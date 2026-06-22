@@ -51,5 +51,5 @@ impl LifecycleObserver for DummyActivity {}
 fn test_activity_creation() {
     let mut ctx = AppContext::<DummyApp>::new();
     let activity = DummyActivity::create(&ctx);
-    // если не паникует значит все Ок
+    //если не паникует значит все Ок
 }
