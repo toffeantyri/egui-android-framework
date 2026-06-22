@@ -1,10 +1,11 @@
 [package]
 name = "egui-android-framework"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 thiserror = "2.0"
+log = "0.4"
 
 # GUI — egui работает на всех платформах
 egui = "0.31"

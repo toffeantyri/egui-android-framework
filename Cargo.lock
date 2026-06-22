@@ -186,6 +186,7 @@ dependencies = [
  "egui",
  "egui_glow",
  "glow",
+ "log",
  "thiserror 2.0.18",
 ]
 

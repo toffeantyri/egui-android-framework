@@ -12,9 +12,4 @@ pub use lifecycle::{LifecycleObserver, LifecycleState};
 pub use view_model::{ViewModel, ViewModelContext};
 
 #[cfg(test)]
-mod tests {
-    mod activity_tests;
-    mod error_tests;
-    mod lifecycle_tests;
-    mod view_model_tests;
-}
+mod tests;

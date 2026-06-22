@@ -1,4 +1,4 @@
-use crate::{Activity, AppConfig, AppContext, Application, LifecycleObserver, ViewModel, activity};
+use crate::{Activity, AppContext, Application, LifecycleObserver, ViewModel};
 
 enum DummyCmd {}
 enum DummyEvt {}
@@ -12,6 +12,8 @@ impl ViewModel for DummyVM {
     fn create(_context: crate::ViewModelContext<Self::DataCommand, Self::Event>) -> Self {
         Self
     }
+
+    fn handle(&mut self, _cmd: Self::DataCommand) {}
 }
 
 struct DummyApp;
@@ -49,7 +51,7 @@ impl LifecycleObserver for DummyActivity {}
 
 #[test]
 fn test_activity_creation() {
-    let mut ctx = AppContext::<DummyApp>::new();
-    let activity = DummyActivity::create(&ctx);
-    //если не паникует значит все Ок
+    let ctx = AppContext::<DummyApp>::new();
+    let _activity = DummyActivity::create(&ctx);
+    // если не паникует значит все Ок
 }
