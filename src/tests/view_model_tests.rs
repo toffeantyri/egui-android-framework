@@ -16,18 +16,18 @@ struct CounterVm {
 }
 
 impl ViewModel for CounterVm {
-    type DataCommand = TestCmd;
+    type Intent = TestCmd;
 
     type Event = TestEvt;
 
-    fn create(context: ViewModelContext<Self::DataCommand, Self::Event>) -> Self {
+    fn create(context: ViewModelContext<Self::Intent, Self::Event>) -> Self {
         Self {
             counter: 0,
             _ctx: context,
         }
     }
 
-    fn handle(&mut self, cmd: Self::DataCommand) {
+    fn handle(&mut self, cmd: Self::Intent) {
         match cmd {
             TestCmd::Inc => self.counter += 1,
         }

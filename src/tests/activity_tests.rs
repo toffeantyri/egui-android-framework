@@ -6,14 +6,14 @@ enum DummyEvt {}
 struct DummyVM;
 
 impl ViewModel for DummyVM {
-    type DataCommand = DummyCmd;
+    type Intent = DummyCmd;
     type Event = DummyEvt;
 
-    fn create(_context: crate::ViewModelContext<Self::DataCommand, Self::Event>) -> Self {
+    fn create(_context: crate::ViewModelContext<Self::Intent, Self::Event>) -> Self {
         Self
     }
 
-    fn handle(&mut self, _cmd: Self::DataCommand) {}
+    fn handle(&mut self, _cmd: Self::Intent) {}
 }
 
 struct DummyApp;
@@ -48,7 +48,7 @@ impl Activity for DummyActivity {
         &mut self,
         _ctx: &egui::Context,
         _vm: &Self::ViewModel,
-    ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+    ) -> Vec<<Self::ViewModel as ViewModel>::Intent> {
         vec![]
     }
 }

@@ -256,7 +256,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                     ..egui::RawInput::default()
                 };
 
-                let mut commands: Vec<<A::ViewModel as ViewModel>::DataCommand> = Vec::new();
+                let mut commands: Vec<<A::ViewModel as ViewModel>::Intent> = Vec::new();
                 let full_output = egui_ctx.run(raw_input, |ctx| {
                     commands = activity.render(ctx, &view_model);
                 });

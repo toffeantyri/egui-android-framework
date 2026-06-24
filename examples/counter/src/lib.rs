@@ -1,8 +1,8 @@
 //! Пример счётчика на egui + egui-android-framework.
 //!
 //! Демонстрирует полную MVVM-архитектуру:
-//! - ViewModel хранит состояние, владеет Sender для отправки команд в data layer
-//! - Activity читает состояние из ViewModel, возвращает команды через `render()`
+//! - ViewModel хранит состояние, владеет Sender для отправки интентов в data layer
+//! - Activity читает состояние из ViewModel, возвращает интенты через `render()`
 //! - Data layer работает в отдельном потоке, общается через mpsc-каналы
 //! - Нет глобальных переменных — всё через трейты фреймворка
 
@@ -12,9 +12,9 @@ use std::sync::mpsc;
 #[cfg(target_os = "android")]
 use egui_android_framework::android::run;
 
-// ─── Типы команд и событий ────────────────────────────────────────────────────
+// ─── Типы интентов и событий ──────────────────────────────────────────────────
 
-/// Команда от UI к ViewModel (и далее в data layer).
+/// Интент от UI к ViewModel (и далее в data layer).
 #[derive(Debug)]
 enum Cmd {
     Increment,
@@ -28,7 +28,7 @@ enum Evt {
 
 // ─── Data Layer ───────────────────────────────────────────────────────────────
 
-/// Фоновая задача: получает команды, изменяет состояние, шлёт события обратно.
+/// Фоновая задача: получает интенты, изменяет состояние, шлёт события обратно.
 fn data_layer_worker(cmd_rx: mpsc::Receiver<Cmd>, evt_tx: mpsc::Sender<Evt>) {
     let mut count = 0u32;
     loop {
@@ -42,7 +42,7 @@ fn data_layer_worker(cmd_rx: mpsc::Receiver<Cmd>, evt_tx: mpsc::Sender<Evt>) {
                 }
             }
             Err(_) => {
-                log::info!("DataLayer: канал команд закрыт, завершаемся");
+                log::info!("DataLayer: канал интентов закрыт, завершаемся");
                 break;
             }
         }
@@ -51,15 +51,15 @@ fn data_layer_worker(cmd_rx: mpsc::Receiver<Cmd>, evt_tx: mpsc::Sender<Evt>) {
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
-/// ViewModel владеет состоянием (`count`) и отправляет команды в data layer.
+/// ViewModel владеет состоянием (`count`) и отправляет интенты в data layer.
 struct CounterViewModel {
     count: u32,
-    /// Sender для отправки команд в data layer.
+    /// Sender для отправки интентов в data layer.
     cmd_tx: mpsc::Sender<Cmd>,
 }
 
 impl ViewModel for CounterViewModel {
-    type DataCommand = Cmd;
+    type Intent = Cmd;
     type Event = Evt;
 
     fn create(ctx: ViewModelContext<Cmd, Evt>) -> Self {
@@ -69,7 +69,7 @@ impl ViewModel for CounterViewModel {
 
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
-            // Команда от UI — отправляем в data layer через ViewModelContext
+            // Интент от UI — отправляем в data layer через ViewModelContext
             Cmd::Increment => {
                 log::info!("ViewModel: handle Increment — отправляем в data layer");
                 let _ = self.cmd_tx.send(Cmd::Increment);
@@ -105,7 +105,7 @@ impl Activity for CounterActivity {
         &mut self,
         ctx: &egui::Context,
         vm: &CounterViewModel,
-    ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+    ) -> Vec<<Self::ViewModel as ViewModel>::Intent> {
         let count = vm.count;
         let mut commands = vec![];
 

@@ -33,7 +33,7 @@ use egui_android_framework::android::run;
 use std::sync::mpsc;
 ```
 
-### 3. Определите типы команд и событий
+### 3. Определите типы интентов и событий
 
 ```rust,ignore
 enum Cmd { Incr }
@@ -42,13 +42,13 @@ enum Evt { Updated(u32) }
 
 ### 4. Реализуйте ViewModel
 
-ViewModel хранит состояние, отправляет команды в data layer, получает события:
+ViewModel хранит состояние, отправляет интенты в data layer, получает события:
 
 ```rust,ignore
 struct MyVM { count: u32, cmd_tx: mpsc::Sender<Cmd> }
 
 impl ViewModel for MyVM {
-    type DataCommand = Cmd;
+    type Intent = Cmd;
     type Event = Evt;
 
     fn create(ctx: ViewModelContext<Cmd, Evt>) -> Self {
@@ -67,7 +67,7 @@ impl ViewModel for MyVM {
 
 ### 5. Реализуйте Activity
 
-Activity читает состояние из ViewModel и возвращает команды:
+Activity читает состояние из ViewModel и возвращает интенты:
 
 ```rust,ignore
 impl Activity for MyActivity {
@@ -141,7 +141,7 @@ x run --device adb:XXXXXXXX
 ┌──────────┐   ┌──────────┐   ┌──────────────┐
 │ Activity │ → │ ViewModel│   │  Data Layer  │
 │ .render  │   │ .handle  │   │  cmd_rx      │
-│ commands │   │ .on_event│   │  evt_tx      │
+│ intents  │   │ .on_event│   │  evt_tx      │
 └────┬─────┘   └────┬─────┘   └──────┬───────┘
      │               │               │
      ▼               ▼               ▼
@@ -160,7 +160,7 @@ x run --device adb:XXXXXXXX
 UI (нажатие кнопки)
   → Activity::render() возвращает Vec<Cmd>
     → Фреймворк (run.rs) вызывает view_model.dispatch(cmd)
-      → ViewModel::handle(cmd) — отправляет команду в data layer через self.cmd_tx
+      → ViewModel::handle(cmd) — отправляет интент в data layer через self.cmd_tx
         → Data Layer (ваш поток) получает cmd из cmd_rx, обрабатывает
           → Data Layer шлёт Event через evt_tx.send(event)
             → Фреймворк (run.rs) вызывает vm_ctx.poll_events()

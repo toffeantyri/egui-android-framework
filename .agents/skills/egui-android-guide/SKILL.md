@@ -13,7 +13,7 @@ description: Архитектура, правила и идиомы проект
 ┌──────────┐     ┌──────────┐     ┌──────────────┐
 │ Activity │  →  │ ViewModel│     │  Data Layer  │
 │ .render  │     │ .handle  │     │  cmd_rx      │
-│ commands │     │ .on_event│     │  evt_tx      │
+│ intents  │     │ .on_event│     │  evt_tx      │
 └────┬─────┘     └────┬─────┘     └──────┬───────┘
      │                │                  │
      └────────────────┼──────────────────┘
@@ -22,7 +22,7 @@ description: Архитектура, правила и идиомы проект
          │  egui-android-framework│
          │  run() — lifecycle     │
          │  + input + render     │
-         │  + dispatch команд     │
+         │  + dispatch интентов   │
          └────────────────────────┘
 ```
 
@@ -32,7 +32,7 @@ description: Архитектура, правила и идиомы проект
 UI (нажатие кнопки)
   → Activity::render() возвращает Vec<Cmd>
     → Фреймворк (run.rs) вызывает view_model.dispatch(cmd)
-      → ViewModel::handle(cmd) — отправляет команду в data layer через self.cmd_tx
+      → ViewModel::handle(cmd) — отправляет интент в data layer через self.cmd_tx
         → Data Layer (ваш поток) получает cmd из cmd_rx, обрабатывает
           → Data Layer шлёт Event через evt_tx.send(event)
             → Фреймворк (run.rs) вызывает vm_ctx.poll_events()
@@ -51,14 +51,14 @@ UI (нажатие кнопки)
 - `create_activity(ctx)` — создаёт Activity.
 
 ### `Activity`
-- UI-слой. Читает `&ViewModel`, возвращает `Vec<DataCommand>`.
-- `render(ctx, vm) → Vec<Cmd>` — отрисовка, команды возвращаются, фреймворк диспатчит их.
+- UI-слой. Читает `&ViewModel`, возвращает `Vec<Intent>`.
+- `render(ctx, vm) → Vec<Cmd>` — отрисовка, интенты возвращаются, фреймворк диспатчит их.
 - `on_back_pressed(vm) → bool` — true = выйти из приложения.
 - Не хранит Sender'ы, не знает о каналах.
 
 ### `ViewModel`
-- Владеет состоянием и `Sender<DataCommand>` (получен из `ViewModelContext`).
-- `handle(cmd)` — обрабатывает команду от UI, отправляет в data layer через `self.cmd_tx`.
+- Владеет состоянием и `Sender<Intent>` (получен из `ViewModelContext`).
+- `handle(cmd)` — обрабатывает интент от UI, отправляет в data layer через `self.cmd_tx`.
 - `on_event(evt)` — получает события из data layer, обновляет состояние.
 - `ViewModelContext` содержит `command_tx()` для клонирования Sender.
 
@@ -76,13 +76,13 @@ UI (нажатие кнопки)
 | `Destroy` | `activity.on_destroy()`, destroy painter/EGL, `break` из цикла |
 | `RedrawNeeded` | `needs_redraw = true` |
 
-## Команды и события
+## Интенты и события
 
-- `DataCommand` — команда от UI к data layer (enum).
+- `Intent` — интент от UI к data layer (enum).
 - `Event` — событие от data layer к ViewModel (enum).
 - Каналы создаются в `create_view_model()` через `ctx.view_model_context()`.
 - Data layer получает `(Receiver<Cmd>, Sender<Evt>)` через `take_data_layer_channels()`.
-- Sender для команд хранится в ViewModel, клонируется из `ctx.command_tx()`.
+- Sender для интентов хранится в ViewModel, клонируется из `ctx.command_tx()`.
 
 ## Структура проекта
 
@@ -119,7 +119,7 @@ examples/
 ## Важные правила
 
 1. **Не использовать `OnceLock` / глобальные статические переменные** для хранения Sender'ов. Sender хранится в самой ViewModel.
-   — *Почему:* `OnceLock` не сбрасывается между запусками процесса. После Back → повторный запуск старый Sender закрыт, новый `set()` возвращает `Err`, команды уходят в никуда. Sender, сохранённый в полях ViewModel, создаётся заново при каждом создании процесса.
+   — *Почему:* `OnceLock` не сбрасывается между запусками процесса. После Back → повторный запуск старый Sender закрыт, новый `set()` возвращает `Err`, интенты уходят в никуда. Sender, сохранённый в полях ViewModel, создаётся заново при каждом создании процесса.
 
 2. **Не вызывать `std::process::exit(0)`** в колбэках `on_back_pressed` или render — фреймворк сам завершает цикл через `break`.
    — *Почему:* `exit(0)` убивает процесс мгновенно, не дожидаясь других потоков (RenderThread, data layer). Это вызывает `pthread_mutex_lock called on a destroyed mutex` и SIGABRT. `break` из цикла позволяет `run()` вернуться, и android-activity корректно завершает NativeActivity.
@@ -130,7 +130,7 @@ examples/
 4. **`needs_redraw = true` на каждом кадре** — иначе UI не обновляется при событиях от data layer.
    — *Почему:* Если не форсировать `needs_redraw`, рендер происходит только по внешним событиям (нажатие, RedrawNeeded). События от `poll_events()` не триггерят системный redraw, поэтому изменения состояния ViewModel не отобразятся до следующего touch-события.
 
-5. **Render возвращает `Vec<DataCommand>`** — команды собираются во время отрисовки, потом фреймворк диспатчит их в ViewModel.
+5. **Render возвращает `Vec<Intent>`** — интенты собираются во время отрисовки, потом фреймворк диспатчит их в ViewModel.
    — *Почему:* `render()` принимает `&ViewModel` (иммутабельно), а `dispatch()` требует `&mut ViewModel`. Вызов `dispatch()` внутри `egui_ctx.run()` создаёт пересечение заимствований. `Vec<Cmd>` разрывает последовательность: сначала читаем (`render`), потом пишем (`dispatch`).
 
 6. **Все комментарии, логи и строки ошибок — на русском.**

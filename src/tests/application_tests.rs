@@ -14,17 +14,17 @@ struct TestVM {
 }
 
 impl ViewModel for TestVM {
-    type DataCommand = TestCmd;
+    type Intent = TestCmd;
     type Event = TestEvt;
 
-    fn create(context: crate::ViewModelContext<Self::DataCommand, Self::Event>) -> Self {
+    fn create(context: crate::ViewModelContext<Self::Intent, Self::Event>) -> Self {
         Self {
             value: 0,
             ctx: context,
         }
     }
 
-    fn handle(&mut self, cmd: Self::DataCommand) {
+    fn handle(&mut self, cmd: Self::Intent) {
         match cmd {
             TestCmd::Add(n) => self.value += n,
         }
@@ -50,7 +50,7 @@ impl Activity for TestActivity {
         &mut self,
         _ctx: &egui::Context,
         _vm: &Self::ViewModel,
-    ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+    ) -> Vec<<Self::ViewModel as ViewModel>::Intent> {
         vec![]
     }
 }
@@ -173,7 +173,7 @@ fn test_create_view_model_without_view_model_context_panics() {
             &mut self,
             _ctx: &egui::Context,
             _vm: &Self::ViewModel,
-        ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+        ) -> Vec<<Self::ViewModel as ViewModel>::Intent> {
             vec![]
         }
     }

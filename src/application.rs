@@ -14,12 +14,12 @@ pub trait Application: Sized + 'static {
 /// Контекст приложения — точка сборки ViewModel, Activity и data layer.
 ///
 /// Хранит каналы связи между ViewModel и data layer:
-/// - `dl_command_rx` — data layer **читает** команды, отправленные ViewModel
+/// - `dl_command_rx` — data layer **читает** интенты, отправленные ViewModel
 /// - `dl_event_tx` — data layer **отправляет** события, читаемые ViewModel
 pub struct AppContext<A: Application> {
     config: AppConfig,
-    /// Data layer читает отсюда команды от ViewModel
-    dl_command_rx: Option<mpsc::Receiver<<A::ViewModel as ViewModel>::DataCommand>>,
+    /// Data layer читает отсюда интенты от ViewModel
+    dl_command_rx: Option<mpsc::Receiver<<A::ViewModel as ViewModel>::Intent>>,
     /// Data layer отправляет сюда события для ViewModel
     dl_event_tx: Option<mpsc::Sender<<A::ViewModel as ViewModel>::Event>>,
     /// Shared event receiver Arc, с клонированием для передачи и ViewModel и run() одного и того же Receiver
@@ -48,7 +48,7 @@ impl<A: Application> AppContext<A> {
     /// Забрать каналы для передачи data layer (один раз).
     ///
     /// Data layer получает:
-    /// - `Receiver<DataCommand>` — для чтения команд от ViewModel
+    /// - `Receiver<Intent>` — для чтения интентов от ViewModel
     /// - `Sender<Event>` — для отправки событий в ViewModel
     ///
     /// # Panics
@@ -58,7 +58,7 @@ impl<A: Application> AppContext<A> {
     pub fn take_data_layer_channels(
         &mut self,
     ) -> (
-        mpsc::Receiver<<A::ViewModel as ViewModel>::DataCommand>,
+        mpsc::Receiver<<A::ViewModel as ViewModel>::Intent>,
         mpsc::Sender<<A::ViewModel as ViewModel>::Event>,
     ) {
         (
@@ -75,18 +75,16 @@ impl<A: Application> AppContext<A> {
     /// вызовах не используется — run() только читает события.
     pub fn view_model_context(
         &mut self,
-    ) -> ViewModelContext<
-        <A::ViewModel as ViewModel>::DataCommand,
-        <A::ViewModel as ViewModel>::Event,
-    > {
+    ) -> ViewModelContext<<A::ViewModel as ViewModel>::Intent, <A::ViewModel as ViewModel>::Event>
+    {
         if let Some(ref shared_rx) = self.shared_event_rx {
             return ViewModelContext::from_parts(
-                mpsc::channel::<<A::ViewModel as ViewModel>::DataCommand>().0,
+                mpsc::channel::<<A::ViewModel as ViewModel>::Intent>().0,
                 Arc::clone(shared_rx),
             );
         }
 
-        let (vm_cmd_tx, dl_cmd_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::DataCommand>();
+        let (vm_cmd_tx, dl_cmd_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::Intent>();
         let (dl_evt_tx, vm_evt_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::Event>();
 
         let shared_rx = Arc::new(Mutex::new(vm_evt_rx));
