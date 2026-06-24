@@ -7,7 +7,7 @@
 #![cfg(target_os = "android")]
 
 use android_activity::{
-    input::{InputEvent, KeyAction, KeyEvent, MotionAction},
+    input::{InputEvent, KeyAction, MotionAction},
     InputStatus,
 };
 
@@ -57,11 +57,8 @@ pub(crate) fn process_input_events(
     }
 }
 
-/// Код Android-клавиши Back.
-const KEYCODE_BACK: i32 = 4;
-
 /// Обработать одно событие ввода и вернуть `InputStatus`.
-fn handle_input_event(event: InputEvent<'_>, pp: f32, state: &mut InputState) -> InputStatus {
+fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -> InputStatus {
     match event {
         InputEvent::MotionEvent(motion) => {
             let action = motion.action();
@@ -102,9 +99,9 @@ fn handle_input_event(event: InputEvent<'_>, pp: f32, state: &mut InputState) ->
             }
         }
         InputEvent::KeyEvent(key) => {
-            let action = key.key_action();
-            let code = key_key_code(&key);
-            if action == KeyAction::Down && code == KEYCODE_BACK {
+            let action = key.action();
+            let code = key.key_code();
+            if action == KeyAction::Down && code == android_activity::input::Keycode::Back {
                 state.back_pressed = true;
                 InputStatus::Handled
             } else {
@@ -113,20 +110,4 @@ fn handle_input_event(event: InputEvent<'_>, pp: f32, state: &mut InputState) ->
         }
         _ => InputStatus::Unhandled,
     }
-}
-
-/// Достать key code из KeyEvent.
-///
-/// В android-activity 0.6 `KeyEvent` не имеет прямого метода `key_code()`,
-/// используем внутреннее поле через итератор.
-fn key_key_code(key: &KeyEvent<'_>) -> i32 {
-    // KeyEvent из android-activity содержит итератор по KeyAction,
-    // но сам код клавиши лежит в поле. Используем формат debug или
-    // получаем через итератор с информацией о key code.
-    // В android-activity 0.6 KeyEvent имеет метод key_code() через
-    // итератор. На практике берём первое событие.
-    for k in key.key_events() {
-        return k.key_code;
-    }
-    0
 }

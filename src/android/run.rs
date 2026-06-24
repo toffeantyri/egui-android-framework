@@ -12,9 +12,10 @@ use std::time::{Duration, Instant};
 use android_activity::{AndroidApp, MainEvent, PollEvent};
 use ndk::native_window::NativeWindow;
 
+use crate::activity::Activity;
 use crate::android::egl_backend::EglState;
 use crate::android::input::{self, InputState};
-use crate::{AppContext, Application, LifecycleObserver, ViewModel, ViewModelContext};
+use crate::{AppContext, Application, LifecycleObserver, ViewModel};
 
 use glow::HasContext;
 
@@ -29,13 +30,16 @@ pub fn run<A: Application>(app: AndroidApp) {
     // Инициализируем логгер с тегом из конфига приложения
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag(&app_ctx.config().log_tag)
+            .with_tag(app_ctx.config().log_tag.as_str())
             .with_max_level(log::LevelFilter::Info),
     );
     log::info!("run: starting egui-android-framework app");
 
-    let vm_ctx = app_ctx.view_model_context();
+    // create_view_model вызывается первой — она сама создаёт каналы
+    // через ctx.view_model_context(). Затем run() получает свою копию vm_ctx
+    // с тем же Receiver (через Arc), чтобы опрашивать события из data layer.
     let mut view_model = A::create_view_model(&mut app_ctx);
+    let vm_ctx = app_ctx.view_model_context();
     let mut activity = A::create_activity(&mut app_ctx);
 
     activity.on_create();
@@ -124,7 +128,10 @@ pub fn run<A: Application>(app: AndroidApp) {
             // Проверяем, сменилось ли окно (по сырому указателю ANativeWindow*)
             let window_changed = current_native_window
                 .as_ref()
-                .map(|old| old.raw_window_handle() != nw.raw_window_handle())
+                .map(|old| {
+                    old.ptr().as_ptr() as *const std::ffi::c_void
+                        != nw.ptr().as_ptr() as *const std::ffi::c_void
+                })
                 .unwrap_or(true);
 
             if window_changed {

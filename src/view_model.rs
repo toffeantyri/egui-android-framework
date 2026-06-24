@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 
 pub trait ViewModel: Sized + Send {
     type DataCommand: Send + 'static;
@@ -29,14 +29,23 @@ pub trait ViewModel: Sized + Send {
 
 pub struct ViewModelContext<C: Send + 'static, E: Send + 'static> {
     command_tx: mpsc::Sender<C>,
-    event_rx: RefCell<mpsc::Receiver<E>>,
+    event_rx: Arc<Mutex<mpsc::Receiver<E>>>,
 }
 
 impl<C: Send + 'static, E: Send + 'static> ViewModelContext<C, E> {
-    pub fn new(tx: mpsc::Sender<C>, rx: mpsc::Receiver<E>) -> Self {
+    pub fn new(tx: mpsc::Sender<C>, rx: Arc<Mutex<mpsc::Receiver<E>>>) -> Self {
         Self {
             command_tx: tx,
-            event_rx: RefCell::new(rx),
+            event_rx: rx,
+        }
+    }
+
+    /// Создать контекст из готового Sender и общего Arc<Mutex<Receiver>>.
+    /// Используется для клонирования контекста (run() получает свою копию).
+    pub fn from_parts(tx: mpsc::Sender<C>, rx: Arc<Mutex<mpsc::Receiver<E>>>) -> Self {
+        Self {
+            command_tx: tx,
+            event_rx: rx,
         }
     }
 
@@ -53,7 +62,7 @@ impl<C: Send + 'static, E: Send + 'static> ViewModelContext<C, E> {
     /// Вызывается фреймворком перед каждым `render()`,
     /// результат передаётся в `ViewModel::on_event()`.
     pub fn poll_events(&self) -> Vec<E> {
-        let rx = self.event_rx.borrow_mut();
+        let rx = self.event_rx.lock().unwrap();
         let mut events = Vec::new();
         while let Ok(evt) = rx.try_recv() {
             events.push(evt);

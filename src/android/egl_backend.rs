@@ -7,7 +7,6 @@
 #![cfg(target_os = "android")]
 
 use ndk::native_window::NativeWindow;
-use raw_window_handle::HasRawWindowHandle;
 
 // ---------------------------------------------------------------------------
 // EGL bindings — минимум, необходимый для работы
@@ -65,6 +64,7 @@ pub(crate) mod egl {
     pub const EGL_CONTEXT_CLIENT_VERSION: EGLint = 0x3098;
     pub const EGL_OPENGL_ES_API: EGLint = 0x30A0;
 
+    #[link(name = "EGL")]
     extern "C" {
         pub fn eglGetDisplay(display_id: EGLDisplay) -> EGLDisplay;
         pub fn eglInitialize(dpy: EGLDisplay, major: *mut EGLint, minor: *mut EGLint)
@@ -198,13 +198,10 @@ impl EglState {
         }
 
         // Создаём window surface
-        let win_handle = native_window.raw_window_handle();
-        let egl_native_window = match win_handle {
-            raw_window_handle::RawWindowHandle::AndroidNdk(handle) => {
-                handle.a_native_window.as_ptr() as egl::EGLNativeWindowType
-            }
-            _ => return Err("Unsupported RawWindowHandle".into()),
-        };
+        // NativeWindow — это repr(transparent) обёртка над ANativeWindow*,
+        // получаем сырой указатель напрямую через ptr().
+        let egl_native_window =
+            native_window.ptr().as_ptr() as *mut std::ffi::c_void as egl::EGLNativeWindowType;
 
         let surface = unsafe {
             egl::eglCreateWindowSurface(display, config, egl_native_window, std::ptr::null())

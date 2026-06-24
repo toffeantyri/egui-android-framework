@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::{ViewModel, ViewModelContext};
 
@@ -43,7 +43,7 @@ impl ViewModel for CounterVm {
 fn test_view_model_handle_and_dispatch() {
     let (cmd_tx, _cmd_rx) = mpsc::channel::<TestCmd>();
     let (_evt_tx, evt_rx) = mpsc::channel::<TestEvt>();
-    let ctx = ViewModelContext::new(cmd_tx, evt_rx);
+    let ctx = ViewModelContext::new(cmd_tx, Arc::new(Mutex::new(evt_rx)));
     let mut vm = CounterVm::create(ctx);
 
     assert_eq!(vm.counter, 0);
@@ -55,7 +55,7 @@ fn test_view_model_handle_and_dispatch() {
 fn test_view_model_event() {
     let (cmd_tx, _cmd_rx) = mpsc::channel::<TestCmd>();
     let (_evt_tx, evt_rx) = mpsc::channel::<TestEvt>();
-    let ctx = ViewModelContext::new(cmd_tx, evt_rx);
+    let ctx = ViewModelContext::new(cmd_tx, Arc::new(Mutex::new(evt_rx)));
 
     let mut vm = CounterVm::create(ctx);
     assert_eq!(vm.counter, 0);
@@ -68,7 +68,7 @@ fn test_view_model_event() {
 fn test_view_model_send_through_context() {
     let (cmd_tx, cmd_rx) = mpsc::channel::<TestCmd>();
     let (_evt_tx, evt_rx) = mpsc::channel::<TestEvt>();
-    let ctx = ViewModelContext::new(cmd_tx, evt_rx);
+    let ctx = ViewModelContext::new(cmd_tx, Arc::new(Mutex::new(evt_rx)));
 
     ctx.send(TestCmd::Inc);
 
@@ -80,7 +80,7 @@ fn test_view_model_send_through_context() {
 fn test_view_model_poll_events() {
     let (_cmd_tx, _cmd_rx) = mpsc::channel::<TestCmd>();
     let (evt_tx, evt_rx) = mpsc::channel::<TestEvt>();
-    let ctx = ViewModelContext::new(_cmd_tx, evt_rx);
+    let ctx = ViewModelContext::new(_cmd_tx, Arc::new(Mutex::new(evt_rx)));
 
     // Событий пока нет
     assert!(ctx.poll_events().is_empty());

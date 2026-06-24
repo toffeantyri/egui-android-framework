@@ -189,7 +189,6 @@ dependencies = [
  "libc",
  "log",
  "ndk",
- "raw-window-handle",
  "thiserror 2.0.18",
 ]
 

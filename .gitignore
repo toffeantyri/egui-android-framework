@@ -1,1 +1,5 @@
 /target
+/examples/counter/target
+/examples/counter/Cargo.lock
+/examples/counter/target
+/examples/counter/Cargo.lock

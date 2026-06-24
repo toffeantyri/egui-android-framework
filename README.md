@@ -14,11 +14,19 @@
 
 ## Быстрый старт
 
-Добавьте в `Cargo.toml`:
+Добавьте в `Cargo.toml` вашего приложения:
 
 ```toml
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
-egui-android-framework = { git = "..." }
+egui-android-framework = { path = "../egui-android-framework" }
 
 # Обязательно для Android
 [target.'cfg(target_os = "android")'.dependencies]
@@ -32,10 +40,28 @@ use egui_android_framework::{
     Activity, AppConfig, AppContext, Application, ViewModel, ViewModelContext,
 };
 use egui_android_framework::android::run;
+use std::sync::mpsc;
+
+// --- Data layer (ваш код, выполняется в отдельном потоке) ---
+fn data_layer_worker(
+    cmd_rx: mpsc::Receiver<Cmd>,
+    evt_tx: mpsc::Sender<Evt>,
+) {
+    let mut count: u32 = 0;
+    loop {
+        match cmd_rx.recv() {
+            Ok(Cmd::Increment) => {
+                count += 1;
+                let _ = evt_tx.send(Evt::CountUpdated(count));
+            }
+            Err(_) => break,
+        }
+    }
+}
 
 // --- ViewModel ---
 enum Cmd { Increment }
-enum Evt {}
+enum Evt { CountUpdated(u32) }
 
 struct CounterVM { count: u32 }
 
@@ -71,6 +97,10 @@ impl Activity for MainActivity {
             }
         });
     }
+
+    fn on_back_pressed(&mut self, _vm: &mut CounterVM) -> bool {
+        true // обработать — выйти
+    }
 }
 
 // --- Application ---
@@ -85,7 +115,14 @@ impl Application for App {
     }
 
     fn create_view_model(ctx: &mut AppContext<Self>) -> CounterVM {
+        // Создаём ViewModelContext — это заводит каналы и сохраняет
+        // концы для data layer.
         let vm_ctx = ctx.view_model_context();
+
+        // Передаём каналы data layer (можно в отдельном потоке)
+        let (cmd_rx, evt_tx) = ctx.take_data_layer_channels();
+        std::thread::spawn(move || data_layer_worker(cmd_rx, evt_tx));
+
         CounterVM::create(vm_ctx)
     }
 

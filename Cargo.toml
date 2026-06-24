@@ -11,26 +11,21 @@ license = "MIT OR Apache-2.0"
 thiserror = "2.0"
 log = "0.4"
 
-# GUI — egui работает на всех платформах
 egui = "0.31"
 egui_glow = { version = "0.31", optional = true }
 glow = { version = "0.16", optional = true }
 
-# Android (не собирается на десктопе)
 [target.'cfg(target_os = "android")'.dependencies]
-# Для Android включаем egui_glow/glow обязательно
-# (на десктопе они опциональны — тесты могут не требовать графику)
 egui_glow = { version = "0.31" }
 glow = { version = "0.16" }
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = "0.14"
 ndk = "0.9"
 libc = "0.2"
-raw-window-handle = "0.6"
 
 [profile.release]
-opt-level = "z"     # Минимальный размер
-lto = true           # Link-time optimization
-codegen-units = 1    # Лучшая оптимизация
-strip = true         # Удалить отладочную информацию
-debug = "none"       # Не генерировать .pdb
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+debug = "none"

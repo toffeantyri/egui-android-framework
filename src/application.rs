@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::{Activity, ViewModel, ViewModelContext};
 
@@ -22,6 +22,8 @@ pub struct AppContext<A: Application> {
     dl_command_rx: Option<mpsc::Receiver<<A::ViewModel as ViewModel>::DataCommand>>,
     /// Data layer отправляет сюда события для ViewModel
     dl_event_tx: Option<mpsc::Sender<<A::ViewModel as ViewModel>::Event>>,
+    /// Shared event receiver Arc, cloned to give both ViewModel and run() the same receiver
+    shared_event_rx: Option<Arc<Mutex<mpsc::Receiver<<A::ViewModel as ViewModel>::Event>>>>,
 }
 
 impl<A: Application> Default for AppContext<A> {
@@ -30,6 +32,7 @@ impl<A: Application> Default for AppContext<A> {
             config: AppConfig::default(),
             dl_command_rx: None,
             dl_event_tx: None,
+            shared_event_rx: None,
         }
     }
 }
@@ -64,27 +67,35 @@ impl<A: Application> AppContext<A> {
         )
     }
 
-    /// Создать `ViewModelContext` для ViewModel (один раз).
+    /// Создать (или получить) `ViewModelContext`.
     ///
-    /// Заводит каналы и сохраняет в себе концы для data layer.
-    /// ViewModel получает `Sender<DataCommand>` для отправки команд
-    /// и `Receiver<Event>` для чтения событий.
+    /// При первом вызове заводит mpsc-каналы и сохраняет концы для data layer.
+    /// При повторных вызовах возвращает новый контекст, разделяющий тот же
+    /// `Receiver` событий (через `Arc`), что и первый. `command_tx` в повторных
+    /// вызовах не используется — run() только читает события.
     pub fn view_model_context(
         &mut self,
     ) -> ViewModelContext<
         <A::ViewModel as ViewModel>::DataCommand,
         <A::ViewModel as ViewModel>::Event,
     > {
-        // Канал команд: VM (Sender) → Data layer (Receiver)
-        let (vm_cmd_tx, dl_cmd_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::DataCommand>();
+        if let Some(ref shared_rx) = self.shared_event_rx {
+            return ViewModelContext::from_parts(
+                mpsc::channel::<<A::ViewModel as ViewModel>::DataCommand>().0,
+                Arc::clone(shared_rx),
+            );
+        }
 
-        // Канал событий: Data layer (Sender) → VM (Receiver)
+        let (vm_cmd_tx, dl_cmd_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::DataCommand>();
         let (dl_evt_tx, vm_evt_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::Event>();
+
+        let shared_rx = Arc::new(Mutex::new(vm_evt_rx));
 
         self.dl_command_rx = Some(dl_cmd_rx);
         self.dl_event_tx = Some(dl_evt_tx);
+        self.shared_event_rx = Some(Arc::clone(&shared_rx));
 
-        ViewModelContext::new(vm_cmd_tx, vm_evt_rx)
+        ViewModelContext::new(vm_cmd_tx, shared_rx)
     }
 
     pub fn config(&self) -> &AppConfig {
