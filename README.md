@@ -25,7 +25,7 @@ egui = "0.31"
 android_logger = "0.14"
 ```
 
-### 2. Реализуйте трейты
+### 2. Импорты
 
 ```rust,ignore
 use egui_android_framework::*;
@@ -33,7 +33,16 @@ use egui_android_framework::android::run;
 use std::sync::mpsc;
 ```
 
-**ViewModel** — состояние + команды в data layer:
+### 3. Определите типы команд и событий
+
+```rust,ignore
+enum Cmd { Incr }
+enum Evt { Updated(u32) }
+```
+
+### 4. Реализуйте ViewModel
+
+ViewModel хранит состояние, отправляет команды в data layer, получает события:
 
 ```rust,ignore
 struct MyVM { count: u32, cmd_tx: mpsc::Sender<Cmd> }
@@ -46,8 +55,7 @@ impl ViewModel for MyVM {
         Self { count: 0, cmd_tx: ctx.command_tx().clone() }
     }
 
-    fn handle(&mut self, _cmd: Cmd) {
-        // UI-команда — перенаправить в data layer
+    fn handle(&mut self, cmd: Cmd) {
         let _ = self.cmd_tx.send(cmd);
     }
 
@@ -57,7 +65,9 @@ impl ViewModel for MyVM {
 }
 ```
 
-**Activity** — читает ViewModel, возвращает команды:
+### 5. Реализуйте Activity
+
+Activity читает состояние из ViewModel и возвращает команды:
 
 ```rust,ignore
 impl Activity for MyActivity {
@@ -78,7 +88,9 @@ impl Activity for MyActivity {
 }
 ```
 
-**Application** — сборка:
+### 6. Реализуйте Application
+
+Application связывает Activity и ViewModel, запускает data layer:
 
 ```rust,ignore
 impl Application for MyApp {
@@ -92,17 +104,16 @@ impl Application for MyApp {
     fn create_view_model(ctx: &mut AppContext<Self>) -> MyVM {
         let vm_ctx = ctx.view_model_context();
         let (rx, tx) = ctx.take_data_layer_channels();
-        std::thread::spawn(|| data_layer_worker(rx, tx));
+        // Запустите ваш data layer в отдельном потоке
+        // std::thread::spawn(|| data_layer_worker(rx, tx));
         MyVM::create(vm_ctx)
     }
 
-    fn create_activity(_: &mut AppContext<Self>) -> MyActivity {
-        MyActivity
-    }
+    fn create_activity(_: &mut AppContext<Self>) -> MyActivity { MyActivity }
 }
 ```
 
-### 3. Точка входа
+### 7. Точка входа
 
 ```rust,ignore
 #[no_mangle]
@@ -111,7 +122,7 @@ pub fn android_main(app: android_activity::AndroidApp) {
 }
 ```
 
-### 4. Сборка и запуск
+### 8. Сборка и запуск
 
 ```bash
 # Установите xbuild (cargo-apk)
@@ -145,7 +156,18 @@ x run --device adb:XXXXXXXX
 
 **Поток данных:**
 
-`UI → render() → [Cmd] → dispatch() → ViewModel.handle() → cmd_tx → Data Layer → evt_tx → poll_events() → on_event() → обновление состояния → render()`
+```
+UI (нажатие кнопки)
+  → Activity::render() возвращает Vec<Cmd>
+    → Фреймворк (run.rs) вызывает view_model.dispatch(cmd)
+      → ViewModel::handle(cmd) — отправляет команду в data layer через self.cmd_tx
+        → Data Layer (ваш поток) получает cmd из cmd_rx, обрабатывает
+          → Data Layer шлёт Event через evt_tx.send(event)
+            → Фреймворк (run.rs) вызывает vm_ctx.poll_events()
+              → Фреймворк вызывает view_model.on_event(event)
+                → ViewModel::on_event() обновляет self.state
+                  → Следующий кадр: Activity::render() читает vm.state
+```
 
 ## Тесты
 
