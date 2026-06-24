@@ -146,14 +146,17 @@ impl EglState {
     pub(crate) fn create(native_window: &NativeWindow) -> Result<Self, String> {
         let display = unsafe { egl::eglGetDisplay(egl::EGL_DEFAULT_DISPLAY) };
         if display.is_null() {
-            return Err("eglGetDisplay returned null".into());
+            return Err("eglGetDisplay вернул null".into());
         }
 
         let mut major: egl::EGLint = 0;
         let mut minor: egl::EGLint = 0;
         if unsafe { egl::eglInitialize(display, &mut major, &mut minor) } == egl::EGL_FALSE {
             let err = unsafe { egl::eglGetError() };
-            return Err(format!("eglInitialize failed: {}", egl::egl_error_str(err)));
+            return Err(format!(
+                "eglInitialize не удался: {}",
+                egl::egl_error_str(err)
+            ));
         }
         log::info!("EGL initialized: {}.{}", major, minor);
 
@@ -193,7 +196,7 @@ impl EglState {
         {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglChooseConfig failed: {}",
+                "eglChooseConfig не удался: {}",
                 egl::egl_error_str(err)
             ));
         }
@@ -210,7 +213,7 @@ impl EglState {
         if surface.is_null() {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglCreateWindowSurface failed: {}",
+                "eglCreateWindowSurface не удался: {}",
                 egl::egl_error_str(err)
             ));
         }
@@ -223,7 +226,7 @@ impl EglState {
         if context.is_null() {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglCreateContext failed: {}",
+                "eglCreateContext не удался: {}",
                 egl::egl_error_str(err)
             ));
         }
@@ -232,7 +235,7 @@ impl EglState {
         if unsafe { egl::eglMakeCurrent(display, surface, surface, context) } == egl::EGL_FALSE {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglMakeCurrent failed: {}",
+                "eglMakeCurrent не удался: {}",
                 egl::egl_error_str(err)
             ));
         }
@@ -268,13 +271,13 @@ impl EglState {
         }
     }
 
-    /// Destroy the old window surface and create a new one for the given native window.
-    /// The display, config, and context are preserved — only the surface is replaced.
-    /// Returns an error if surface creation or make_current fails.
+    /// Уничтожить старую оконную поверхность и создать новую для данного native window.
+    /// Дисплей, конфиг и контекст сохраняются — заменяется только surface.
+    /// Возвращает ошибку, если создание surface или make_current не удались.
     pub(crate) fn recreate_surface(&mut self, native_window: &NativeWindow) -> Result<(), String> {
-        // Destroy old surface
+        // Уничтожаем старую поверхность
         unsafe {
-            // Unbind current surface first
+            // Сначала отвязываем текущую поверхность
             egl::eglMakeCurrent(
                 self.display,
                 egl::EGL_NO_SURFACE,
@@ -287,7 +290,7 @@ impl EglState {
             }
         }
 
-        // Create new surface
+        // Создаём новую поверхность
         let egl_native_window =
             native_window.ptr().as_ptr() as *mut std::ffi::c_void as egl::EGLNativeWindowType;
 
@@ -302,19 +305,19 @@ impl EglState {
         if surface.is_null() {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglCreateWindowSurface failed on recreate: {}",
+                "eglCreateWindowSurface не удался при пересоздании: {}",
                 egl::egl_error_str(err)
             ));
         }
         self.surface = surface;
 
-        // Make current with new surface
+        // Делаем контекст текущим с новой поверхностью
         if unsafe { egl::eglMakeCurrent(self.display, self.surface, self.surface, self.context) }
             == egl::EGL_FALSE
         {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglMakeCurrent failed on recreate: {}",
+                "eglMakeCurrent не удался при пересоздании: {}",
                 egl::egl_error_str(err)
             ));
         }
@@ -326,7 +329,7 @@ impl EglState {
         if unsafe { egl::eglSwapBuffers(self.display, self.surface) } == egl::EGL_FALSE {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
-                "eglSwapBuffers failed: {}",
+                "eglSwapBuffers не удался: {}",
                 egl::egl_error_str(err)
             ));
         }

@@ -32,7 +32,7 @@ pub fn run<A: Application>(app: AndroidApp) {
             .with_tag(app_ctx.config().log_tag.as_str())
             .with_max_level(log::LevelFilter::Info),
     );
-    log::info!("run: starting egui-android-framework app");
+    log::info!("run: запуск egui-android-framework приложения");
 
     // create_view_model вызывается первой — она сама создаёт каналы
     // через ctx.view_model_context(). Затем run() получает свою копию vm_ctx
@@ -68,25 +68,25 @@ pub fn run<A: Application>(app: AndroidApp) {
             PollEvent::Wake | PollEvent::Timeout => {}
             PollEvent::Main(e) => match e {
                 MainEvent::InitWindow { .. } => {
-                    log::info!("Lifecycle: InitWindow — scheduling surface recreation");
+                    log::info!("Жизненный цикл: InitWindow — планирование пересоздания surface");
                     surface_needs_recreation = true;
                     needs_redraw = true;
                 }
                 MainEvent::Resume { .. } => {
-                    log::info!("Lifecycle: Resume");
+                    log::info!("Жизненный цикл: Resume");
                     activity.on_resume();
                     needs_redraw = true;
                 }
                 MainEvent::Pause { .. } => {
-                    log::info!("Lifecycle: Pause");
+                    log::info!("Жизненный цикл: Pause");
                     activity.on_pause();
                 }
                 MainEvent::Stop { .. } => {
-                    log::info!("Lifecycle: Stop — preserving EGL state");
+                    log::info!("Жизненный цикл: Stop — сохранение состояния EGL");
                     activity.on_stop();
                 }
                 MainEvent::Destroy { .. } => {
-                    log::info!("Lifecycle: Destroy — exiting");
+                    log::info!("Жизненный цикл: Destroy — выход");
                     destroy_requested = true;
                 }
                 MainEvent::RedrawNeeded { .. } => {
@@ -106,10 +106,10 @@ pub fn run<A: Application>(app: AndroidApp) {
         // --- Обработка кнопки Back (должна быть ДО проверки destroy_requested) ---
         if input_state.back_pressed {
             if activity.on_back_pressed(&mut view_model) {
-                log::info!("Back pressed — exiting");
+                log::info!("Back нажата — выход");
                 destroy_requested = true;
             } else {
-                log::info!("Back pressed — not handled, ignoring");
+                log::info!("Back нажата — не обработано, игнорируем");
             }
         }
 
@@ -123,7 +123,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                 state.destroy();
             }
             egl_state = None;
-            log::info!("Exiting main loop — android_main will return");
+            log::info!("Выход из главного цикла — android_main вернёт управление");
             break;
         }
 
@@ -132,7 +132,7 @@ pub fn run<A: Application>(app: AndroidApp) {
             if let Some(nw) = app.native_window() {
                 if let Some(ref mut state) = egl_state {
                     log::info!(
-                        "Recreating EGL surface for new window {}x{}",
+                        "Пересоздание EGL surface для нового окна {}x{}",
                         nw.width(),
                         nw.height()
                     );
@@ -145,10 +145,10 @@ pub fn run<A: Application>(app: AndroidApp) {
                             }
                             let pp = compute_pixels_per_point(nw.width(), nw.height());
                             egui_ctx.set_pixels_per_point(pp);
-                            log::info!("EGL surface recreated successfully, pp={}", pp);
+                            log::info!("EGL surface успешно пересоздан, pp={}", pp);
                         }
                         Err(e) => {
-                            log::error!("Failed to recreate EGL surface: {}", e);
+                            log::error!("Не удалось пересоздать EGL surface: {}", e);
                             if let Some(ref mut p) = egui_painter {
                                 p.destroy();
                             }
@@ -168,7 +168,7 @@ pub fn run<A: Application>(app: AndroidApp) {
         if egl_state.is_none() {
             if let Some(nw) = app.native_window() {
                 log::info!(
-                    "Initializing EGL + egui... size={}x{}",
+                    "Инициализация EGL + egui... размер={}x{}",
                     nw.width(),
                     nw.height()
                 );
@@ -192,34 +192,43 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                                 let pp = compute_pixels_per_point(nw.width(), nw.height());
                                 egui_ctx.set_pixels_per_point(pp);
-                                log::info!("EGL + egui painter initialized! pp={}", pp);
+                                log::info!("EGL + egui painter инициализирован! pp={}", pp);
 
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
                                 needs_redraw = true;
                             }
                             Err(e) => {
-                                log::error!("egui_glow::Painter::new failed: {:?}", e);
+                                log::error!("egui_glow::Painter::new не удался: {:?}", e);
                             }
                         }
                     }
                     Err(e) => {
-                        log::error!("EglState::create failed: {}", e);
+                        log::error!("EglState::create не удался: {}", e);
                     }
                 }
             }
         }
 
         // --- События из data layer (ViewModelContext::poll_events) ---
-        let events = vm_ctx.poll_events();
-        if !events.is_empty() {
-            for evt in events {
-                view_model.on_event(evt);
+        {
+            // Отладка: проверка валидности vm_ctx
+            let events = vm_ctx.poll_events();
+            if !events.is_empty() {
+                log::info!("run: получено {} событий из data layer", events.len());
+                for evt in events {
+                    view_model.on_event(evt);
+                }
+                needs_redraw = true;
+            } else {
+                // Молча: в этом кадре нет событий — нормально
             }
-            needs_redraw = true;
         }
 
         // --- Рендеринг ---
+        // Всегда запрашиваем repaint — иначе UI не обновляется при событиях
+        // от data layer, и анимации не работают.
+        needs_redraw = true;
         let now = Instant::now();
         if needs_redraw && now.duration_since(last_frame) >= target_dt {
             needs_redraw = false;
@@ -267,7 +276,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                 );
 
                 if let Err(e) = state.swap_buffers() {
-                    log::warn!("swap_buffers error: {}", e);
+                    log::warn!("ошибка swap_buffers: {}", e);
                     if let Some(ref mut p) = egui_painter {
                         p.destroy();
                     }
@@ -281,7 +290,7 @@ pub fn run<A: Application>(app: AndroidApp) {
     }
 }
 
-/// Compute a reasonable pixels_per_point from the native window pixel dimensions.
+/// Вычислить разумный pixels_per_point из размеров native window в пикселях.
 fn compute_pixels_per_point(width: i32, height: i32) -> f32 {
     let w = width.max(height) as f32;
     (w / 400.0).max(1.0).min(5.0)
@@ -305,7 +314,7 @@ fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
         )
     };
     if handle.is_null() {
-        log::error!("get_proc_address: libEGL.so not loaded");
+        log::error!("get_proc_address: libEGL.so не загружен");
         return std::ptr::null();
     }
 
@@ -316,7 +325,7 @@ fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
         )
     };
     if sym.is_null() {
-        log::error!("get_proc_address: eglGetProcAddress not found");
+        log::error!("get_proc_address: eglGetProcAddress не найден");
         return std::ptr::null();
     }
 
@@ -331,7 +340,7 @@ fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
             )
         };
         if let Ok(s) = name.to_str() {
-            log::warn!("eglGetProcAddress returned null for {}", s);
+            log::warn!("eglGetProcAddress вернул null для {}", s);
         }
         if !handle2.is_null() {
             let fallback = unsafe { libc::dlsym(handle2, name.as_ptr()) };

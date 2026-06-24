@@ -118,7 +118,7 @@ fn test_take_data_layer_channels_panics_before_view_model_context() {
     }));
     assert!(
         result.is_err(),
-        "Expected panic when channels not initialized"
+        "Ожидается паника, когда каналы не инициализированы"
     );
 }
 
@@ -131,7 +131,7 @@ fn test_take_data_layer_channels_once() {
     let second = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.take_data_layer_channels();
     }));
-    assert!(second.is_err(), "Expected panic on double take");
+    assert!(second.is_err(), "Ожидается паника при повторном взятии");
 }
 
 #[test]

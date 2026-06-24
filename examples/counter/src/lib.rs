@@ -1,88 +1,31 @@
-//! Counter example demonstrating the full ViewModel ↔ Data Layer pattern.
+//! Minimal counter demo.
 //!
-//! The data layer runs in a background thread, owns the counter state,
-//! and communicates via mpsc channels:
-//!   UI → global COMMAND_TX → Cmd → data_layer_worker → Evt → ViewModel.on_event()
-//!
-//! Also demonstrates Back button handling.
+//! State is stored directly in egui's persisted data via `ctx.data_mut()`,
+//! avoiding channels, data-layer threads, and ViewModel state entirely.
+//! This is the simplest possible approach to test that the rendering
+//! pipeline and input handling work correctly.
 
 use egui_android_framework::{Activity, AppContext, Application, ViewModel, ViewModelContext};
-use std::sync::mpsc;
 
 #[cfg(target_os = "android")]
 use egui_android_framework::android::run;
 
-/// Global sender so the UI (render) can dispatch commands to the data layer
-/// without needing to mutate the ViewModel.
-static COMMAND_TX: std::sync::OnceLock<mpsc::Sender<Cmd>> = std::sync::OnceLock::new();
+// ─── ViewModel (empty, no state) ──────────────────────────────────────────────
 
-// ─── Data Layer ──────────────────────────────────────────────────────────────
-
-/// Commands sent from the ViewModel to the data layer.
-#[derive(Debug)]
-enum Cmd {
-    Increment,
-}
-
-/// Events emitted by the data layer back to the ViewModel.
-#[derive(Debug)]
-enum Evt {
-    CountUpdated(u32),
-}
-
-/// Background data-layer worker: owns the counter, processes commands,
-/// sends events back to the ViewModel.
-fn data_layer_worker(cmd_rx: mpsc::Receiver<Cmd>, evt_tx: mpsc::Sender<Evt>) {
-    let mut count: u32 = 0;
-    loop {
-        match cmd_rx.recv() {
-            Ok(Cmd::Increment) => {
-                count = count.wrapping_add(1);
-                log::info!("DataLayer: count -> {count}");
-                let _ = evt_tx.send(Evt::CountUpdated(count));
-            }
-
-            Err(_) => {
-                log::info!("DataLayer: channel closed, exiting");
-                break;
-            }
-        }
-    }
-}
-
-// ─── ViewModel ───────────────────────────────────────────────────────────────
-
-struct CounterViewModel {
-    count: u32,
-}
+struct CounterViewModel;
 
 impl ViewModel for CounterViewModel {
-    type DataCommand = Cmd;
-    type Event = Evt;
+    type DataCommand = ();
+    type Event = ();
 
-    fn create(_ctx: ViewModelContext<Cmd, Evt>) -> Self {
-        Self { count: 0 }
+    fn create(_ctx: ViewModelContext<(), ()>) -> Self {
+        Self
     }
 
-    fn handle(&mut self, cmd: Cmd) {
-        match cmd {
-            Cmd::Increment => {
-                log::info!("ViewModel: forwarding Increment to data layer");
-            }
-        }
-    }
-
-    fn on_event(&mut self, evt: Evt) {
-        match evt {
-            Evt::CountUpdated(count) => {
-                log::info!("ViewModel: received CountUpdated({count})");
-                self.count = count;
-            }
-        }
-    }
+    fn handle(&mut self, _cmd: ()) {}
 }
 
-// ─── Activity ────────────────────────────────────────────────────────────────
+// ─── Activity ─────────────────────────────────────────────────────────────────
 
 struct CounterActivity;
 
@@ -96,8 +39,9 @@ impl Activity for CounterActivity {
         Self
     }
 
-    fn render(&mut self, ctx: &egui::Context, vm: &CounterViewModel) {
-        let count = vm.count;
+    fn render(&mut self, ctx: &egui::Context, _vm: &CounterViewModel) {
+        let mut count =
+            ctx.data_mut(|data| *data.get_persisted_mut_or(egui::Id::new("counter"), 0u32));
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -115,22 +59,23 @@ impl Activity for CounterActivity {
                     .add_sized([200.0, 56.0], egui::Button::new("+1"))
                     .clicked()
                 {
-                    log::info!("UI: +1 clicked, sending Cmd::Increment");
-                    if let Some(tx) = COMMAND_TX.get() {
-                        let _ = tx.send(Cmd::Increment);
-                    }
+                    log::info!("UI: +1 clicked");
+                    count = count.wrapping_add(1);
+                    ctx.data_mut(|data| {
+                        data.insert_persisted(egui::Id::new("counter"), count);
+                    });
                 }
             });
         });
     }
 
     fn on_back_pressed(&mut self, _vm: &mut CounterViewModel) -> bool {
-        log::info!("Back pressed — requesting shutdown via framework");
+        log::info!("Back pressed — requesting shutdown");
         true
     }
 }
 
-// ─── Application ─────────────────────────────────────────────────────────────
+// ─── Application ──────────────────────────────────────────────────────────────
 
 struct CounterApp;
 
@@ -140,26 +85,13 @@ impl Application for CounterApp {
 
     fn on_create(ctx: &mut AppContext<Self>) {
         ctx.config_mut().log_tag = "egui-counter".into();
-        log::info!("App: onCreate");
     }
 
     fn create_view_model(ctx: &mut AppContext<Self>) -> CounterViewModel {
-        log::info!("App: createViewModel");
-
-        let vm_ctx = ctx.view_model_context();
-
-        // Take the channels for the data layer.
-        let (cmd_rx, evt_tx) = ctx.take_data_layer_channels();
-
-        // Store the command sender globally so render() can dispatch commands.
-        let _ = COMMAND_TX.set(vm_ctx.command_tx().clone());
-
-        // Spawn the data layer thread.
-        std::thread::spawn(move || {
-            data_layer_worker(cmd_rx, evt_tx);
-        });
-
-        CounterViewModel::create(vm_ctx)
+        // Initialize internal channels so the framework doesn't panic if
+        // take_data_layer_channels() is ever called internally.
+        ctx.view_model_context();
+        CounterViewModel
     }
 
     fn create_activity(_ctx: &mut AppContext<Self>) -> CounterActivity {
@@ -167,7 +99,7 @@ impl Application for CounterApp {
     }
 }
 
-// ─── Entry Point ─────────────────────────────────────────────────────────────
+// ─── Entry Point ──────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "android")]
 #[no_mangle]

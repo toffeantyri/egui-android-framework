@@ -2,15 +2,15 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
-    #[error("Graphic initialization failed: {0}")]
+    #[error("Ошибка инициализации графики: {0}")]
     GraphicInit(String),
 
-    #[error("Surface creation failed: {0}")]
+    #[error("Ошибка создания поверхности: {0}")]
     SurfaceCreation(String),
 
-    #[error("Lifecycle error: {0}")]
+    #[error("Ошибка жизненного цикла: {0}")]
     Lifecycle(String),
 
-    #[error("EGL error: {0}")]
+    #[error("Ошибка EGL: {0}")]
     Egl(String),
 }

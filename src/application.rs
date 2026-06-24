@@ -22,7 +22,7 @@ pub struct AppContext<A: Application> {
     dl_command_rx: Option<mpsc::Receiver<<A::ViewModel as ViewModel>::DataCommand>>,
     /// Data layer отправляет сюда события для ViewModel
     dl_event_tx: Option<mpsc::Sender<<A::ViewModel as ViewModel>::Event>>,
-    /// Shared event receiver Arc, cloned to give both ViewModel and run() the same receiver
+    /// Shared event receiver Arc, с клонированием для передачи и ViewModel и run() одного и того же Receiver
     shared_event_rx: Option<Arc<Mutex<mpsc::Receiver<<A::ViewModel as ViewModel>::Event>>>>,
 }
 
@@ -62,8 +62,8 @@ impl<A: Application> AppContext<A> {
         mpsc::Sender<<A::ViewModel as ViewModel>::Event>,
     ) {
         (
-            self.dl_command_rx.take().expect("take_data_layer_channels: command receiver already taken, call view_model_context() first"),
-            self.dl_event_tx.take().expect("take_data_layer_channels: event sender already taken, call view_model_context() first"),
+            self.dl_command_rx.take().expect("take_data_layer_channels: command receiver уже забран, сначала вызови view_model_context()"),
+            self.dl_event_tx.take().expect("take_data_layer_channels: event sender уже забран, сначала вызови view_model_context()"),
         )
     }
 
