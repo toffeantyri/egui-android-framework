@@ -1,28 +1,90 @@
-//! Minimal counter demo.
+//! Пример счётчика на egui + egui-android-framework.
 //!
-//! State is stored directly in egui's persisted data via `ctx.data_mut()`,
-//! avoiding channels, data-layer threads, and ViewModel state entirely.
-//! This is the simplest possible approach to test that the rendering
-//! pipeline and input handling work correctly.
+//! Демонстрирует полную MVVM-архитектуру:
+//! - ViewModel хранит состояние, владеет Sender для отправки команд в data layer
+//! - Activity читает состояние из ViewModel, возвращает команды через `render()`
+//! - Data layer работает в отдельном потоке, общается через mpsc-каналы
+//! - Нет глобальных переменных — всё через трейты фреймворка
 
 use egui_android_framework::{Activity, AppContext, Application, ViewModel, ViewModelContext};
+use std::sync::mpsc;
 
 #[cfg(target_os = "android")]
 use egui_android_framework::android::run;
 
-// ─── ViewModel (empty, no state) ──────────────────────────────────────────────
+// ─── Типы команд и событий ────────────────────────────────────────────────────
 
-struct CounterViewModel;
+/// Команда от UI к ViewModel (и далее в data layer).
+#[derive(Debug)]
+enum Cmd {
+    Increment,
+}
+
+/// Событие от data layer к ViewModel.
+#[derive(Debug)]
+enum Evt {
+    CountUpdated(u32),
+}
+
+// ─── Data Layer ───────────────────────────────────────────────────────────────
+
+/// Фоновая задача: получает команды, изменяет состояние, шлёт события обратно.
+fn data_layer_worker(cmd_rx: mpsc::Receiver<Cmd>, evt_tx: mpsc::Sender<Evt>) {
+    let mut count = 0u32;
+    loop {
+        match cmd_rx.recv() {
+            Ok(Cmd::Increment) => {
+                count = count.wrapping_add(1);
+                log::info!("DataLayer: count -> {count}");
+                if evt_tx.send(Evt::CountUpdated(count)).is_err() {
+                    log::info!("DataLayer: получатель событий отключён, завершаемся");
+                    break;
+                }
+            }
+            Err(_) => {
+                log::info!("DataLayer: канал команд закрыт, завершаемся");
+                break;
+            }
+        }
+    }
+}
+
+// ─── ViewModel ────────────────────────────────────────────────────────────────
+
+/// ViewModel владеет состоянием (`count`) и отправляет команды в data layer.
+struct CounterViewModel {
+    count: u32,
+    /// Sender для отправки команд в data layer.
+    cmd_tx: mpsc::Sender<Cmd>,
+}
 
 impl ViewModel for CounterViewModel {
-    type DataCommand = ();
-    type Event = ();
+    type DataCommand = Cmd;
+    type Event = Evt;
 
-    fn create(_ctx: ViewModelContext<(), ()>) -> Self {
-        Self
+    fn create(ctx: ViewModelContext<Cmd, Evt>) -> Self {
+        let cmd_tx = ctx.command_tx().clone();
+        Self { count: 0, cmd_tx }
     }
 
-    fn handle(&mut self, _cmd: ()) {}
+    fn handle(&mut self, cmd: Cmd) {
+        match cmd {
+            // Команда от UI — отправляем в data layer через ViewModelContext
+            Cmd::Increment => {
+                log::info!("ViewModel: handle Increment — отправляем в data layer");
+                let _ = self.cmd_tx.send(Cmd::Increment);
+            }
+        }
+    }
+
+    fn on_event(&mut self, evt: Evt) {
+        match evt {
+            Evt::CountUpdated(count) => {
+                log::info!("ViewModel: получено CountUpdated({count})");
+                self.count = count;
+            }
+        }
+    }
 }
 
 // ─── Activity ─────────────────────────────────────────────────────────────────
@@ -39,9 +101,13 @@ impl Activity for CounterActivity {
         Self
     }
 
-    fn render(&mut self, ctx: &egui::Context, _vm: &CounterViewModel) {
-        let mut count =
-            ctx.data_mut(|data| *data.get_persisted_mut_or(egui::Id::new("counter"), 0u32));
+    fn render(
+        &mut self,
+        ctx: &egui::Context,
+        vm: &CounterViewModel,
+    ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+        let count = vm.count;
+        let mut commands = vec![];
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -60,17 +126,16 @@ impl Activity for CounterActivity {
                     .clicked()
                 {
                     log::info!("UI: +1 clicked");
-                    count = count.wrapping_add(1);
-                    ctx.data_mut(|data| {
-                        data.insert_persisted(egui::Id::new("counter"), count);
-                    });
+                    commands.push(Cmd::Increment);
                 }
             });
         });
+
+        commands
     }
 
     fn on_back_pressed(&mut self, _vm: &mut CounterViewModel) -> bool {
-        log::info!("Back pressed — requesting shutdown");
+        log::info!("Back pressed — завершаемся");
         true
     }
 }
@@ -88,10 +153,20 @@ impl Application for CounterApp {
     }
 
     fn create_view_model(ctx: &mut AppContext<Self>) -> CounterViewModel {
-        // Initialize internal channels so the framework doesn't panic if
-        // take_data_layer_channels() is ever called internally.
-        ctx.view_model_context();
-        CounterViewModel
+        log::info!("App: createViewModel");
+
+        // Создаём каналы
+        let vm_ctx = ctx.view_model_context();
+
+        // Забираем каналы для data layer
+        let (cmd_rx, evt_tx) = ctx.take_data_layer_channels();
+
+        // Запускаем data layer в фоне
+        std::thread::spawn(move || {
+            data_layer_worker(cmd_rx, evt_tx);
+        });
+
+        CounterViewModel::create(vm_ctx)
     }
 
     fn create_activity(_ctx: &mut AppContext<Self>) -> CounterActivity {
@@ -99,7 +174,7 @@ impl Application for CounterApp {
     }
 }
 
-// ─── Entry Point ──────────────────────────────────────────────────────────────
+// ─── Точка входа ──────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "android")]
 #[no_mangle]

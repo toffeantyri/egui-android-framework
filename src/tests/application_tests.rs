@@ -46,7 +46,13 @@ impl Activity for TestActivity {
         Self
     }
 
-    fn render(&mut self, _context: &egui::Context, _vm: &Self::ViewModel) {}
+    fn render(
+        &mut self,
+        _context: &egui::Context,
+        _vm: &Self::ViewModel,
+    ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
+        vec![]
+    }
 }
 
 impl LifecycleObserver for TestActivity {}

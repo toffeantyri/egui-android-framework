@@ -256,9 +256,15 @@ pub fn run<A: Application>(app: AndroidApp) {
                     ..egui::RawInput::default()
                 };
 
+                let mut commands: Vec<<A::ViewModel as ViewModel>::DataCommand> = Vec::new();
                 let full_output = egui_ctx.run(raw_input, |ctx| {
-                    activity.render(ctx, &view_model);
+                    commands = activity.render(ctx, &view_model);
                 });
+
+                // Dispatch commands to ViewModel
+                for cmd in commands {
+                    view_model.dispatch(cmd);
+                }
 
                 unsafe {
                     let gl = painter.gl();
