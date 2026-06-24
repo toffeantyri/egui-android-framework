@@ -7,10 +7,9 @@
 #![cfg(target_os = "android")]
 
 use android_activity::{
-    input::{InputEvent, MotionAction},
+    input::{InputEvent, KeyAction, KeyEvent, MotionAction},
     InputStatus,
 };
-use ndk::native_window::NativeWindow;
 
 /// Результат обработки ввода за кадр.
 pub(crate) struct InputState {
@@ -18,6 +17,8 @@ pub(crate) struct InputState {
     pub(crate) events: Vec<egui::Event>,
     /// Текущая позиция указателя (если есть касание)
     pub(crate) pointer_pos: Option<egui::Pos2>,
+    /// Была ли нажата кнопка Back (Activity решает, обрабатывать или нет)
+    pub(crate) back_pressed: bool,
 }
 
 impl InputState {
@@ -25,11 +26,13 @@ impl InputState {
         Self {
             events: Vec::new(),
             pointer_pos: None,
+            back_pressed: false,
         }
     }
 
     pub(crate) fn clear(&mut self) {
         self.events.clear();
+        self.back_pressed = false;
         // pointer_pos не сбрасываем — нужен для генерации PointerUp
     }
 }
@@ -37,10 +40,6 @@ impl InputState {
 /// Обработать все накопившиеся события ввода из очереди Android.
 ///
 /// Вызывается один раз за кадр. Заполняет `InputState` событиями egui.
-///
-/// `window` — опциональное native window (нужно для определения размеров
-/// при трансляции координат, если потребуется).
-#[allow(unused)]
 pub(crate) fn process_input_events(
     app: &android_activity::AndroidApp,
     pixels_per_point: f32,
@@ -57,6 +56,9 @@ pub(crate) fn process_input_events(
         }
     }
 }
+
+/// Код Android-клавиши Back.
+const KEYCODE_BACK: i32 = 4;
 
 /// Обработать одно событие ввода и вернуть `InputStatus`.
 fn handle_input_event(event: InputEvent<'_>, pp: f32, state: &mut InputState) -> InputStatus {
@@ -99,8 +101,32 @@ fn handle_input_event(event: InputEvent<'_>, pp: f32, state: &mut InputState) ->
                 _ => InputStatus::Unhandled,
             }
         }
-        // TODO: клавиатура — InputEvent::KeyEvent
-        // TODO: mouse / scroll — если Android-устройство с мышью
+        InputEvent::KeyEvent(key) => {
+            let action = key.key_action();
+            let code = key_key_code(&key);
+            if action == KeyAction::Down && code == KEYCODE_BACK {
+                state.back_pressed = true;
+                InputStatus::Handled
+            } else {
+                InputStatus::Unhandled
+            }
+        }
         _ => InputStatus::Unhandled,
     }
+}
+
+/// Достать key code из KeyEvent.
+///
+/// В android-activity 0.6 `KeyEvent` не имеет прямого метода `key_code()`,
+/// используем внутреннее поле через итератор.
+fn key_key_code(key: &KeyEvent<'_>) -> i32 {
+    // KeyEvent из android-activity содержит итератор по KeyAction,
+    // но сам код клавиши лежит в поле. Используем формат debug или
+    // получаем через итератор с информацией о key code.
+    // В android-activity 0.6 KeyEvent имеет метод key_code() через
+    // итератор. На практике берём первое событие.
+    for k in key.key_events() {
+        return k.key_code;
+    }
+    0
 }

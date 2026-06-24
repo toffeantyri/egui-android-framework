@@ -2,6 +2,10 @@
 name = "egui-android-framework"
 version = "0.1.0"
 edition = "2021"
+description = "Lightweight framework for running egui applications on Android"
+keywords = ["egui", "android", "gui", "framework", "gles"]
+repository = "https://github.com/your/repo"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 thiserror = "2.0"

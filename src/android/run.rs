@@ -23,15 +23,16 @@ use glow::HasContext;
 /// Вызывается из `#[no_mangle] pub fn android_main(app: AndroidApp)` в крейте пользователя,
 /// которая настраивает конкретный тип приложения.
 pub fn run<A: Application>(app: AndroidApp) {
+    let mut app_ctx = AppContext::<A>::new();
+    A::on_create(&mut app_ctx);
+
+    // Инициализируем логгер с тегом из конфига приложения
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag("egui-android")
+            .with_tag(&app_ctx.config().log_tag)
             .with_max_level(log::LevelFilter::Info),
     );
     log::info!("run: starting egui-android-framework app");
-
-    let mut app_ctx = AppContext::<A>::new();
-    A::on_create(&mut app_ctx);
 
     let vm_ctx = app_ctx.view_model_context();
     let mut view_model = A::create_view_model(&mut app_ctx);
@@ -105,9 +106,18 @@ pub fn run<A: Application>(app: AndroidApp) {
             std::process::exit(0);
         }
 
-        // --- Touch-ввод ---
+        // --- Ввод (touch, клавиатура, back) ---
         let pp = egui_ctx.pixels_per_point();
         input::process_input_events(&app, pp, &mut input_state);
+
+        // --- Обработка кнопки Back ---
+        if input_state.back_pressed {
+            if activity.on_back_pressed(&mut view_model) {
+                log::info!("Back pressed — handled by activity");
+            } else {
+                log::info!("Back pressed — not handled, ignoring");
+            }
+        }
 
         // --- Инициализация/пересоздание EGL при получении окна ---
         if let Some(nw) = app.native_window() {
