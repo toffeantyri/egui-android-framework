@@ -68,25 +68,25 @@ pub fn run<A: Application>(app: AndroidApp) {
             PollEvent::Wake | PollEvent::Timeout => {}
             PollEvent::Main(e) => match e {
                 MainEvent::InitWindow { .. } => {
-                    log::info!("Жизненный цикл: InitWindow — планирование пересоздания surface");
+                    log::info!("Lifecycle: InitWindow — планирование пересоздания surface");
                     surface_needs_recreation = true;
                     needs_redraw = true;
                 }
                 MainEvent::Resume { .. } => {
-                    log::info!("Жизненный цикл: Resume");
+                    log::info!("Lifecycle: Resume");
                     activity.on_resume();
                     needs_redraw = true;
                 }
                 MainEvent::Pause { .. } => {
-                    log::info!("Жизненный цикл: Pause");
+                    log::info!("Lifecycle: Pause");
                     activity.on_pause();
                 }
                 MainEvent::Stop { .. } => {
-                    log::info!("Жизненный цикл: Stop — сохранение состояния EGL");
+                    log::info!("Lifecycle: Stop — сохранение состояния EGL");
                     activity.on_stop();
                 }
                 MainEvent::Destroy { .. } => {
-                    log::info!("Жизненный цикл: Destroy — выход");
+                    log::info!("Lifecycle: Destroy — выход");
                     destroy_requested = true;
                 }
                 MainEvent::RedrawNeeded { .. } => {
@@ -261,7 +261,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                     commands = activity.render(ctx, &view_model);
                 });
 
-                // Dispatch commands to ViewModel
                 for cmd in commands {
                     view_model.dispatch(cmd);
                 }

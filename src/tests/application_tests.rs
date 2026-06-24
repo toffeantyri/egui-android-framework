@@ -48,7 +48,7 @@ impl Activity for TestActivity {
 
     fn render(
         &mut self,
-        _context: &egui::Context,
+        _ctx: &egui::Context,
         _vm: &Self::ViewModel,
     ) -> Vec<<Self::ViewModel as ViewModel>::DataCommand> {
         vec![]
