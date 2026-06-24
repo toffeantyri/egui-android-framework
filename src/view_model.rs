@@ -49,6 +49,14 @@ impl<C: Send + 'static, E: Send + 'static> ViewModelContext<C, E> {
         }
     }
 
+    /// Get a reference to the command sender.
+    ///
+    /// Useful when the caller needs to clone the sender for use outside
+    /// of the ViewModel (e.g. from the UI thread during `render()`).
+    pub fn command_tx(&self) -> &mpsc::Sender<C> {
+        &self.command_tx
+    }
+
     /// Отправить команду в data layer.
     ///
     /// ViewModel вызывает этот метод, чтобы передать команду

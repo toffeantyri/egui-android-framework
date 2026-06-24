@@ -68,9 +68,6 @@ pub fn run<A: Application>(app: AndroidApp) {
             PollEvent::Wake | PollEvent::Timeout => {}
             PollEvent::Main(e) => match e {
                 MainEvent::InitWindow { .. } => {
-                    // Получено новое окно (например, после Resume).
-                    // Не разрушаем EGL display/context — только surface будет пересоздан
-                    // после poll_events, где у нас есть доступ к egl_state.
                     log::info!("Lifecycle: InitWindow — scheduling surface recreation");
                     surface_needs_recreation = true;
                     needs_redraw = true;
@@ -85,8 +82,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                     activity.on_pause();
                 }
                 MainEvent::Stop { .. } => {
-                    // Не разрушаем EGL — activity может вернуться через
-                    // Resume → InitWindow с тем же display/context.
                     log::info!("Lifecycle: Stop — preserving EGL state");
                     activity.on_stop();
                 }
@@ -102,6 +97,22 @@ pub fn run<A: Application>(app: AndroidApp) {
             _ => {}
         });
 
+        // --- Ввод (touch, клавиатура, back) ---
+        {
+            let pp = egui_ctx.pixels_per_point();
+            input::process_input_events(&app, pp, &mut input_state);
+        }
+
+        // --- Обработка кнопки Back (должна быть ДО проверки destroy_requested) ---
+        if input_state.back_pressed {
+            if activity.on_back_pressed(&mut view_model) {
+                log::info!("Back pressed — exiting");
+                destroy_requested = true;
+            } else {
+                log::info!("Back pressed — not handled, ignoring");
+            }
+        }
+
         if destroy_requested {
             activity.on_destroy();
             if let Some(ref mut p) = egui_painter {
@@ -112,20 +123,8 @@ pub fn run<A: Application>(app: AndroidApp) {
                 state.destroy();
             }
             egl_state = None;
-            std::process::exit(0);
-        }
-
-        // --- Ввод (touch, клавиатура, back) ---
-        let pp = egui_ctx.pixels_per_point();
-        input::process_input_events(&app, pp, &mut input_state);
-
-        // --- Обработка кнопки Back ---
-        if input_state.back_pressed {
-            if activity.on_back_pressed(&mut view_model) {
-                log::info!("Back pressed — handled by activity");
-            } else {
-                log::info!("Back pressed — not handled, ignoring");
-            }
+            log::info!("Exiting main loop — android_main will return");
+            break;
         }
 
         // --- Пересоздание EGL surface при смене окна (InitWindow) ---
@@ -139,19 +138,17 @@ pub fn run<A: Application>(app: AndroidApp) {
                     );
                     match state.recreate_surface(&nw) {
                         Ok(()) => {
-                            // Не разрушаем painter — переиспользуем его.
-                            // Сбрасываем GL состояние после make_current с новым surface.
                             if let Some(ref mut painter) = egui_painter {
                                 unsafe {
                                     gl_clear(painter.gl());
                                 }
                             }
-                            log::info!("EGL surface recreated successfully");
+                            let pp = compute_pixels_per_point(nw.width(), nw.height());
+                            egui_ctx.set_pixels_per_point(pp);
+                            log::info!("EGL surface recreated successfully, pp={}", pp);
                         }
                         Err(e) => {
                             log::error!("Failed to recreate EGL surface: {}", e);
-                            // Если не удалось пересоздать surface, разрушаем всё —
-                            // будет инициализировано заново при следующем native_window().
                             if let Some(ref mut p) = egui_painter {
                                 p.destroy();
                             }
@@ -177,7 +174,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                 );
                 match EglState::create(&nw) {
                     Ok(state) => {
-                        // Создаём glow контекст через загрузчик из EGL
                         let gl = unsafe {
                             glow::Context::from_loader_function(|name| {
                                 let cname = std::ffi::CStr::from_ptr(
@@ -189,16 +185,17 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                         match egui_glow::Painter::new(Arc::new(gl), "", None, true) {
                             Ok(painter) => {
-                                // Сбрасываем состояние GL
                                 unsafe {
                                     gl_clear(painter.gl());
                                 }
-                                // Перезагружаем шрифты
                                 egui_ctx.set_fonts(egui::FontDefinitions::default());
+
+                                let pp = compute_pixels_per_point(nw.width(), nw.height());
+                                egui_ctx.set_pixels_per_point(pp);
+                                log::info!("EGL + egui painter initialized! pp={}", pp);
 
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
-                                log::info!("EGL + egui painter initialized!");
                                 needs_redraw = true;
                             }
                             Err(e) => {
@@ -234,7 +231,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                     .map(|nw| (nw.width() as u32, nw.height() as u32))
                     .unwrap_or((0, 0));
                 if w == 0 || h == 0 {
-                    // Surface ещё не готов
                     continue;
                 }
 
@@ -255,7 +251,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                     activity.render(ctx, &view_model);
                 });
 
-                // Очищаем экран тёмно-серым
                 unsafe {
                     let gl = painter.gl();
                     gl.clear_color(0.2, 0.2, 0.2, 1.0);
@@ -273,7 +268,6 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                 if let Err(e) = state.swap_buffers() {
                     log::warn!("swap_buffers error: {}", e);
-                    // При ошибке swap нужно пересоздать EGL
                     if let Some(ref mut p) = egui_painter {
                         p.destroy();
                     }
@@ -283,9 +277,14 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // Небольшая задержка для снижения нагрузки на CPU
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// Compute a reasonable pixels_per_point from the native window pixel dimensions.
+fn compute_pixels_per_point(width: i32, height: i32) -> f32 {
+    let w = width.max(height) as f32;
+    (w / 400.0).max(1.0).min(5.0)
 }
 
 /// Очистить GL буфер (чёрный прозрачный).
@@ -295,14 +294,10 @@ unsafe fn gl_clear(gl: &glow::Context) {
 }
 
 /// Получить адрес OpenGL функции через eglGetProcAddress.
-///
-/// Использует `dlopen`/`dlsym` для вызова `eglGetProcAddress` из libEGL.so.
-/// Fallback — прямой `dlsym` на libGLESv2.so.
 fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
     type EglGetProcAddress =
         unsafe extern "system" fn(*const std::os::raw::c_char) -> *const std::os::raw::c_void;
 
-    // libEGL.so уже загружена процессом android-activity
     let handle = unsafe {
         libc::dlopen(
             "libEGL.so\0".as_ptr() as *const std::os::raw::c_char,
@@ -329,7 +324,6 @@ fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
     let addr = unsafe { func(name.as_ptr()) };
 
     if addr.is_null() {
-        // fallback: dlsym на саму GL функцию из libGLESv2.so
         let handle2 = unsafe {
             libc::dlopen(
                 "libGLESv2.so\0".as_ptr() as *const std::os::raw::c_char,
