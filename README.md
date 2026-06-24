@@ -4,8 +4,8 @@
 
 ## Возможности
 
-- **EGL + OpenGL ES 2.0** — прямая работа с libEGL.so, без `glutin` и других тяжёлых зависимостей
-- **MVVM-like архитектура** — `Application`, `Activity`, `ViewModel` с каналами для data layer
+- **EGL + OpenGL ES 2.0** — прямая работа с libEGL.so, без `glutin`
+- **MVVM-архитектура** — `Application`, `Activity`, `ViewModel` с каналами для data layer
 - **Android Lifecycle** — полная поддержка `Create → Start → Resume → Pause → Stop → Destroy`
 - **Touch-ввод** — трансляция `MotionEvent` в `egui::Event`
 - **Кнопка Back** — обрабатывается через `Activity::on_back_pressed()`
@@ -14,173 +14,152 @@
 
 ## Быстрый старт
 
-Добавьте в `Cargo.toml` вашего приложения:
+### 1. Зависимости
 
 ```toml
-[package]
-name = "my-app"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
-egui-android-framework = { path = "../egui-android-framework" }
+egui-android-framework = { git = "..." }
+egui = "0.31"
 
-# Обязательно для Android
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
 ```
 
-Создайте точку входа (`src/lib.rs` или отдельный бинарник):
+### 2. Реализуйте трейты
 
 ```rust,ignore
-use egui_android_framework::{
-    Activity, AppConfig, AppContext, Application, ViewModel, ViewModelContext,
-};
+use egui_android_framework::*;
 use egui_android_framework::android::run;
 use std::sync::mpsc;
+```
 
-// --- Data layer (ваш код, выполняется в отдельном потоке) ---
-fn data_layer_worker(
-    cmd_rx: mpsc::Receiver<Cmd>,
-    evt_tx: mpsc::Sender<Evt>,
-) {
-    let mut count: u32 = 0;
-    loop {
-        match cmd_rx.recv() {
-            Ok(Cmd::Increment) => {
-                count += 1;
-                let _ = evt_tx.send(Evt::CountUpdated(count));
-            }
-            Err(_) => break,
-        }
-    }
-}
+**ViewModel** — состояние + команды в data layer:
 
-// --- ViewModel ---
-enum Cmd { Increment }
-enum Evt { CountUpdated(u32) }
+```rust,ignore
+struct MyVM { count: u32, cmd_tx: mpsc::Sender<Cmd> }
 
-struct CounterVM { count: u32 }
-
-impl ViewModel for CounterVM {
+impl ViewModel for MyVM {
     type DataCommand = Cmd;
     type Event = Evt;
 
-    fn create(_ctx: ViewModelContext<Cmd, Evt>) -> Self {
-        Self { count: 0 }
+    fn create(ctx: ViewModelContext<Cmd, Evt>) -> Self {
+        Self { count: 0, cmd_tx: ctx.command_tx().clone() }
     }
 
-    fn handle(&mut self, cmd: Cmd) {
-        match cmd {
-            Cmd::Increment => self.count += 1,
-        }
-    }
-}
-
-// --- Activity ---
-struct MainActivity;
-
-impl Activity for MainActivity {
-    type ViewModel = CounterVM;
-    type Application = App;
-
-    fn create(_ctx: &AppContext<App>) -> Self { Self }
-
-    fn render(&mut self, ctx: &egui::Context, vm: &CounterVM) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(format!("Count: {}", vm.count));
-            if ui.button("+1").clicked() {
-                // TODO: отправить Cmd::Increment через data layer
-            }
-        });
+    fn handle(&mut self, _cmd: Cmd) {
+        // UI-команда — перенаправить в data layer
+        let _ = self.cmd_tx.send(cmd);
     }
 
-    fn on_back_pressed(&mut self, _vm: &mut CounterVM) -> bool {
-        true // обработать — выйти
+    fn on_event(&mut self, evt: Evt) {
+        if let Evt::Updated(n) = evt { self.count = n; }
     }
-}
-
-// --- Application ---
-struct App;
-
-impl Application for App {
-    type Activity = MainActivity;
-    type ViewModel = CounterVM;
-
-    fn on_create(ctx: &mut AppContext<Self>) {
-        ctx.config_mut().log_tag = "counter-app".into();
-    }
-
-    fn create_view_model(ctx: &mut AppContext<Self>) -> CounterVM {
-        // Создаём ViewModelContext — это заводит каналы и сохраняет
-        // концы для data layer.
-        let vm_ctx = ctx.view_model_context();
-
-        // Передаём каналы data layer (можно в отдельном потоке)
-        let (cmd_rx, evt_tx) = ctx.take_data_layer_channels();
-        std::thread::spawn(move || data_layer_worker(cmd_rx, evt_tx));
-
-        CounterVM::create(vm_ctx)
-    }
-
-    fn create_activity(_ctx: &mut AppContext<Self>) -> MainActivity {
-        MainActivity
-    }
-}
-
-// Точка входа для Android
-#[no_mangle]
-pub fn android_main(app: android_activity::AndroidApp) {
-    run::<App>(app);
 }
 ```
+
+**Activity** — читает ViewModel, возвращает команды:
+
+```rust,ignore
+impl Activity for MyActivity {
+    type ViewModel = MyVM;
+    type Application = MyApp;
+
+    fn create(_: &AppContext<MyApp>) -> Self { Self }
+
+    fn render(&mut self, ctx: &egui::Context, vm: &MyVM) -> Vec<Cmd> {
+        let mut cmds = vec![];
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if ui.button("+1").clicked() { cmds.push(Cmd::Incr); }
+        });
+        cmds
+    }
+
+    fn on_back_pressed(&mut self, _: &mut MyVM) -> bool { true }
+}
+```
+
+**Application** — сборка:
+
+```rust,ignore
+impl Application for MyApp {
+    type Activity = MyActivity;
+    type ViewModel = MyVM;
+
+    fn on_create(ctx: &mut AppContext<Self>) {
+        ctx.config_mut().log_tag = "my-app".into();
+    }
+
+    fn create_view_model(ctx: &mut AppContext<Self>) -> MyVM {
+        let vm_ctx = ctx.view_model_context();
+        let (rx, tx) = ctx.take_data_layer_channels();
+        std::thread::spawn(|| data_layer_worker(rx, tx));
+        MyVM::create(vm_ctx)
+    }
+
+    fn create_activity(_: &mut AppContext<Self>) -> MyActivity {
+        MyActivity
+    }
+}
+```
+
+### 3. Точка входа
+
+```rust,ignore
+#[no_mangle]
+pub fn android_main(app: android_activity::AndroidApp) {
+    run::<MyApp>(app);
+}
+```
+
+### 4. Сборка и запуск
+
+```bash
+# Установите xbuild (cargo-apk)
+cargo install xbuild
+
+# Соберите и запустите на устройстве
+cd your_project_path
+x run --device adb:XXXXXXXX
+```
+
+Полный рабочий пример — [`examples/counter`](examples/counter).
 
 ## Архитектура
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Application (ваш крейт)                                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐          │
-│  │ Activity │  │ ViewModel│  │  Data Layer  │          │
-│  │  .render │  │  .handle │  │  (ваш код)   │          │
-│  └────┬─────┘  └────┬─────┘  └──────┬───────┘          │
-│       │              │               │                  │
-└───────┼──────────────┼───────────────┼──────────────────┘
-        │              │               │
-   ┌────▼──────────────▼───────────────▼────┐
-   │         egui-android-framework          │
-   │  ┌────────────┐  ┌──────────────────┐  │
-   │  │  egl_backend│  │  run() — главный │  │
-   │  │  (EGL FFI)  │  │  цикл + lifecycle│  │
-   │  └────────────┘  │  + input + render │  │
-   │                  └──────────────────┘  │
-   │  ┌──────────────────────────────────┐  │
-   │  │  input.rs — MotionEvent → egui   │  │
-   │  └──────────────────────────────────┘  │
-   └────────────────────────────────────────┘
-                      │
-          android-activity (NDK / NativeActivity)
-                      │
-                 Android / libEGL.so
+┌──────────┐   ┌──────────┐   ┌──────────────┐
+│ Activity │ → │ ViewModel│   │  Data Layer  │
+│ .render  │   │ .handle  │   │  cmd_rx      │
+│ commands │   │ .on_event│   │  evt_tx      │
+└────┬─────┘   └────┬─────┘   └──────┬───────┘
+     │               │               │
+     ▼               ▼               ▼
+┌────────────────────────────────────────────┐
+│              egui-android-framework          │
+│  ┌────────────┐  ┌──────────────────────┐  │
+│  │ EGL backend │  │ run() — lifecycle   │  │
+│  │ + input     │  │ + render + dispatch │  │
+│  └────────────┘  └──────────────────────┘  │
+└────────────────────────────────────────────┘
 ```
 
-Каналы между ViewModel и Data Layer:
+**Поток данных:**
 
-- **ViewModel → Data Layer**: `Sender<DataCommand>` — команды (сохранить, загрузить, отправить)
-- **Data Layer → ViewModel**: `Receiver<Event>` — события (данные загружены, ошибка)
+`UI → render() → [Cmd] → dispatch() → ViewModel.handle() → cmd_tx → Data Layer → evt_tx → poll_events() → on_event() → обновление состояния → render()`
+
+## Тесты
+
+20 тестов: каналы, dispatch, handle, on_event, AppConfig, LifecycleObserver.
 
 ## Зависимости
 
-| Крейт | Версия | Назначение |
-|---|---|---|
-| `egui` | 0.31 | GUI-фреймворк |
-| `egui_glow` | 0.31 | Рендеринг egui через OpenGL |
-| `glow` | 0.16 | OpenGL context |
-| `android-activity` | 0.6 | Android NativeActivity |
-| `ndk` | 0.9 | NDK bindings (NativeWindow) |
+| Крейт | Назначение |
+|---|---|
+| `egui` 0.31 | GUI |
+| `egui_glow` 0.31 | Рендеринг |
+| `glow` 0.16 | OpenGL |
+| `android-activity` 0.6 | NativeActivity |
+| `ndk` 0.9 | NDK bindings |
 
 ## Лицензия
 
