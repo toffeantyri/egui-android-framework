@@ -1,5 +1,6 @@
 pub mod egl_backend;
 pub mod input;
+pub mod run;
 
-//pub use self::run::run;
-//mod run;
+#[cfg(target_os = "android")]
+pub use run::run;

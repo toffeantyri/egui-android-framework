@@ -14,8 +14,15 @@ glow = { version = "0.16", optional = true }
 
 # Android (не собирается на десктопе)
 [target.'cfg(target_os = "android")'.dependencies]
+# Для Android включаем egui_glow/glow обязательно
+# (на десктопе они опциональны — тесты могут не требовать графику)
+egui_glow = { version = "0.31" }
+glow = { version = "0.16" }
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = "0.14"
+ndk = "0.9"
+libc = "0.2"
+raw-window-handle = "0.6"
 
 [profile.release]
 opt-level = "z"     # Минимальный размер
