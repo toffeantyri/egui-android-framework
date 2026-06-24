@@ -138,6 +138,7 @@ pub(crate) struct EglState {
     pub(crate) display: egl::EGLDisplay,
     pub(crate) surface: egl::EGLSurface,
     pub(crate) context: egl::EGLContext,
+    pub(crate) config: egl::EGLConfig,
 }
 
 impl EglState {
@@ -240,6 +241,7 @@ impl EglState {
             display,
             surface,
             context,
+            config,
         })
     }
 
@@ -264,6 +266,60 @@ impl EglState {
                 self.display = egl::EGL_DEFAULT_DISPLAY;
             }
         }
+    }
+
+    /// Destroy the old window surface and create a new one for the given native window.
+    /// The display, config, and context are preserved — only the surface is replaced.
+    /// Returns an error if surface creation or make_current fails.
+    pub(crate) fn recreate_surface(&mut self, native_window: &NativeWindow) -> Result<(), String> {
+        // Destroy old surface
+        unsafe {
+            // Unbind current surface first
+            egl::eglMakeCurrent(
+                self.display,
+                egl::EGL_NO_SURFACE,
+                egl::EGL_NO_SURFACE,
+                egl::EGL_NO_CONTEXT,
+            );
+            if !self.surface.is_null() {
+                egl::eglDestroySurface(self.display, self.surface);
+                self.surface = egl::EGL_NO_SURFACE;
+            }
+        }
+
+        // Create new surface
+        let egl_native_window =
+            native_window.ptr().as_ptr() as *mut std::ffi::c_void as egl::EGLNativeWindowType;
+
+        let surface = unsafe {
+            egl::eglCreateWindowSurface(
+                self.display,
+                self.config,
+                egl_native_window,
+                std::ptr::null(),
+            )
+        };
+        if surface.is_null() {
+            let err = unsafe { egl::eglGetError() };
+            return Err(format!(
+                "eglCreateWindowSurface failed on recreate: {}",
+                egl::egl_error_str(err)
+            ));
+        }
+        self.surface = surface;
+
+        // Make current with new surface
+        if unsafe { egl::eglMakeCurrent(self.display, self.surface, self.surface, self.context) }
+            == egl::EGL_FALSE
+        {
+            let err = unsafe { egl::eglGetError() };
+            return Err(format!(
+                "eglMakeCurrent failed on recreate: {}",
+                egl::egl_error_str(err)
+            ));
+        }
+
+        Ok(())
     }
 
     pub(crate) fn swap_buffers(&self) -> Result<(), String> {

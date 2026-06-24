@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use android_activity::{AndroidApp, MainEvent, PollEvent};
-use ndk::native_window::NativeWindow;
 
 use crate::activity::Activity;
 use crate::android::egl_backend::EglState;
@@ -49,16 +48,16 @@ pub fn run<A: Application>(app: AndroidApp) {
     let mut egl_state: Option<EglState> = None;
     let mut egui_painter: Option<egui_glow::Painter> = None;
 
-    // Храним указатель на текущее native window (ANativeWindow*),
-    // чтобы при смене окна (конфигурация/пересоздание) пересоздать EGL.
-    let mut current_native_window: Option<NativeWindow> = None;
-
     let mut needs_redraw = true;
     let mut last_frame = Instant::now();
     let target_dt = Duration::from_secs_f64(1.0 / app_ctx.config().target_fps as f64);
 
     // Состояние ввода (touch, клавиатура)
     let mut input_state = InputState::new();
+
+    // Флаг: EGL display существует, но surface устарел из-за InitWindow.
+    // Устанавливается в колбэке InitWindow, сбрасывается после пересоздания surface.
+    let mut surface_needs_recreation = false;
 
     loop {
         input_state.clear();
@@ -69,7 +68,11 @@ pub fn run<A: Application>(app: AndroidApp) {
             PollEvent::Wake | PollEvent::Timeout => {}
             PollEvent::Main(e) => match e {
                 MainEvent::InitWindow { .. } => {
-                    log::info!("Lifecycle: InitWindow");
+                    // Получено новое окно (например, после Resume).
+                    // Не разрушаем EGL display/context — только surface будет пересоздан
+                    // после poll_events, где у нас есть доступ к egl_state.
+                    log::info!("Lifecycle: InitWindow — scheduling surface recreation");
+                    surface_needs_recreation = true;
                     needs_redraw = true;
                 }
                 MainEvent::Resume { .. } => {
@@ -82,7 +85,9 @@ pub fn run<A: Application>(app: AndroidApp) {
                     activity.on_pause();
                 }
                 MainEvent::Stop { .. } => {
-                    log::info!("Lifecycle: Stop");
+                    // Не разрушаем EGL — activity может вернуться через
+                    // Resume → InitWindow с тем же display/context.
+                    log::info!("Lifecycle: Stop — preserving EGL state");
                     activity.on_stop();
                 }
                 MainEvent::Destroy { .. } => {
@@ -123,43 +128,54 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // --- Инициализация/пересоздание EGL при получении окна ---
-        if let Some(nw) = app.native_window() {
-            // Проверяем, сменилось ли окно (по сырому указателю ANativeWindow*)
-            let window_changed = current_native_window
-                .as_ref()
-                .map(|old| {
-                    old.ptr().as_ptr() as *const std::ffi::c_void
-                        != nw.ptr().as_ptr() as *const std::ffi::c_void
-                })
-                .unwrap_or(true);
-
-            if window_changed {
-                // Сброс EGL — будет пересоздан ниже
-                if egl_state.is_some() {
-                    log::info!("Window changed, resetting EGL");
-                    if let Some(ref mut p) = egui_painter {
-                        p.destroy();
+        // --- Пересоздание EGL surface при смене окна (InitWindow) ---
+        if surface_needs_recreation {
+            if let Some(nw) = app.native_window() {
+                if let Some(ref mut state) = egl_state {
+                    log::info!(
+                        "Recreating EGL surface for new window {}x{}",
+                        nw.width(),
+                        nw.height()
+                    );
+                    match state.recreate_surface(&nw) {
+                        Ok(()) => {
+                            // Не разрушаем painter — переиспользуем его.
+                            // Сбрасываем GL состояние после make_current с новым surface.
+                            if let Some(ref mut painter) = egui_painter {
+                                unsafe {
+                                    gl_clear(painter.gl());
+                                }
+                            }
+                            log::info!("EGL surface recreated successfully");
+                        }
+                        Err(e) => {
+                            log::error!("Failed to recreate EGL surface: {}", e);
+                            // Если не удалось пересоздать surface, разрушаем всё —
+                            // будет инициализировано заново при следующем native_window().
+                            if let Some(ref mut p) = egui_painter {
+                                p.destroy();
+                            }
+                            egui_painter = None;
+                            if let Some(ref mut s) = egl_state {
+                                s.destroy();
+                            }
+                            egl_state = None;
+                        }
                     }
-                    egui_painter = None;
-                    if let Some(ref mut state) = egl_state {
-                        state.destroy();
-                    }
-                    egl_state = None;
                 }
-                current_native_window = Some(nw);
             }
+            surface_needs_recreation = false;
+        }
 
-            // Захватываем nw снова (после того как могли переместить его выше)
-            let nw_ref = current_native_window.as_ref().unwrap();
-
-            if egl_state.is_none() {
+        // --- Инициализация EGL с нуля (первый запуск или после полной очистки) ---
+        if egl_state.is_none() {
+            if let Some(nw) = app.native_window() {
                 log::info!(
                     "Initializing EGL + egui... size={}x{}",
-                    nw_ref.width(),
-                    nw_ref.height()
+                    nw.width(),
+                    nw.height()
                 );
-                match EglState::create(nw_ref) {
+                match EglState::create(&nw) {
                     Ok(state) => {
                         // Создаём glow контекст через загрузчик из EGL
                         let gl = unsafe {
