@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-egui-android-framework = { path = "../.." }
+egui-android-framework = "0.1.0-alpha.1"
 egui = "0.31"
 log = "0.4"
 
