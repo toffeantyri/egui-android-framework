@@ -16,7 +16,16 @@ use crate::LifecycleObserver;
 
 use glow::HasContext;
 
-/// Запустить egui-приложение на Android (новая архитектура).
+/// Запустить egui-приложение на Android.
+///
+/// Главный цикл: обработка Android lifecycle, touch-ввод,
+/// инициализация EGL/egui, рендеринг.
+///
+/// Вызывается из `#[no_mangle] pub fn android_main(app: AndroidApp)`.
+///
+/// # Параметры типа
+///
+/// * `A` — тип приложения, реализующий [`Application`].
 pub fn run<A: Application>(app: AndroidApp) {
     let mut app_instance = A::create();
 
@@ -176,7 +185,7 @@ pub fn run<A: Application>(app: AndroidApp) {
         }
 
         // --- События из data layer ---
-        app_instance.poll_data_events();
+        app_instance.poll();
 
         // --- Рендеринг ---
         needs_redraw = true;
@@ -207,7 +216,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                     ..egui::RawInput::default()
                 };
 
-                let (commands, full_output) = app_instance.render_and_handle(&egui_ctx, raw_input);
+                let full_output = app_instance.frame(&egui_ctx, raw_input);
 
                 unsafe {
                     let gl = painter.gl();

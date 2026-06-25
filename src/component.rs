@@ -37,7 +37,7 @@ pub trait Component: LifecycleObserver + Send + 'static {
 
     /// Получить событие из data layer.
     ///
-    /// Вызывается фреймворком после `poll_events()`, перед `render()`.
+    /// Вызывается фреймворком после `poll()`, перед `frame()`.
     fn on_event(&mut self, _evt: DataEvent) {}
 
     /// Получить ссылку на текущее состояние.

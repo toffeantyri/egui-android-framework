@@ -177,11 +177,7 @@ impl Application for CounterApp {
         &mut self.config
     }
 
-    fn render_and_handle(
-        &mut self,
-        egui_ctx: &egui::Context,
-        raw_input: egui::RawInput,
-    ) -> (Vec<()>, egui::FullOutput) {
+    fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
         // 1. Опрашиваем события от data layer, обновляем состояние компонента
         while let Ok(evt) = self.evt_rx.try_recv() {
             self.root.apply_event(evt);
@@ -201,7 +197,7 @@ impl Application for CounterApp {
             let _ = self.cmd_tx.send(msg);
         }
 
-        (vec![], full_output)
+        full_output
     }
 }
 

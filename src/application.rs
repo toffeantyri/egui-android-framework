@@ -54,27 +54,28 @@ pub trait Application: LifecycleObserver + Sized + 'static {
     /// Получить мутабельную ссылку на конфиг.
     fn config_mut(&mut self) -> &mut AppConfig;
 
-    /// Обработать события от data layer.
-    fn poll_data_events(&mut self) {}
+    /// Опрос событий из data layer.
+    ///
+    /// Вызывается в начале каждого кадра до `frame()`.
+    fn poll(&mut self) {}
 
-    /// Отрисовать UI и обработать сообщения от компонентов.
+    /// Один кадр: рендеринг компонента и обработка сообщений.
     ///
     /// Вызывается один раз за кадр из `run()`.
-    /// Принимает `egui::Context` и `RawInput`, возвращает команды
-    /// (пока не используется) и `FullOutput` для рендеринга.
+    /// Принимает `egui::Context` и `RawInput`, возвращает `FullOutput`
+    /// для отрисовки через EGL.
     ///
-    /// Реализация по умолчанию:
-    /// 1. Запускает egui-кадр через `ctx.run()`.
-    /// 2. Внутри колбэка вызывает `root().render(ui)`.
-    /// 3. После `ctx.run()` обрабатывает сообщения через `root().handle()`.
-    fn render_and_handle(
-        &mut self,
-        egui_ctx: &egui::Context,
-        raw_input: egui::RawInput,
-    ) -> (Vec</* TODO: сообщения */ ()>, egui::FullOutput) {
-        // Временная заглушка — рендеринг без компонентов
-        let full_output = egui_ctx.run(raw_input, |_ctx| {});
-        (vec![], full_output)
+    /// Реализация по умолчанию — пустой egui-кадр (заглушка).
+    /// Конкретное приложение **должно** переопределить этот метод,
+    /// чтобы:
+    /// 1. Запустить `egui_ctx.run(raw_input, ...)`, внутри которого
+    ///    вызвать `self.root().render(ui)`.
+    /// 2. После `ctx.run()` обработать сообщения через `root().handle()`.
+    ///
+    /// См. пример `examples/counter2`.
+    fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
+        // Заглушка — пустой кадр. Переопределите в вашем Application.
+        egui_ctx.run(raw_input, |_ctx| {})
     }
 }
 
@@ -127,8 +128,11 @@ pub type ComponentFactory<OutComp> = fn(
 
 /// Handle для взаимодействия с data layer.
 ///
-/// TODO: В Этапе 3 будет заменён на конкретный тип с каналами.
-/// Пока — заглушка, позволяющая компонентам отправлять команды.
+/// Позволяет компонентам отправлять команды в фоновый data layer
+/// через `send()`. Создаётся в `Application::create()`.
+///
+/// TODO: реализовать полноценный канал (Sender хранится здесь,
+/// Receiver — в Application для опроса через `poll()`).
 #[derive(Clone)]
 pub struct DataLayerHandle {
     // TODO: добавить Sender<DataCmd>
@@ -176,7 +180,7 @@ mod tests {
     use crate::component::Component;
     use crate::LifecycleObserver;
 
-    /// Тестовый компонент для проверки Application2.
+    /// Тестовый компонент для проверки Application.
     struct TestRoot {
         state: u32,
     }
@@ -198,7 +202,7 @@ mod tests {
         }
     }
 
-    /// Тестовая имплементация Application2.
+    /// Тестовая имплементация Application.
     struct TestApp {
         root: TestRoot,
         config: AppConfig,
