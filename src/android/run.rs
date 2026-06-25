@@ -1,8 +1,6 @@
-//! Главный цикл приложения для Android: обработка жизненного цикла,
-//! touch-ввод, инициализация EGL/egui и рендеринг.
+//! Главный цикл для Decompose-style архитектуры.
 //!
-//! Точка входа — [`run()`], которая принимает конкретный тип,
-//! реализующий [`Application`].
+//! Использует `Application` трейт.
 
 #![cfg(target_os = "android")]
 
@@ -11,38 +9,27 @@ use std::time::{Duration, Instant};
 
 use android_activity::{AndroidApp, MainEvent, PollEvent};
 
-use crate::activity::Activity;
 use crate::android::egl_backend::EglState;
 use crate::android::input::{self, InputState};
-use crate::{AppContext, Application, LifecycleObserver, ViewModel};
+use crate::application::Application;
+use crate::LifecycleObserver;
 
 use glow::HasContext;
 
-/// Запустить egui-приложение на Android.
-///
-/// Вызывается из `#[no_mangle] pub fn android_main(app: AndroidApp)` в крейте пользователя,
-/// которая настраивает конкретный тип приложения.
+/// Запустить egui-приложение на Android (новая архитектура).
 pub fn run<A: Application>(app: AndroidApp) {
-    let mut app_ctx = AppContext::<A>::new();
-    A::on_create(&mut app_ctx);
+    let mut app_instance = A::create();
 
-    // Инициализируем логгер с тегом из конфига приложения
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag(app_ctx.config().log_tag.as_str())
+            .with_tag(app_instance.config().log_tag.as_str())
             .with_max_level(log::LevelFilter::Info),
     );
-    log::info!("run: запуск egui-android-framework приложения");
+    log::info!("run: запуск egui-android-framework (Decompose-style)");
 
-    // create_view_model вызывается первой — она сама создаёт каналы
-    // через ctx.view_model_context(). Затем run() получает свою копию vm_ctx
-    // с тем же Receiver (через Arc), чтобы опрашивать события из data layer.
-    let mut view_model = A::create_view_model(&mut app_ctx);
-    let vm_ctx = app_ctx.view_model_context();
-    let mut activity = A::create_activity(&mut app_ctx);
-
-    activity.on_create();
-    activity.on_start();
+    app_instance.on_create();
+    app_instance.on_start();
+    app_instance.on_resume();
 
     let egui_ctx = egui::Context::default();
     let mut egl_state: Option<EglState> = None;
@@ -50,13 +37,9 @@ pub fn run<A: Application>(app: AndroidApp) {
 
     let mut needs_redraw = true;
     let mut last_frame = Instant::now();
-    let target_dt = Duration::from_secs_f64(1.0 / app_ctx.config().target_fps as f64);
+    let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
 
-    // Состояние ввода (touch, клавиатура)
     let mut input_state = InputState::new();
-
-    // Флаг: EGL display существует, но surface устарел из-за InitWindow.
-    // Устанавливается в колбэке InitWindow, сбрасывается после пересоздания surface.
     let mut surface_needs_recreation = false;
 
     loop {
@@ -68,25 +51,25 @@ pub fn run<A: Application>(app: AndroidApp) {
             PollEvent::Wake | PollEvent::Timeout => {}
             PollEvent::Main(e) => match e {
                 MainEvent::InitWindow { .. } => {
-                    log::info!("Lifecycle: InitWindow — планирование пересоздания surface");
+                    log::info!("Lifecycle: InitWindow");
                     surface_needs_recreation = true;
                     needs_redraw = true;
                 }
                 MainEvent::Resume { .. } => {
                     log::info!("Lifecycle: Resume");
-                    activity.on_resume();
+                    app_instance.on_resume();
                     needs_redraw = true;
                 }
                 MainEvent::Pause { .. } => {
                     log::info!("Lifecycle: Pause");
-                    activity.on_pause();
+                    app_instance.on_pause();
                 }
                 MainEvent::Stop { .. } => {
-                    log::info!("Lifecycle: Stop — сохранение состояния EGL");
-                    activity.on_stop();
+                    log::info!("Lifecycle: Stop");
+                    app_instance.on_stop();
                 }
                 MainEvent::Destroy { .. } => {
-                    log::info!("Lifecycle: Destroy — выход");
+                    log::info!("Lifecycle: Destroy");
                     destroy_requested = true;
                 }
                 MainEvent::RedrawNeeded { .. } => {
@@ -103,18 +86,14 @@ pub fn run<A: Application>(app: AndroidApp) {
             input::process_input_events(&app, pp, &mut input_state);
         }
 
-        // --- Обработка кнопки Back (должна быть ДО проверки destroy_requested) ---
+        // --- Обработка кнопки Back ---
         if input_state.back_pressed {
-            if activity.on_back_pressed(&mut view_model) {
-                log::info!("Back нажата — выход");
-                destroy_requested = true;
-            } else {
-                log::info!("Back нажата — не обработано, игнорируем");
-            }
+            log::info!("Back нажата — выход");
+            destroy_requested = true;
         }
 
         if destroy_requested {
-            activity.on_destroy();
+            app_instance.on_destroy();
             if let Some(ref mut p) = egui_painter {
                 p.destroy();
             }
@@ -123,19 +102,14 @@ pub fn run<A: Application>(app: AndroidApp) {
                 state.destroy();
             }
             egl_state = None;
-            log::info!("Выход из главного цикла — android_main вернёт управление");
+            log::info!("Выход из главного цикла (run)");
             break;
         }
 
-        // --- Пересоздание EGL surface при смене окна (InitWindow) ---
+        // --- Пересоздание EGL surface при смене окна ---
         if surface_needs_recreation {
             if let Some(nw) = app.native_window() {
                 if let Some(ref mut state) = egl_state {
-                    log::info!(
-                        "Пересоздание EGL surface для нового окна {}x{}",
-                        nw.width(),
-                        nw.height()
-                    );
                     match state.recreate_surface(&nw) {
                         Ok(()) => {
                             if let Some(ref mut painter) = egui_painter {
@@ -145,7 +119,6 @@ pub fn run<A: Application>(app: AndroidApp) {
                             }
                             let pp = compute_pixels_per_point(nw.width(), nw.height());
                             egui_ctx.set_pixels_per_point(pp);
-                            log::info!("EGL surface успешно пересоздан, pp={}", pp);
                         }
                         Err(e) => {
                             log::error!("Не удалось пересоздать EGL surface: {}", e);
@@ -164,14 +137,9 @@ pub fn run<A: Application>(app: AndroidApp) {
             surface_needs_recreation = false;
         }
 
-        // --- Инициализация EGL с нуля (первый запуск или после полной очистки) ---
+        // --- Инициализация EGL с нуля ---
         if egl_state.is_none() {
             if let Some(nw) = app.native_window() {
-                log::info!(
-                    "Инициализация EGL + egui... размер={}x{}",
-                    nw.width(),
-                    nw.height()
-                );
                 match EglState::create(&nw) {
                     Ok(state) => {
                         let gl = unsafe {
@@ -189,17 +157,14 @@ pub fn run<A: Application>(app: AndroidApp) {
                                     gl_clear(painter.gl());
                                 }
                                 egui_ctx.set_fonts(egui::FontDefinitions::default());
-
                                 let pp = compute_pixels_per_point(nw.width(), nw.height());
                                 egui_ctx.set_pixels_per_point(pp);
-                                log::info!("EGL + egui painter инициализирован! pp={}", pp);
-
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
                                 needs_redraw = true;
                             }
                             Err(e) => {
-                                log::error!("egui_glow::Painter::new не удался: {:?}", e);
+                                log::error!("Painter::new не удался: {:?}", e);
                             }
                         }
                     }
@@ -210,24 +175,10 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // --- События из data layer (ViewModelContext::poll_events) ---
-        {
-            // Отладка: проверка валидности vm_ctx
-            let events = vm_ctx.poll_events();
-            if !events.is_empty() {
-                log::info!("run: получено {} событий из data layer", events.len());
-                for evt in events {
-                    view_model.on_event(evt);
-                }
-                needs_redraw = true;
-            } else {
-                // Молча: в этом кадре нет событий — нормально
-            }
-        }
+        // --- События из data layer ---
+        app_instance.poll_data_events();
 
         // --- Рендеринг ---
-        // Всегда запрашиваем repaint — иначе UI не обновляется при событиях
-        // от data layer, и анимации не работают.
         needs_redraw = true;
         let now = Instant::now();
         if needs_redraw && now.duration_since(last_frame) >= target_dt {
@@ -256,14 +207,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                     ..egui::RawInput::default()
                 };
 
-                let mut commands: Vec<<A::ViewModel as ViewModel>::Intent> = Vec::new();
-                let full_output = egui_ctx.run(raw_input, |ctx| {
-                    commands = activity.render(ctx, &view_model);
-                });
-
-                for cmd in commands {
-                    view_model.dispatch(cmd);
-                }
+                let (commands, full_output) = app_instance.render_and_handle(&egui_ctx, raw_input);
 
                 unsafe {
                     let gl = painter.gl();
@@ -271,7 +215,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
 
-                let primitives: Vec<egui::epaint::ClippedPrimitive> =
+                let primitives =
                     egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
                 painter.paint_and_update_textures(
                     [w, h],
@@ -281,7 +225,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                 );
 
                 if let Err(e) = state.swap_buffers() {
-                    log::warn!("ошибка swap_buffers: {}", e);
+                    log::warn!("swap_buffers: {}", e);
                     if let Some(ref mut p) = egui_painter {
                         p.destroy();
                     }
@@ -295,19 +239,16 @@ pub fn run<A: Application>(app: AndroidApp) {
     }
 }
 
-/// Вычислить разумный pixels_per_point из размеров native window в пикселях.
 fn compute_pixels_per_point(width: i32, height: i32) -> f32 {
     let w = width.max(height) as f32;
     (w / 400.0).max(1.0).min(5.0)
 }
 
-/// Очистить GL буфер (чёрный прозрачный).
 unsafe fn gl_clear(gl: &glow::Context) {
     gl.clear_color(0.0, 0.0, 0.0, 0.0);
     gl.clear(glow::COLOR_BUFFER_BIT);
 }
 
-/// Получить адрес OpenGL функции через eglGetProcAddress.
 fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
     type EglGetProcAddress =
         unsafe extern "system" fn(*const std::os::raw::c_char) -> *const std::os::raw::c_void;

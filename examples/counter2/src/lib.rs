@@ -1,17 +1,16 @@
-//! Пример счётчика на новой Decompose-style архитектуре.
+//! Пример счётчика на Decompose-style архитектуре.
 //!
 //! Демонстрирует:
 //! - `Component` + чистая View-функция
-//! - `Application2` как корень DI
+//! - `Application` как корень DI
 //! - Data layer в фоновом потоке через mpsc
 //! - `poll_data_events()` — опрос событий из data layer
-//! - `run2()` вместо `run()`
 
-use egui_android_framework::{AppConfig2, Application2, Component, LifecycleObserver};
+use egui_android_framework::{AppConfig, Application, Component, LifecycleObserver};
 use std::sync::mpsc;
 
 #[cfg(target_os = "android")]
-use egui_android_framework::android::run2;
+use egui_android_framework::android::run;
 
 // ─── Сообщения и события ───────────────────────────────────────────────────────
 
@@ -131,20 +130,18 @@ fn counter_view(state: &u32, ui: &mut egui::Ui) -> Vec<Msg> {
 /// Приложение-счётчик в новой архитектуре.
 struct CounterApp {
     root: CounterComponent,
-    config: AppConfig2,
-    /// Отправитель команд в data layer (хранится здесь, а не в Component).
+    config: AppConfig,
     cmd_tx: mpsc::Sender<Msg>,
-    /// Получатель событий от data layer (опрос в render_and_handle).
     evt_rx: mpsc::Receiver<Evt>,
 }
 
 impl LifecycleObserver for CounterApp {}
 
-impl Application2 for CounterApp {
+impl Application for CounterApp {
     type RootComponent = CounterComponent;
 
     fn create() -> Self {
-        let mut config = AppConfig2::default();
+        let mut config = AppConfig::default();
         config.log_tag = "egui-counter2".into();
 
         // Создаём каналы для data layer
@@ -172,11 +169,11 @@ impl Application2 for CounterApp {
         &self.root
     }
 
-    fn config(&self) -> &AppConfig2 {
+    fn config(&self) -> &AppConfig {
         &self.config
     }
 
-    fn config_mut(&mut self) -> &mut AppConfig2 {
+    fn config_mut(&mut self) -> &mut AppConfig {
         &mut self.config
     }
 
@@ -213,5 +210,5 @@ impl Application2 for CounterApp {
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub fn android_main(app: android_activity::AndroidApp) {
-    run2::<CounterApp>(app);
+    run::<CounterApp>(app);
 }

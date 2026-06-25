@@ -1,113 +1,91 @@
-use std::sync::{mpsc, Arc, Mutex};
+//! Новый Decompose-style Application — корень DI и владелец RootComponent.
+//!
+//! В отличие от старого MVVM `Application`, новый не знает про Activity
+//! и ViewModel. Вместо этого он:
+//!
+//! - Хранит общее состояние приложения (`AppState`).
+//! - Запускает data layer один раз, владеет `DataLayerHandle`.
+//! - Содержит фабрику компонентов (`ComponentFactory`).
+//! - Владеет RootComponent с `ChildStack`.
+//!
+//! # Поток данных
+//!
+//! ```text
+//! Application::render(&mut self, ui)
+//!   → root.render_current(ui) → active_component.render(ui)
+//!     → active_component.handle_messages()
+//!       → RootComponent обрабатывает навигационные сообщения
+//!         → ChildStack::push/pop/replace
+//! ```
+//!
+//! # Жизненный цикл
+//!
+//! `on_resume()` / `on_pause()` / `on_destroy()` пробрасываются
+//! в RootComponent, который делегирует активному компоненту.
 
-use crate::{Activity, ViewModel, ViewModelContext};
+use crate::component::{Component, DataEvent};
+use crate::component_context::ComponentContext;
+use crate::LifecycleObserver;
 
-pub trait Application: Sized + 'static {
-    type Activity: Activity<ViewModel = Self::ViewModel, Application = Self>;
-    type ViewModel: ViewModel;
+// ─── Новый Application ─────────────────────────────────────────────────────────
 
-    fn on_create(context: &mut AppContext<Self>);
-    fn create_view_model(context: &mut AppContext<Self>) -> Self::ViewModel;
-    fn create_activity(context: &mut AppContext<Self>) -> Self::Activity;
-}
-
-/// Контекст приложения — точка сборки ViewModel, Activity и data layer.
+/// Decompose-style Application — корень DI.
 ///
-/// Хранит каналы связи между ViewModel и data layer:
-/// - `dl_command_rx` — data layer **читает** интенты, отправленные ViewModel
-/// - `dl_event_tx` — data layer **отправляет** события, читаемые ViewModel
-#[allow(clippy::type_complexity)]
-pub struct AppContext<A: Application> {
-    config: AppConfig,
-    /// Data layer читает отсюда интенты от ViewModel
-    dl_command_rx: Option<mpsc::Receiver<<A::ViewModel as ViewModel>::Intent>>,
-    /// Data layer отправляет сюда события для ViewModel
-    dl_event_tx: Option<mpsc::Sender<<A::ViewModel as ViewModel>::Event>>,
-    /// Shared event receiver Arc, с клонированием для передачи и ViewModel и run() одного и того же Receiver
-    shared_event_rx: Option<Arc<Mutex<mpsc::Receiver<<A::ViewModel as ViewModel>::Event>>>>,
-}
+/// Владеет всем деревом компонентов, data layer и общим состоянием.
+/// Также реализует `LifecycleObserver` — фреймворк вызывает
+/// методы жизненного цикла на самом Application, который
+/// делегирует их в RootComponent и ChildStack.
+pub trait Application: LifecycleObserver + Sized + 'static {
+    /// Тип компонента в корне стека (обычно `Box<dyn Component>`).
+    type RootComponent: Component;
 
-impl<A: Application> Default for AppContext<A> {
-    fn default() -> Self {
-        Self {
-            config: AppConfig::default(),
-            dl_command_rx: None,
-            dl_event_tx: None,
-            shared_event_rx: None,
-        }
-    }
-}
+    /// Создать приложение.
+    fn create() -> Self;
 
-impl<A: Application> AppContext<A> {
-    /// Создаёт `AppContext` с пустыми каналами.
-    ///
-    /// Каналы полноценно инициализируются при вызове `view_model_context()`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    /// Получить мутабельную ссылку на корневой компонент.
+    fn root(&mut self) -> &mut Self::RootComponent;
 
-    /// Забрать каналы для передачи data layer (один раз).
+    /// Получить ссылку на корневой компонент.
+    fn root_ref(&self) -> &Self::RootComponent;
+
+    /// Получить конфиг приложения.
+    fn config(&self) -> &AppConfig;
+
+    /// Получить мутабельную ссылку на конфиг.
+    fn config_mut(&mut self) -> &mut AppConfig;
+
+    /// Обработать события от data layer.
+    fn poll_data_events(&mut self) {}
+
+    /// Отрисовать UI и обработать сообщения от компонентов.
     ///
-    /// Data layer получает:
-    /// - `Receiver<Intent>` — для чтения интентов от ViewModel
-    /// - `Sender<Event>` — для отправки событий в ViewModel
+    /// Вызывается один раз за кадр из `run()`.
+    /// Принимает `egui::Context` и `RawInput`, возвращает команды
+    /// (пока не используется) и `FullOutput` для рендеринга.
     ///
-    /// # Panics
-    /// Паникует, если `view_model_context()` ещё не был вызван,
-    /// или каналы уже были взяты.
-    #[allow(clippy::type_complexity)]
-    pub fn take_data_layer_channels(
+    /// Реализация по умолчанию:
+    /// 1. Запускает egui-кадр через `ctx.run()`.
+    /// 2. Внутри колбэка вызывает `root().render(ui)`.
+    /// 3. После `ctx.run()` обрабатывает сообщения через `root().handle()`.
+    fn render_and_handle(
         &mut self,
-    ) -> (
-        mpsc::Receiver<<A::ViewModel as ViewModel>::Intent>,
-        mpsc::Sender<<A::ViewModel as ViewModel>::Event>,
-    ) {
-        (
-            self.dl_command_rx.take().expect("take_data_layer_channels: command receiver уже забран, сначала вызови view_model_context()"),
-            self.dl_event_tx.take().expect("take_data_layer_channels: event sender уже забран, сначала вызови view_model_context()"),
-        )
-    }
-
-    /// Создать (или получить) `ViewModelContext`.
-    ///
-    /// При первом вызове заводит mpsc-каналы и сохраняет концы для data layer.
-    /// При повторных вызовах возвращает новый контекст, разделяющий тот же
-    /// `Receiver` событий (через `Arc`), что и первый. `command_tx` в повторных
-    /// вызовах не используется — run() только читает события.
-    pub fn view_model_context(
-        &mut self,
-    ) -> ViewModelContext<<A::ViewModel as ViewModel>::Intent, <A::ViewModel as ViewModel>::Event>
-    {
-        if let Some(ref shared_rx) = self.shared_event_rx {
-            return ViewModelContext::from_parts(
-                mpsc::channel::<<A::ViewModel as ViewModel>::Intent>().0,
-                Arc::clone(shared_rx),
-            );
-        }
-
-        let (vm_cmd_tx, dl_cmd_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::Intent>();
-        let (dl_evt_tx, vm_evt_rx) = mpsc::channel::<<A::ViewModel as ViewModel>::Event>();
-
-        let shared_rx = Arc::new(Mutex::new(vm_evt_rx));
-
-        self.dl_command_rx = Some(dl_cmd_rx);
-        self.dl_event_tx = Some(dl_evt_tx);
-        self.shared_event_rx = Some(Arc::clone(&shared_rx));
-
-        ViewModelContext::new(vm_cmd_tx, shared_rx)
-    }
-
-    pub fn config(&self) -> &AppConfig {
-        &self.config
-    }
-
-    pub fn config_mut(&mut self) -> &mut AppConfig {
-        &mut self.config
+        egui_ctx: &egui::Context,
+        raw_input: egui::RawInput,
+    ) -> (Vec</* TODO: сообщения */ ()>, egui::FullOutput) {
+        // Временная заглушка — рендеринг без компонентов
+        let full_output = egui_ctx.run(raw_input, |_ctx| {});
+        (vec![], full_output)
     }
 }
 
+// ─── AppConfig (общий, реэкспорт из application.rs) ────────────────────────────
+
+/// Конфигурация приложения.
+#[derive(Clone)]
 pub struct AppConfig {
+    /// Тег для логгера Android.
     pub log_tag: String,
+    /// Целевой FPS (кадров в секунду).
     pub target_fps: u32,
 }
 
@@ -117,5 +95,171 @@ impl Default for AppConfig {
             log_tag: "egui_app".to_owned(),
             target_fps: 60,
         }
+    }
+}
+
+// ─── ComponentFactory ──────────────────────────────────────────────────────────
+
+/// Фабрика компонентов — создаёт компонент по конфигурации экрана.
+///
+/// Каждое приложение определяет свою фабрику, которая матчит
+/// `Screen` на конкретный компонент.
+///
+/// # Пример
+///
+/// ```ignore
+/// fn component_factory(
+///     screen: &Screen,
+///     ctx: &mut ComponentContext<NavMsg, DataCmd, DataEvt>,
+/// ) -> Box<dyn Component<State = …, Message = …>> {
+///     match screen {
+///         Screen::Login => Box::new(LoginComponent::new(ctx)),
+///         Screen::Home { user_id } => Box::new(HomeComponent::new(*user_id, ctx)),
+///     }
+/// }
+/// ```
+pub type ComponentFactory<OutComp> = fn(
+    config: &<OutComp as Component>::State,
+    ctx: &mut ComponentContext<<OutComp as Component>::Message, (), DataEvent>,
+) -> OutComp;
+
+// ─── DataLayerHandle (каркас) ──────────────────────────────────────────────────
+
+/// Handle для взаимодействия с data layer.
+///
+/// TODO: В Этапе 3 будет заменён на конкретный тип с каналами.
+/// Пока — заглушка, позволяющая компонентам отправлять команды.
+#[derive(Clone)]
+pub struct DataLayerHandle {
+    // TODO: добавить Sender<DataCmd>
+}
+
+impl DataLayerHandle {
+    /// Создать новый handle (заглушка).
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    /// Отправить команду в data layer (заглушка).
+    pub fn send(&self, _cmd: impl Send + 'static) {
+        // TODO: реализовать отправку через канал
+        log::info!("DataLayerHandle::send — заглушка, команда не отправлена");
+    }
+}
+
+impl Default for DataLayerHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── AppState ──────────────────────────────────────────────────────────────────
+
+/// Общее состояние приложения (тема, локаль, сессия пользователя).
+///
+/// Хранится в Application и может быть передано компонентам
+/// через `ComponentContext`.
+#[derive(Clone, Default)]
+pub struct AppState {
+    /// Тема приложения (светлая/тёмная).
+    pub dark_mode: bool,
+    /// Язык (локаль).
+    pub locale: String,
+    // TODO: добавить user session, настройки и т.д.
+}
+
+// ─── Тесты ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::Component;
+    use crate::LifecycleObserver;
+
+    /// Тестовый компонент для проверки Application2.
+    struct TestRoot {
+        state: u32,
+    }
+
+    impl LifecycleObserver for TestRoot {}
+
+    impl Component for TestRoot {
+        type State = u32;
+        type Message = ();
+
+        fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
+            vec![]
+        }
+
+        fn handle(&mut self, _msg: Self::Message) {}
+
+        fn state(&self) -> &Self::State {
+            &self.state
+        }
+    }
+
+    /// Тестовая имплементация Application2.
+    struct TestApp {
+        root: TestRoot,
+        config: AppConfig,
+    }
+
+    impl LifecycleObserver for TestApp {}
+
+    impl Application for TestApp {
+        type RootComponent = TestRoot;
+
+        fn create() -> Self {
+            Self {
+                root: TestRoot { state: 42 },
+                config: AppConfig::default(),
+            }
+        }
+
+        fn root(&mut self) -> &mut TestRoot {
+            &mut self.root
+        }
+
+        fn root_ref(&self) -> &TestRoot {
+            &self.root
+        }
+
+        fn config(&self) -> &AppConfig {
+            &self.config
+        }
+
+        fn config_mut(&mut self) -> &mut AppConfig {
+            &mut self.config
+        }
+    }
+
+    #[test]
+    fn test_app_creation() {
+        let app = TestApp::create();
+        assert_eq!(app.root_ref().state, 42);
+        assert_eq!(app.config().log_tag, "egui_app");
+    }
+
+    #[test]
+    fn test_app_config_customization() {
+        let mut app = TestApp::create();
+        app.config_mut().log_tag = "my-app".into();
+        app.config_mut().target_fps = 30;
+        assert_eq!(app.config().log_tag, "my-app");
+        assert_eq!(app.config().target_fps, 30);
+    }
+
+    #[test]
+    fn test_root_access() {
+        let mut app = TestApp::create();
+        let root = app.root();
+        assert_eq!(root.state, 42);
+    }
+
+    #[test]
+    fn test_app_state_default() {
+        let state = AppState::default();
+        assert!(!state.dark_mode);
+        assert_eq!(state.locale, "");
     }
 }
