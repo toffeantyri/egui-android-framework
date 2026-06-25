@@ -16,6 +16,7 @@ pub trait Application: Sized + 'static {
 /// Хранит каналы связи между ViewModel и data layer:
 /// - `dl_command_rx` — data layer **читает** интенты, отправленные ViewModel
 /// - `dl_event_tx` — data layer **отправляет** события, читаемые ViewModel
+#[allow(clippy::type_complexity)]
 pub struct AppContext<A: Application> {
     config: AppConfig,
     /// Data layer читает отсюда интенты от ViewModel

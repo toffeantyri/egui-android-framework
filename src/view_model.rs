@@ -8,13 +8,13 @@ pub trait ViewModel: Sized + Send {
 
     /// Обработать команду от UI.
     ///
-    /// Вызывается через [`dispatch()`]. Аналог редьюсера — изменяет состояние
+    /// Вызывается через [`ViewModel::dispatch`]. Аналог редьюсера — изменяет состояние
     /// ViewModel в ответ на команду пользователя.
     fn handle(&mut self, cmd: Self::Intent);
 
     /// Отправить интент в ViewModel на обработку.
     ///
-    /// Вызывается из Activity. По умолчанию делегирует [`handle()`],
+    /// Вызывается из Activity. По умолчанию делегирует [`ViewModel::handle`],
     /// но может быть переопределён для логирования, отладки или
     /// перехвата интентов до обработки.
     fn dispatch(&mut self, cmd: Self::Intent) {
@@ -40,7 +40,7 @@ impl<C: Send + 'static, E: Send + 'static> ViewModelContext<C, E> {
         }
     }
 
-    /// Создать контекст из готового Sender и общего Arc<Mutex<Receiver>>.
+    /// Создать контекст из готового `Sender` и общего `Arc<Mutex<Receiver>>`.
     /// Используется для клонирования контекста (run() получает свою копию).
     pub fn from_parts(tx: mpsc::Sender<C>, rx: Arc<Mutex<mpsc::Receiver<E>>>) -> Self {
         Self {
@@ -52,7 +52,7 @@ impl<C: Send + 'static, E: Send + 'static> ViewModelContext<C, E> {
     /// Получить ссылку на отправитель интентов.
     ///
     /// Полезно, когда вызывающему нужно клонировать отправитель для использования
-    /// вне ViewModel (например, из UI-потока во время `render()`).
+    /// вне ViewModel (например, из UI-потока во время `render`).
     pub fn command_tx(&self) -> &mpsc::Sender<C> {
         &self.command_tx
     }

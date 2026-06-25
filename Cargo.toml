@@ -1,10 +1,13 @@
 [package]
 name = "egui-android-framework"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
-description = "Lightweight framework for running egui applications on Android"
+description = "Alpha: lightweight framework for running egui applications on Android"
 keywords = ["egui", "android", "gui", "framework", "gles"]
-repository = "https://github.com/your/repo"
+categories = ["gui", "rendering::graphics-api"]
+repository = "https://gitverse.ru/Tofy3434/egui-android-framework"
+documentation = "https://docs.rs/egui-android-framework"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

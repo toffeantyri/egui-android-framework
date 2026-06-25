@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-framework"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "android-activity",
  "android_logger",
