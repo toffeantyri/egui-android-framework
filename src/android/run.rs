@@ -44,7 +44,6 @@ pub fn run<A: Application>(app: AndroidApp) {
     let mut egl_state: Option<EglState> = None;
     let mut egui_painter: Option<egui_glow::Painter> = None;
 
-    let mut needs_redraw = true;
     let mut last_frame = Instant::now();
     let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
 
@@ -70,37 +69,36 @@ pub fn run<A: Application>(app: AndroidApp) {
         let mut destroy_requested = false;
         app.poll_events(Some(Duration::from_millis(16)), |event| match event {
             PollEvent::Wake | PollEvent::Timeout => {
-                // Wake — пробуждение от EguiRepaintSubscriber
-                needs_redraw = true;
+                // Wake — пробуждение от EguiRepaintSubscriber.
+                // Кадры и так идут постоянно, но Wake может прервать
+                // ожидание poll_events раньше.
             }
-            PollEvent::Main(e) => match e {
-                MainEvent::InitWindow { .. } => {
-                    log::info!("Lifecycle: InitWindow");
-                    surface_needs_recreation = true;
-                    needs_redraw = true;
+            PollEvent::Main(e) => {
+                // Любое Main-событие (touch, клавиатура, lifecycle)
+                match e {
+                    MainEvent::InitWindow { .. } => {
+                        log::info!("Lifecycle: InitWindow");
+                        surface_needs_recreation = true;
+                    }
+                    MainEvent::Resume { .. } => {
+                        log::info!("Lifecycle: Resume");
+                        app_instance.on_resume();
+                    }
+                    MainEvent::Pause { .. } => {
+                        log::info!("Lifecycle: Pause");
+                        app_instance.on_pause();
+                    }
+                    MainEvent::Stop { .. } => {
+                        log::info!("Lifecycle: Stop");
+                        app_instance.on_stop();
+                    }
+                    MainEvent::Destroy { .. } => {
+                        log::info!("Lifecycle: Destroy");
+                        destroy_requested = true;
+                    }
+                    _ => {}
                 }
-                MainEvent::Resume { .. } => {
-                    log::info!("Lifecycle: Resume");
-                    app_instance.on_resume();
-                    needs_redraw = true;
-                }
-                MainEvent::Pause { .. } => {
-                    log::info!("Lifecycle: Pause");
-                    app_instance.on_pause();
-                }
-                MainEvent::Stop { .. } => {
-                    log::info!("Lifecycle: Stop");
-                    app_instance.on_stop();
-                }
-                MainEvent::Destroy { .. } => {
-                    log::info!("Lifecycle: Destroy");
-                    destroy_requested = true;
-                }
-                MainEvent::RedrawNeeded { .. } => {
-                    needs_redraw = true;
-                }
-                _ => {}
-            },
+            }
             _ => {}
         });
 
@@ -185,16 +183,12 @@ pub fn run<A: Application>(app: AndroidApp) {
                                 egui_ctx.set_pixels_per_point(pp);
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
-                                needs_redraw = true;
 
                                 // После инициализации EGL создаём реактивного подписчика.
-                                // Раньше — subscriber поток крашил процесс до EGL init.
                                 if !subscriber_initialized {
                                     subscriber_initialized = true;
                                     log::info!("run: инициализируем реактивного подписчика");
                                     app_instance.init_subscriber(&egui_ctx, wake_handle.clone());
-                                    // После создания subscriber форсируем первый кадр
-                                    needs_redraw = true;
                                 }
                             }
                             Err(e) => {
@@ -209,12 +203,11 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // Рендеринг.
-        // needs_redraw устанавливается при Wake (от subscriber),
-        // Resume, InitWindow, RedrawNeeded.
+        // Рендеринг — идёт постоянно с частотой target_fps.
+        // subscriber может разбудить цикл раньше через Wake,
+        // но даже без событий кадры продолжаются для анимаций и таймеров.
         let now = Instant::now();
-        if needs_redraw && now.duration_since(last_frame) >= target_dt {
-            needs_redraw = false;
+        if now.duration_since(last_frame) >= target_dt {
             last_frame = now;
 
             if let (Some(ref mut painter), Some(ref state)) = (&mut egui_painter, &egl_state) {

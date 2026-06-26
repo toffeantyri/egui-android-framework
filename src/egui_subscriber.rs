@@ -65,16 +65,13 @@ impl EguiRepaintSubscriber {
                 // Это не идеально с точки зрения latency, но для UI-фреймворка
                 // с целевым FPS 30-60 задержка 1-5ms не критична.
                 loop {
-                    // Проверяем флаг остановки
                     if stop.load(Ordering::Relaxed) {
                         log::debug!("EguiSubscriber: поток завершён");
                         break;
                     }
 
-                    // Проверяем, появилось ли новое значение
                     match rx.has_changed() {
                         Ok(true) => {
-                            log::info!("EguiSubscriber: изменение обнаружено, вызываем request_repaint + wake");
                             // Помечаем как прочитанное, чтобы has_changed()
                             // снова вернул true только при следующем send()
                             let _ = rx.borrow_and_update();
