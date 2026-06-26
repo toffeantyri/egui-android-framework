@@ -5,103 +5,145 @@ description: Архитектура, правила и идиомы проект
 
 # egui-android-framework: Архитектура и правила
 
-Этот крейт — легковесный MVVM-фреймворк для запуска egui-приложений на Android.
+Этот крейт — MVI-фреймворк для запуска egui-приложений на Android.
+Вдохновлён [Decompose](https://github.com/arkivanov/Decompose) и Jetpack Compose:
+древовидная архитектура компонентов с однонаправленным потоком данных
+и реактивным состоянием.
 
-## Архитектура (MVVM)
+## Архитектура (MVI + Reactive State)
 
 ```
-┌──────────┐     ┌──────────┐     ┌──────────────┐
-│ Activity │  →  │ ViewModel│     │  Data Layer  │
-│ .render  │     │ .handle  │     │  cmd_rx      │
-│ intents  │     │ .on_event│     │  evt_tx      │
-└────┬─────┘     └────┬─────┘     └──────┬───────┘
-     │                │                  │
-     └────────────────┼──────────────────┘
-                      ▼
-         ┌────────────────────────┐
-         │  egui-android-framework│
-         │  run() — lifecycle     │
-         │  + input + render     │
-         │  + dispatch интентов   │
-         └────────────────────────┘
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│  Application  │      │  Component   │      │  Data Layer  │
+│  .frame()     │      │  .render()   │      │  store.rw    │
+│  .notify()    │  →   │  .handle()   │  ↔   │  notify_tx   │
+│  .root()      │      │  .state()    │      └──────┬───────┘
+└──────┬───────┘      └──────┬───────┘             │
+       │                     │                      │
+       ▼                     ▼                      ▼
+┌──────────────────────────────────────────────────────────┐
+│              egui-android-framework                        │
+│  ┌──────────────┐  ┌────────────────────────────────┐    │
+│  │  EGL backend  │  │  run() — lifecycle + input     │    │
+│  │  + OpenGL ES  │  │  + frame() + UiNotifier        │    │
+│  └──────────────┘  └────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
 ```
 
-**Поток данных:**
+**Поток данных (реактивный):**
 
 ```
 UI (нажатие кнопки)
-  → Activity::render() возвращает Vec<Cmd>
-    → Фреймворк (run.rs) вызывает view_model.dispatch(cmd)
-      → ViewModel::handle(cmd) — отправляет интент в data layer через self.cmd_tx
-        → Data Layer (ваш поток) получает cmd из cmd_rx, обрабатывает
-          → Data Layer шлёт Event через evt_tx.send(event)
-            → Фреймворк (run.rs) вызывает vm_ctx.poll_events()
-              → Фреймворк вызывает view_model.on_event(event)
-                → ViewModel::on_event() обновляет self.state
-                  → Следующий кадр: Activity::render() читает vm.state
+  → View(state, ui) возвращает Vec<Message>
+    → Component::handle(msg) — отправляет команду в data layer
+      → Data Layer (фоновый поток) получает команду
+        → store.update(|s| s.count += 1)        ← ЕДИНСТВЕННАЯ ТОЧКА
+          → notify_tx.send(())                   ← сигнал в Runtime
+            → UiNotifier::check()
+              → ctx.request_repaint()
+              → waker.wake()
+                → poll_events() получает Wake
+                  → frame() → render(state) → новый UI
 ```
+
+Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
+Состояние само уведомляет Runtime через `notify_tx`.
 
 ## Трейты и их назначение
 
 ### `Application`
-- Точка сборки приложения.
-- Ассоциирует `Activity` и `ViewModel`.
-- `on_create(ctx)` — настройка `AppConfig` (log_tag, target_fps).
-- `create_view_model(ctx)` — создаёт каналы (`ctx.view_model_context()`), забирает их (`take_data_layer_channels()`), запускает data layer, возвращает ViewModel.
-- `create_activity(ctx)` — создаёт Activity.
+- Корень DI. Владеет RootComponent, каналами, AppConfig.
+- `create()` — создаёт приложение, каналы, запускает data layer.
+- `root() / root_ref()` — доступ к корневому компоненту.
+- `config() / config_mut()` — настройки (log_tag, target_fps).
+- `create_notifier(ctx, wake) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
+- `frame(ctx, raw_input) -> FullOutput` — один кадр: `sync → render → handle`.
+- Наследует `LifecycleObserver` — lifecycle делегируется в RootComponent.
 
-### `Activity`
-- UI-слой. Читает `&ViewModel`, возвращает `Vec<Intent>`.
-- `render(ctx, vm) → Vec<Cmd>` — отрисовка, интенты возвращаются, фреймворк диспатчит их.
-- `on_back_pressed(vm) → bool` — true = выйти из приложения.
-- Не хранит Sender'ы, не знает о каналах.
+### `Component`
+- Узел дерева навигации. Хранит snapshot состояния + ссылку на Store.
+- `render(ui) -> Vec<Message>` — делегирует View-функции, возвращает сообщения.
+- `handle(msg)` — логирует/обрабатывает сообщение.
+- `sync_from_store()` — синхронизирует snapshot из Store (вызывается перед render).
+- `state() -> &State` — текущий snapshot для View.
+- Наследует `LifecycleObserver`.
 
-### `ViewModel`
-- Владеет состоянием и `Sender<Intent>` (получен из `ViewModelContext`).
-- `handle(cmd)` — обрабатывает интент от UI, отправляет в data layer через `self.cmd_tx`.
-- `on_event(evt)` — получает события из data layer, обновляет состояние.
-- `ViewModelContext` содержит `command_tx()` для клонирования Sender.
+### `StateStore<T>`
+- Реактивное состояние на `tokio::sync::watch`.
+- `update(f)` — атомарно изменить состояние (+ уведомить подписчиков).
+- `dispatch(msg, reducer)` — MVI-диспатч через reducer.
+- `state() -> T` — snapshot текущего состояния.
+- `subscribe() -> watch::Receiver<T>` — подписка на изменения.
+- `clone_state() -> Self` — копия с разделяемым каналом.
 
-### `LifecycleObserver`
-- Опциональные колбэки: `on_create/start/resume/pause/stop/destroy`.
+### `UiNotifier`
+- Инфраструктурный уведомитель. Вызывается в главном потоке.
+- `check()` — проверяет `mpsc::Receiver<()>` и при сигнале вызывает `repaint + wake`.
+- Не знает про Domain, Components, Reducer.
+
+### `ChildStack<C, Comp>`
+- Стек дочерних компонентов с управлением жизненным циклом.
+- `push / pop / replace / bring_to_front / clear`.
+- Аналог `ChildStack` из Decompose.
+
+## View — чистая функция
+
+```rust,ignore
+type ViewFn<S, M> = fn(state: &S, ui: &mut egui::Ui) -> Vec<M>;
+```
+
+View не хранит состояние, не знает о каналах, не имеет побочных эффектов.
+Функция легко тестируется и переиспользуется.
+
+## Каналы
+
+| Канал | Тип | Откуда → Куда |
+|-------|-----|---------------|
+| `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component → Data Layer |
+| `notify_tx` / `notify_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
+| `store` | `StateStore<T>` (watch) | Data Layer ↔ Component |
 
 ## Android Lifecycle (как обрабатывается в run.rs)
 
 | Событие | Действие |
 |---|---|
 | `InitWindow` | Пересоздать EGL surface, не трогать display/context/painter |
-| `Resume` | `activity.on_resume()`, `needs_redraw = true` |
-| `Pause` | `activity.on_pause()` |
-| `Stop` | `activity.on_stop()` — не чистить EGL |
-| `Destroy` | `activity.on_destroy()`, destroy painter/EGL, `break` из цикла |
-| `RedrawNeeded` | `needs_redraw = true` |
+| `Resume` | `app_instance.on_resume()` |
+| `Pause` | `app_instance.on_pause()` |
+| `Stop` | `app_instance.on_stop()` — не чистить EGL |
+| `Destroy` | `app_instance.on_destroy()`, destroy painter/EGL, `break` из цикла |
 
-## Интенты и события
-
-- `Intent` — интент от UI к data layer (enum).
-- `Event` — событие от data layer к ViewModel (enum).
-- Каналы создаются в `create_view_model()` через `ctx.view_model_context()`.
-- Data layer получает `(Receiver<Cmd>, Sender<Evt>)` через `take_data_layer_channels()`.
-- Sender для интентов хранится в ViewModel, клонируется из `ctx.command_tx()`.
+Lifecycle вызывается через `LifecycleObserver` на `Application`.
 
 ## Структура проекта
 
 ```
 src/
 ├── lib.rs              — экспорт публичных трейтов и модуля android
-├── activity.rs         — trait Activity
-├── application.rs      — trait Application + AppContext + AppConfig
-├── lifecycle.rs        — enum LifecycleState + trait LifecycleObserver
-├── view_model.rs       — trait ViewModel + ViewModelContext
+├── application.rs      — trait Application + AppConfig + AppState
+├── component.rs        — trait Component
+├── child_stack.rs      — ChildStack<C, Comp>
+├── store.rs            — StateStore<T> (реактивное состояние)
+├── ui_notifier.rs      — UiNotifier (инфраструктура)
+├── component_context.rs
+├── view.rs             — type ViewFn<S, M>
+├── lifecycle.rs        — LifecycleState + LifecycleObserver
 ├── error.rs            — AppError
+├── egui_subscriber.rs  — AndroidWakeHandle (устаревший, оставлен)
 ├── android/
 │   ├── mod.rs          — реэкспорт run()
 │   ├── egl_backend.rs  — EGL FFI bindings + EglState
 │   ├── input.rs        — InputState + process_input_events()
-│   └── run.rs          — run<A>() — главный цикл
-└── tests/              — 20+ тестов
+│   └── run.rs          — run<A: Application>() — событийный главный цикл
+└── tests/
+    ├── mod.rs
+    ├── error_tests.rs
+    ├── lifecycle_tests.rs
+    ├── integration_tests.rs  — 22 теста (MVI, store, component, navigation)
+    └── ui_notifier_tests.rs  — 5 тестов UiNotifier
 examples/
-└── counter/            — рабочий пример счётчика
+├── counter/            — старый пример (требует миграции)
+└── counter2/           — реактивный счётчик (Application + Component + Store)
 ```
 
 ## Зависимости (ключевые)
@@ -109,39 +151,63 @@ examples/
 | Крейт | Зачем |
 |---|---|
 | `egui` 0.31 | GUI-фреймворк |
-| `egui_glow` 0.31 | Рендеринг egui через OpenGL |
+| `egui_glow` 0.31 | Рендеринг через OpenGL |
 | `glow` 0.16 | OpenGL context |
-| `android-activity` 0.6 | Android NativeActivity |
+| `android-activity` 0.6 | NativeActivity |
 | `ndk` 0.9 | NDK bindings (NativeWindow) |
-| `libc` 0.2 | dlopen/dlsym для загрузки GL функций |
-| `raw-window-handle` 0.6 | Получение ANativeWindow* |
+| `libc` 0.2 | dlopen/dlsym для GL |
+| `tokio` 1 (sync) | watch::channel для StateStore |
+| `log` 0.4 + `android_logger` 0.14 | Логирование |
+
+Нет `crossbeam`, нет `OnceLock` — всё на стандартных `mpsc` + `tokio::sync::watch`.
+
+## Правила взаимодействия с агентом
+
+### Коммиты и push
+
+Агент **НЕ** выполняет `git commit` или `git push` без явного разрешения пользователя.
+
+Перед коммитом агент обязан:
+1. Показать `git diff --stat` или summary изменений.
+2. Показать предлагаемое сообщение коммита.
+3. Спросить: «Коммит?» и дождаться подтверждения.
+
+После коммита агент **НЕ** выполняет `git push` без отдельного разрешения.
 
 ## Важные правила
 
-1. **Не использовать `OnceLock` / глобальные статические переменные** для хранения Sender'ов. Sender хранится в самой ViewModel.
-   — *Почему:* `OnceLock` не сбрасывается между запусками процесса. После Back → повторный запуск старый Sender закрыт, новый `set()` возвращает `Err`, интенты уходят в никуда. Sender, сохранённый в полях ViewModel, создаётся заново при каждом создании процесса.
+1. **Не использовать `OnceLock` / глобальные статические переменные`
+1. **Не использовать `OnceLock` / глобальные статические переменные** для хранения Sender'ов.
+   Sender хранится в Application или Component.
+   — *Почему:* `OnceLock` не сбрасывается между запусками процесса.
 
-2. **Не вызывать `std::process::exit(0)`** в колбэках `on_back_pressed` или render — фреймворк сам завершает цикл через `break`.
-   — *Почему:* `exit(0)` убивает процесс мгновенно, не дожидаясь других потоков (RenderThread, data layer). Это вызывает `pthread_mutex_lock called on a destroyed mutex` и SIGABRT. `break` из цикла позволяет `run()` вернуться, и android-activity корректно завершает NativeActivity.
+2. **Не вызывать `std::process::exit(0)`** — фреймворк сам завершает цикл через `break`.
 
-3. **EGL display/context переживает InitWindow** — при смене окна пересоздаётся только surface, не context и не painter.
-   — *Почему:* При сворачивании/разворачивании Android уничтожает и создаёт заново `ANativeWindow`. Если каждый раз уничтожать EGL display/context, теряются все загруженные текстуры и шрифты. Пересоздание только surface сохраняет контекст, и `egui_glow::Painter` остаётся валидным.
+3. **EGL display/context переживает InitWindow** — при смене окна пересоздаётся
+   только surface.
 
-4. **`needs_redraw = true` на каждом кадре** — иначе UI не обновляется при событиях от data layer.
-   — *Почему:* Если не форсировать `needs_redraw`, рендер происходит только по внешним событиям (нажатие, RedrawNeeded). События от `poll_events()` не триггерят системный redraw, поэтому изменения состояния ViewModel не отобразятся до следующего touch-события.
+4. **Render возвращает `Vec<Message>`** — сообщения собираются в `render()`, потом
+   фреймворк обрабатывает их через `handle()`.
 
-5. **Render возвращает `Vec<Intent>`** — интенты собираются во время отрисовки, потом фреймворк диспатчит их в ViewModel.
-   — *Почему:* `render()` принимает `&ViewModel` (иммутабельно), а `dispatch()` требует `&mut ViewModel`. Вызов `dispatch()` внутри `egui_ctx.run()` создаёт пересечение заимствований. `Vec<Cmd>` разрывает последовательность: сначала читаем (`render`), потом пишем (`dispatch`).
+5. **Все комментарии, логи и строки ошибок — на русском.**
 
-6. **Все комментарии, логи и строки ошибок — на русском.**
+6. **`store.update()` — единственная точка изменения состояния.** Никаких прямых
+   присваиваний через `RwLock`.
+
+7. **Data layer после `store.update()` всегда шлёт `notify_tx.send(())`.**
+
+8. **Component синхронизируется из store через `sync_from_store()` в начале frame.**
+
+9. **Главный цикл событийный:** `poll_events(16ms)` + `notifier.check()` + `frame()`.
+   Никаких `poll()`, `on_event()`, `needs_redraw`.
 
 ## Сборка и запуск
 
 ```bash
-# Сборка под Android через xbuild
-cd examples/counter
+cd examples/counter2
 x run --device adb:XXXXXXXX
 
 # Тесты (на хосте)
 cargo test
+# Все 55 тестов должны проходить
 ```

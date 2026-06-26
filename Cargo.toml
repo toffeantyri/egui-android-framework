@@ -1,6 +1,6 @@
 [package]
 name = "egui-android-framework"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 edition = "2021"
 description = "Alpha: lightweight framework for running egui applications on Android"
 keywords = ["egui", "android", "gui", "framework", "gles"]
@@ -17,6 +17,7 @@ log = "0.4"
 egui = "0.31"
 egui_glow = { version = "0.31", optional = true }
 glow = { version = "0.16", optional = true }
+tokio = { version = "1", features = ["sync"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 egui_glow = { version = "0.31" }

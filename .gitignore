@@ -1,7 +1,4 @@
 /target
 /examples/counter/target
+/examples/counter2/target
 /examples/counter/Cargo.lock
-/examples/counter/target
-/examples/counter/Cargo.lock
-nul
-nul
