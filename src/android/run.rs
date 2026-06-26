@@ -63,42 +63,35 @@ pub fn run<A: Application>(app: AndroidApp) {
     let mut subscriber_initialized = false;
 
     loop {
-        input_state.clear();
-
         // --- Обработка событий жизненного цикла ---
         let mut destroy_requested = false;
         app.poll_events(Some(Duration::from_millis(16)), |event| match event {
             PollEvent::Wake | PollEvent::Timeout => {
-                // Wake — пробуждение от EguiRepaintSubscriber.
-                // Кадры и так идут постоянно, но Wake может прервать
-                // ожидание poll_events раньше.
+                // Wake от subscriber — он увидел изменение store.
             }
-            PollEvent::Main(e) => {
-                // Любое Main-событие (touch, клавиатура, lifecycle)
-                match e {
-                    MainEvent::InitWindow { .. } => {
-                        log::info!("Lifecycle: InitWindow");
-                        surface_needs_recreation = true;
-                    }
-                    MainEvent::Resume { .. } => {
-                        log::info!("Lifecycle: Resume");
-                        app_instance.on_resume();
-                    }
-                    MainEvent::Pause { .. } => {
-                        log::info!("Lifecycle: Pause");
-                        app_instance.on_pause();
-                    }
-                    MainEvent::Stop { .. } => {
-                        log::info!("Lifecycle: Stop");
-                        app_instance.on_stop();
-                    }
-                    MainEvent::Destroy { .. } => {
-                        log::info!("Lifecycle: Destroy");
-                        destroy_requested = true;
-                    }
-                    _ => {}
+            PollEvent::Main(e) => match e {
+                MainEvent::InitWindow { .. } => {
+                    log::info!("Lifecycle: InitWindow");
+                    surface_needs_recreation = true;
                 }
-            }
+                MainEvent::Resume { .. } => {
+                    log::info!("Lifecycle: Resume");
+                    app_instance.on_resume();
+                }
+                MainEvent::Pause { .. } => {
+                    log::info!("Lifecycle: Pause");
+                    app_instance.on_pause();
+                }
+                MainEvent::Stop { .. } => {
+                    log::info!("Lifecycle: Stop");
+                    app_instance.on_stop();
+                }
+                MainEvent::Destroy { .. } => {
+                    log::info!("Lifecycle: Destroy");
+                    destroy_requested = true;
+                }
+                _ => {}
+            },
             _ => {}
         });
 
@@ -204,10 +197,12 @@ pub fn run<A: Application>(app: AndroidApp) {
         }
 
         // Рендеринг — идёт постоянно с частотой target_fps.
-        // subscriber может разбудить цикл раньше через Wake,
-        // но даже без событий кадры продолжаются для анимаций и таймеров.
+        // Рендеринг — всегда после poll_events
         let now = Instant::now();
-        if now.duration_since(last_frame) >= target_dt {
+        let can_render = egl_state.is_some()
+            && egui_painter.is_some()
+            && now.duration_since(last_frame) >= target_dt;
+        if can_render {
             last_frame = now;
 
             if let (Some(ref mut painter), Some(ref state)) = (&mut egui_painter, &egl_state) {
