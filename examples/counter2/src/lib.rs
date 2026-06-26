@@ -1,10 +1,10 @@
-//! Пример счётчика на Decompose-style архитектуре.
+//! Пример счётчика на реактивной архитектуре (StateStore + EguiRepaintSubscriber).
 //!
 //! Демонстрирует:
 //! - `Component` + чистая View-функция
 //! - `Application` как корень DI
-//! - Data layer в фоновом потоке через mpsc
-//! - `poll()` — опрос событий из data layer
+//! - Data layer с `StateStore` (без ручного poll())
+//! - `EguiRepaintSubscriber` для реактивного обновления UI
 
 pub mod app;
 pub mod component;

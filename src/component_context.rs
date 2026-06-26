@@ -2,12 +2,13 @@
 //!
 //! Передаётся в компонент при создании и предоставляет:
 //! - Навигационный handle (push/pop/replace родительского стека).
-//! - Data layer handle (для отправки команд и получения событий).
+//! - Data layer handle (для отправки команд).
+//! - Доступ к [`StateStore`] для реактивного получения состояния.
 //!
-//! Каналы реализованы через стандартный `std::sync::mpsc`,
-//! Sender'ы клонируются для раздачи дочерним компонентам.
+//! Каналы реализованы через стандартный `std::sync::mpsc`.
 
-use std::sync::{mpsc, Arc, Mutex};
+use crate::store::StateStore;
+use std::sync::mpsc;
 
 /// Контекст, передаваемый в компонент при создании.
 ///
@@ -18,28 +19,28 @@ use std::sync::{mpsc, Arc, Mutex};
 ///
 /// * `NavEvent` — тип навигационного события (например, `NavEvent::Push(Screen::Home)`).
 /// * `DataCmd` — тип команды для data layer.
-/// * `DataEvt` — тип события от data layer.
-pub struct ComponentContext<NavEvent, DataCmd, DataEvt>
+/// * `State` — тип состояния приложения (хранится в `StateStore`).
+pub struct ComponentContext<NavEvent, DataCmd, State>
 where
     NavEvent: 'static,
     DataCmd: Send + 'static,
-    DataEvt: Send + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     /// Отправитель навигационных событий в родительский стек.
     nav_tx: Option<mpsc::Sender<NavEvent>>,
     /// Отправитель команд в data layer.
     data_cmd_tx: mpsc::Sender<DataCmd>,
-    /// Получатель событий от data layer (разделённый через Arc).
-    data_evt_rx: Arc<Mutex<mpsc::Receiver<DataEvt>>>,
+    /// Реактивное состояние приложения.
+    store: StateStore<State>,
     /// Флаг: контекст жив (не уничтожен).
     alive: bool,
 }
 
-impl<NavEvent, DataCmd, DataEvt> ComponentContext<NavEvent, DataCmd, DataEvt>
+impl<NavEvent, DataCmd, State> ComponentContext<NavEvent, DataCmd, State>
 where
     NavEvent: 'static,
     DataCmd: Send + 'static,
-    DataEvt: Send + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     /// Создать новый контекст.
     ///
@@ -48,12 +49,12 @@ where
     pub fn new(
         nav_tx: Option<mpsc::Sender<NavEvent>>,
         data_cmd_tx: mpsc::Sender<DataCmd>,
-        data_evt_rx: Arc<Mutex<mpsc::Receiver<DataEvt>>>,
+        store: StateStore<State>,
     ) -> Self {
         Self {
             nav_tx,
             data_cmd_tx,
-            data_evt_rx,
+            store,
             alive: true,
         }
     }
@@ -73,14 +74,12 @@ where
         let _ = self.data_cmd_tx.send(cmd);
     }
 
-    /// Забрать накопившиеся события из data layer.
-    pub fn poll_events(&self) -> Vec<DataEvt> {
-        let rx = self.data_evt_rx.lock().unwrap();
-        let mut events = Vec::new();
-        while let Ok(evt) = rx.try_recv() {
-            events.push(evt);
-        }
-        events
+    /// Получить доступ к реактивному состоянию приложения.
+    ///
+    /// Через `store.state()` можно получить snapshot,
+    /// через `store.subscribe()` — подписаться на изменения.
+    pub fn store(&self) -> &StateStore<State> {
+        &self.store
     }
 
     /// Получить отправитель команд (для клонирования).
@@ -105,39 +104,55 @@ where
     pub fn is_alive(&self) -> bool {
         self.alive
     }
+
+    /// **Устарел.** Используйте `store().state()` для получения snapshot
+    /// или `store().subscribe()` для реактивной подписки.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Используйте store().state() вместо poll_events()"
+    )]
+    pub fn poll_events(&self) -> Vec<DataEvt> {
+        log::warn!("poll_events() устарел — состояние теперь в StateStore");
+        vec![]
+    }
 }
+
+/// Заглушка для обратной совместимости с `poll_events()`.
+/// Удалить в следующей версии.
+#[doc(hidden)]
+pub type DataEvt = ();
 
 /// Хранилище для ComponentContext.
 ///
 /// Позволяет создавать новые контексты для дочерних компонентов,
-/// разделяя общий `Arc<Mutex<Receiver<DataEvt>>>`.
-pub struct ComponentContextHandle<NavEvent, DataCmd, DataEvt>
+/// разделяя общий `StateStore` и отправители.
+pub struct ComponentContextHandle<NavEvent, DataCmd, State>
 where
     NavEvent: 'static,
     DataCmd: Send + 'static,
-    DataEvt: Send + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     nav_tx: mpsc::Sender<NavEvent>,
     data_cmd_tx: mpsc::Sender<DataCmd>,
-    data_evt_rx: Arc<Mutex<mpsc::Receiver<DataEvt>>>,
+    store: StateStore<State>,
 }
 
-impl<NavEvent, DataCmd, DataEvt> ComponentContextHandle<NavEvent, DataCmd, DataEvt>
+impl<NavEvent, DataCmd, State> ComponentContextHandle<NavEvent, DataCmd, State>
 where
     NavEvent: 'static,
     DataCmd: Send + 'static,
-    DataEvt: Send + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     /// Создать новый handle.
     pub fn new(
         nav_tx: mpsc::Sender<NavEvent>,
         data_cmd_tx: mpsc::Sender<DataCmd>,
-        data_evt_rx: Arc<Mutex<mpsc::Receiver<DataEvt>>>,
+        store: StateStore<State>,
     ) -> Self {
         Self {
             nav_tx,
             data_cmd_tx,
-            data_evt_rx,
+            store,
         }
     }
 
@@ -145,12 +160,12 @@ where
     ///
     /// Дочерний компонент получает тот же навигационный Sender (отправит
     /// событие родительскому стеку), тот же data_cmd Sender и разделяемый
-    /// Receiver событий от data layer.
-    pub fn create_context(&self) -> ComponentContext<NavEvent, DataCmd, DataEvt> {
+    /// StateStore.
+    pub fn create_context(&self) -> ComponentContext<NavEvent, DataCmd, State> {
         ComponentContext::new(
             Some(self.nav_tx.clone()),
             self.data_cmd_tx.clone(),
-            Arc::clone(&self.data_evt_rx),
+            self.store.clone_state(),
         )
     }
 }

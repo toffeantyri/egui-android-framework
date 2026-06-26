@@ -23,7 +23,7 @@
 //! `on_resume()` / `on_pause()` / `on_destroy()` пробрасываются
 //! в RootComponent, который делегирует активному компоненту.
 
-use crate::component::{Component, DataEvent};
+use crate::component::Component;
 use crate::component_context::ComponentContext;
 use crate::LifecycleObserver;
 
@@ -56,7 +56,11 @@ pub trait Application: LifecycleObserver + Sized + 'static {
 
     /// Опрос событий из data layer.
     ///
+    /// **Устарел.** Используйте `StateStore` + `EguiRepaintSubscriber`
+    /// для реактивного получения событий.
+    ///
     /// Вызывается в начале каждого кадра до `frame()`.
+    #[deprecated(since = "0.2.0", note = "Используйте StateStore вместо ручного poll()")]
     fn poll(&mut self) {}
 
     /// Один кадр: рендеринг компонента и обработка сообщений.
@@ -121,7 +125,7 @@ impl Default for AppConfig {
 /// ```
 pub type ComponentFactory<OutComp> = fn(
     config: &<OutComp as Component>::State,
-    ctx: &mut ComponentContext<<OutComp as Component>::Message, (), DataEvent>,
+    ctx: &mut ComponentContext<<OutComp as Component>::Message, (), ()>,
 ) -> OutComp;
 
 // ─── DataLayerHandle (каркас) ──────────────────────────────────────────────────

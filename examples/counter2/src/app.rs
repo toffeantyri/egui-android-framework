@@ -1,19 +1,28 @@
 //! Application счётчика — корень DI.
+//!
+//! Использует `StateStore` для реактивного состояния.
+//! Больше не нужен ручной `poll()` — `EguiRepaintSubscriber`
+//! автоматически вызывает `request_repaint()` и `wake()` при изменении.
 
 use std::sync::mpsc;
 
-use egui_android_framework::{AppConfig, Application, Component, LifecycleObserver};
+use egui_android_framework::{
+    egui_subscriber::EguiRepaintSubscriber, store::StateStore, AppConfig, Application, Component,
+    LifecycleObserver,
+};
 
 use crate::component::CounterComponent;
 use crate::data_layer::data_layer_worker;
-use crate::msg::{Evt, Msg};
+use crate::msg::{CounterState, Msg};
 
 /// Приложение-счётчик.
 pub struct CounterApp {
     root: CounterComponent,
     config: AppConfig,
+    store: StateStore<CounterState>,
     cmd_tx: mpsc::Sender<Msg>,
-    evt_rx: mpsc::Receiver<Evt>,
+    /// Подписчик живет пока жив App (RAII).
+    _subscriber: Option<EguiRepaintSubscriber>,
 }
 
 impl LifecycleObserver for CounterApp {}
@@ -25,20 +34,26 @@ impl Application for CounterApp {
         let mut config = AppConfig::default();
         config.log_tag = "egui-counter2".into();
 
-        // Создаём каналы для data layer
-        let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>();
-        let (evt_tx, evt_rx) = mpsc::channel::<Evt>();
+        // Создаём реактивное состояние
+        let store = StateStore::new(CounterState { count: 0 });
 
-        // Запускаем data layer в фоне
+        // Создаём каналы для data layer (старый mpsc для фонового потока)
+        let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>();
+        let store_for_worker = store.clone_state();
+
+        // Запускаем data layer в фоне — он теперь пишет в StateStore
         std::thread::spawn(move || {
-            data_layer_worker(cmd_rx, evt_tx);
+            data_layer_worker(cmd_rx, store_for_worker);
         });
 
+        // Подписчик будет создан позже, когда появится egui::Context и waker.
+        // Пока оставляем None — run.rs сам создаст подписку.
         Self {
             root: CounterComponent { count: 0 },
             config,
+            store,
             cmd_tx,
-            evt_rx,
+            _subscriber: None,
         }
     }
 
@@ -59,10 +74,8 @@ impl Application for CounterApp {
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
-        // 1. Опрашиваем события от data layer, обновляем состояние компонента
-        while let Ok(evt) = self.evt_rx.try_recv() {
-            self.root.apply_event(evt);
-        }
+        // 1. Получаем snapshot состояния из store (реактивно, без poll)
+        let _state = self.store.state();
 
         // 2. Запускаем egui-кадр, внутри рендерим компонент
         let mut messages: Vec<Msg> = Vec::new();

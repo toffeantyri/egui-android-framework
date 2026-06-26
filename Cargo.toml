@@ -17,6 +17,7 @@ log = "0.4"
 egui = "0.31"
 egui_glow = { version = "0.31", optional = true }
 glow = { version = "0.16", optional = true }
+tokio = { version = "1", features = ["sync"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 egui_glow = { version = "0.31" }

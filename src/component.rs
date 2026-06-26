@@ -37,7 +37,14 @@ pub trait Component: LifecycleObserver + Send + 'static {
 
     /// Получить событие из data layer.
     ///
+    /// **Устарел.** Используйте `StateStore` + `EguiRepaintSubscriber`
+    /// для реактивного получения событий.
+    ///
     /// Вызывается фреймворком после `poll()`, перед `frame()`.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Используйте StateStore вместо ручного on_event()"
+    )]
     fn on_event(&mut self, _evt: DataEvent) {}
 
     /// Получить ссылку на текущее состояние.
