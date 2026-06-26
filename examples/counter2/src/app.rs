@@ -1,14 +1,14 @@
 //! Application счётчика — корень DI.
 //!
 //! Использует `StateStore` для реактивного состояния.
-//! `EguiRepaintSubscriber` создаётся через `init_subscriber()`.
-//! Нет ручного poll() — UI обновляется реактивно.
+//! Уведомления об изменении — через mpsc канал, проверяемый
+//! `UiNotifier` в главном цикле. Никаких фоновых потоков.
 
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    store::StateStore, AndroidWakeHandle, AppConfig, Application, Component, EguiRepaintSubscriber,
-    LifecycleObserver,
+    store::StateStore, AndroidWakeHandle, AppConfig, Application, Component, LifecycleObserver,
+    UiNotifier,
 };
 
 use crate::component::CounterComponent;
@@ -19,10 +19,9 @@ use crate::msg::{CounterState, Msg};
 pub struct CounterApp {
     root: CounterComponent,
     config: AppConfig,
-    store: StateStore<CounterState>,
     cmd_tx: mpsc::Sender<Msg>,
-    /// Подписчик живёт пока жив App (RAII).
-    _subscriber: Option<EguiRepaintSubscriber>,
+    /// Канал уведомлений от data layer.
+    notify_rx: mpsc::Receiver<()>,
 }
 
 impl LifecycleObserver for CounterApp {}
@@ -37,10 +36,13 @@ impl Application for CounterApp {
         let store = StateStore::new(CounterState { count: 0 });
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>();
+        // Канал уведомлений: data layer → Runtime
+        let (notify_tx, notify_rx) = mpsc::channel::<()>();
+
         let store_for_worker = store.clone_state();
 
         std::thread::spawn(move || {
-            data_layer_worker(cmd_rx, store_for_worker);
+            data_layer_worker(cmd_rx, store_for_worker, notify_tx);
         });
 
         let root = CounterComponent::new(store.clone_state());
@@ -48,9 +50,8 @@ impl Application for CounterApp {
         Self {
             root,
             config,
-            store,
             cmd_tx,
-            _subscriber: None,
+            notify_rx,
         }
     }
 
@@ -70,11 +71,16 @@ impl Application for CounterApp {
         &mut self.config
     }
 
-    fn init_subscriber(&mut self, ctx: &egui::Context, wake: AndroidWakeHandle) {
-        log::info!("CounterApp: создаём реактивного подписчика");
-        let rx = self.store.subscribe();
-        let subscriber = EguiRepaintSubscriber::new(rx, ctx.clone(), Some(wake));
-        self._subscriber = Some(subscriber);
+    fn create_notifier(
+        &mut self,
+        ctx: &egui::Context,
+        wake: AndroidWakeHandle,
+    ) -> Option<UiNotifier> {
+        log::info!("CounterApp: создаём UiNotifier");
+        // Передаём notify_rx в UiNotifier — он будет проверять
+        // его в главном цикле без блокировок.
+        let rx = std::mem::replace(&mut self.notify_rx, mpsc::channel().1);
+        Some(UiNotifier::new(ctx.clone(), Some(wake), rx))
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {

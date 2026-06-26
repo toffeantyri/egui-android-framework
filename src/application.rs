@@ -54,42 +54,19 @@ pub trait Application: LifecycleObserver + Sized + 'static {
     /// Получить мутабельную ссылку на конфиг.
     fn config_mut(&mut self) -> &mut AppConfig;
 
-    /// Опрос событий из data layer.
+    /// Создать инфраструктурный `UiNotifier`.
     ///
-    /// **Устарел.** Используйте `StateStore` + `EguiRepaintSubscriber`
-    /// для реактивного получения событий.
+    /// Вызывается Runtime после инициализации EGL.
+    /// Application передаёт `Receiver<()>` — канал уведомлений
+    /// от data layer. Data layer отправляет `()` после каждого
+    /// изменения состояния.
     ///
-    /// Вызывается в начале каждого кадра до `frame()`.
-    #[deprecated(since = "0.2.0", note = "Используйте StateStore вместо ручного poll()")]
-    fn poll(&mut self) {}
-
-    /// Установить реактивного подписчика.
-    ///
-    /// Вызывается фреймворком после инициализации EGL, чтобы
-    /// Application мог сохранить `EguiRepaintSubscriber` и
-    /// через RAII управлять его временем жизни.
-    ///
-    /// Реализация по умолчанию — игнорирует (для обратной совместимости).
-    fn set_subscriber(&mut self, _subscriber: crate::EguiRepaintSubscriber) {}
-
-    /// Инициализировать реактивного подписчика.
-    ///
-    /// Вызывается фреймворком один раз перед главным циклом.
-    /// Application должен подписаться на свой StateStore сохранить
-    /// `EguiRepaintSubscriber` в себе (RAII).
-    ///
-    /// Реализация по умолчанию ничего не делает — polling не отключается.
-    fn init_subscriber(&mut self, _ctx: &egui::Context, _wake: crate::AndroidWakeHandle) {}
-
-    /// Получить `watch::Receiver` для подписки на изменения состояния.
-    ///
-    /// Если Application использует `StateStore`, он должен вернуть
-    /// `Some(store.subscribe())`. Фреймворк создаст `EguiRepaintSubscriber`,
-    /// который будет вызывать `request_repaint()` и `wake()` при каждом
-    /// изменении состояния.
-    ///
-    /// Реализация по умолчанию возвращает `None` (для обратной совместимости).
-    fn subscribe_to_state(&self) -> Option<tokio::sync::watch::Receiver<()>> {
+    /// Реализация по умолчанию возвращает `None`.
+    fn create_notifier(
+        &mut self,
+        _ctx: &egui::Context,
+        _wake: crate::AndroidWakeHandle,
+    ) -> Option<crate::UiNotifier> {
         None
     }
 
