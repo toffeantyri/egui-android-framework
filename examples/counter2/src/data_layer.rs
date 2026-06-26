@@ -1,22 +1,22 @@
 //! Data layer для примера счётчика.
 //!
-//! Фоновая задача: получает команды, изменяет состояние через StateStore.
-//! Больше не использует mpsc для отправки событий обратно — пишет напрямую
-//! в реактивный store, что вызывает request_repaint() + wake() автоматически.
+//! Получает команды, пишет результат напрямую в StateStore.
+//! Не шлёт события через mpsc — изменение состояния публикуется
+//! через store.update(), что автоматически вызывает request_repaint() + wake().
 
 use egui_android_framework::store::StateStore;
 
 use crate::msg::{CounterState, Msg};
 use std::sync::mpsc;
 
-/// Фоновая задача: получает команды, изменяет состояние через StateStore.
+/// Фоновая задача: получает команды, обновляет StateStore.
 pub fn data_layer_worker(cmd_rx: mpsc::Receiver<Msg>, store: StateStore<CounterState>) {
     loop {
         match cmd_rx.recv() {
             Ok(Msg::Increment) => {
-                // Единственная точка изменения состояния — через store.update()
-                // Это автоматически уведомит всех подписчиков (EguiRepaintSubscriber),
-                // который вызовет request_repaint() и wake().
+                // Единственная точка изменения состояния.
+                // После update() все подписчики (EguiRepaintSubscriber)
+                // получат уведомление → request_repaint() → wake() → новый кадр.
                 store.update(|state| {
                     state.count = state.count.wrapping_add(1);
                     log::info!("DataLayer: count -> {}", state.count);

@@ -13,8 +13,6 @@ use android_activity::{AndroidApp, MainEvent, PollEvent};
 use crate::android::egl_backend::EglState;
 use crate::android::input::{self, InputState};
 use crate::application::Application;
-use crate::egui_subscriber::AndroidWakeHandle;
-use crate::LifecycleObserver;
 
 use glow::HasContext;
 
@@ -56,22 +54,21 @@ pub fn run<A: Application>(app: AndroidApp) {
     // Создаём waker для Android event loop.
     // Позволяет реактивно пробуждать главный цикл при изменении состояния.
     let waker = app.create_waker();
-    let wake_handle = AndroidWakeHandle::new(move || {
+    let wake_handle = crate::AndroidWakeHandle::new(move || {
         waker.wake();
     });
 
-    // Сохраняем waker в опциональном handle, чтобы subscriber мог его использовать.
-    // Application может предоставить store через свой API (см. пример counter2).
-    let _wake_handle_for_subscriber = wake_handle;
-
     log::info!("run: Android waker создан");
+
+    // Флаг — был ли уже инициализирован subscriber
+    let mut subscriber_initialized = false;
 
     loop {
         input_state.clear();
 
         // --- Обработка событий жизненного цикла ---
         let mut destroy_requested = false;
-        app.poll_events(None, |event| match event {
+        app.poll_events(Some(Duration::from_millis(16)), |event| match event {
             PollEvent::Wake | PollEvent::Timeout => {
                 // Wake — пробуждение от EguiRepaintSubscriber
                 needs_redraw = true;
@@ -189,6 +186,16 @@ pub fn run<A: Application>(app: AndroidApp) {
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
                                 needs_redraw = true;
+
+                                // После инициализации EGL создаём реактивного подписчика.
+                                // Раньше — subscriber поток крашил процесс до EGL init.
+                                if !subscriber_initialized {
+                                    subscriber_initialized = true;
+                                    log::info!("run: инициализируем реактивного подписчика");
+                                    app_instance.init_subscriber(&egui_ctx, wake_handle.clone());
+                                    // После создания subscriber форсируем первый кадр
+                                    needs_redraw = true;
+                                }
                             }
                             Err(e) => {
                                 log::error!("Painter::new не удался: {:?}", e);
@@ -202,13 +209,9 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // --- Рендеринг ---
-        // `needs_redraw = true` теперь не форсируется на каждом кадре.
-        // Вместо этого он устанавливается при:
-        // - Wake от EguiRepaintSubscriber
-        // - InitWindow / Resume / RedrawNeeded
-        // - После инициализации EGL
-        // Это сокращает количество лишних перерисовок.
+        // Рендеринг.
+        // needs_redraw устанавливается при Wake (от subscriber),
+        // Resume, InitWindow, RedrawNeeded.
         let now = Instant::now();
         if needs_redraw && now.duration_since(last_frame) >= target_dt {
             needs_redraw = false;
@@ -236,12 +239,8 @@ pub fn run<A: Application>(app: AndroidApp) {
                     ..egui::RawInput::default()
                 };
 
-                // `poll()` больше не нужен — состояние обновляется реактивно
-                // через StateStore + EguiRepaintSubscriber.
-                // Старый poll() помечен как deprecated, но оставлен для
-                // обратной совместимости.
-                #[allow(deprecated)]
-                app_instance.poll();
+                // subscriber реактивно вызывает request_repaint() + wake()
+                // при изменении состояния. poll() не нужен.
 
                 let full_output = app_instance.frame(&egui_ctx, raw_input);
 
@@ -271,10 +270,8 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
 
-        // Небольшой sleep для снижения нагрузки на CPU, когда
-        // ничего не происходит. При wake() от EguiRepaintSubscriber
-        // цикл проснётся раньше.
-        std::thread::sleep(Duration::from_millis(10));
+        // poll_events с таймаутом 16ms уже даёт паузу.
+        // Дополнительный sleep не нужен.
     }
 }
 

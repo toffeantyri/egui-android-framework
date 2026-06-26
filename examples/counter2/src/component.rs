@@ -1,16 +1,34 @@
 //! Компонент счётчика.
 //!
-//! Получает состояние из `StateStore` реактивно.
-//! Не хранит каналы — данные приходят через store.
+//! Читает состояние из `StateStore` реактивно.
 
-use egui_android_framework::{Component, LifecycleObserver};
+use egui_android_framework::{store::StateStore, Component, LifecycleObserver};
 
-use crate::msg::Msg;
+use crate::msg::{CounterState, Msg};
 use crate::view::counter_view;
 
-/// Компонент счётчика: хранит состояние.
+/// Компонент счётчика.
 pub struct CounterComponent {
-    pub count: u32,
+    /// Snapshot текущего состояния.
+    count: u32,
+    /// Реактивное состояние — источник истины.
+    store: StateStore<CounterState>,
+}
+
+impl CounterComponent {
+    pub fn new(store: StateStore<CounterState>) -> Self {
+        let count = store.state().count;
+        Self { count, store }
+    }
+
+    /// Синхронизировать count из store.
+    pub fn sync_from_store(&mut self) {
+        self.count = self.store.state().count;
+    }
+
+    pub fn get_count(&self) -> u32 {
+        self.count
+    }
 }
 
 impl LifecycleObserver for CounterComponent {}
@@ -26,8 +44,7 @@ impl Component for CounterComponent {
     fn handle(&mut self, msg: Self::Message) {
         match msg {
             Msg::Increment => {
-                log::info!("Component: handle Increment — отправляем в data layer");
-                // Данные обновятся реактивно через StateStore
+                log::info!("Component: handle Increment — data layer обновит store");
             }
         }
     }

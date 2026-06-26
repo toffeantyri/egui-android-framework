@@ -74,6 +74,7 @@ impl EguiRepaintSubscriber {
                     // Проверяем, появилось ли новое значение
                     match rx.has_changed() {
                         Ok(true) => {
+                            log::info!("EguiSubscriber: изменение обнаружено, вызываем request_repaint + wake");
                             // Помечаем как прочитанное, чтобы has_changed()
                             // снова вернул true только при следующем send()
                             let _ = rx.borrow_and_update();
@@ -138,14 +139,22 @@ impl Drop for EguiRepaintSubscriber {
 /// let wake = AndroidWakeHandle::new(move || { let _ = app.wake(); });
 /// ```
 pub struct AndroidWakeHandle {
-    wake_fn: Box<dyn Fn() + Send>,
+    wake_fn: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Clone for AndroidWakeHandle {
+    fn clone(&self) -> Self {
+        Self {
+            wake_fn: Arc::clone(&self.wake_fn),
+        }
+    }
 }
 
 impl AndroidWakeHandle {
     /// Создать новый handle.
-    pub fn new(wake_fn: impl Fn() + Send + 'static) -> Self {
+    pub fn new(wake_fn: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
-            wake_fn: Box::new(wake_fn),
+            wake_fn: Arc::new(wake_fn),
         }
     }
 

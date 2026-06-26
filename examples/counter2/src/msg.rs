@@ -1,7 +1,7 @@
-//! Типы сообщений и состояния для примера счётчика.
+//! Типы сообщений для примера счётчика.
 
 /// Состояние счётчика (хранится в StateStore).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct CounterState {
     pub count: u32,
 }
@@ -10,13 +10,4 @@ pub struct CounterState {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Increment,
-}
-
-/// Событие от data layer.
-///
-/// **Устарел.** Используйте `StateStore<CounterState>` вместо mpsc-канала.
-/// События публикуются через `store.update()` и приходят реактивно.
-#[derive(Debug)]
-pub enum Evt {
-    CountUpdated(u32),
 }
