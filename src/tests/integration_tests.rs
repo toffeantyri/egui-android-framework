@@ -56,7 +56,7 @@ impl Component for MockComponent {
     type State = u32;
     type Message = MockMsg;
 
-    fn render(&self, ui: &mut egui::Ui) -> Vec<Self::Message> {
+    fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
         // Не используем CentralPanel — тесты вызывают render внутри ctx.run()
         if self.value == 0 {
             vec![MockMsg::Incr]
@@ -449,4 +449,211 @@ fn test_app_full_integration() {
     // После обработки сообщений — состояние должно обновиться
     assert_eq!(*app.root_ref().state(), 1);
     assert_eq!(app.root_ref().handle_log, vec!["Incr"]);
+}
+
+// ─── Тесты: Store + канал уведомлений ─────────────────────────────────────
+
+#[test]
+fn test_store_update_triggers_notify_tx() {
+    use crate::store::StateStore;
+    use std::sync::mpsc;
+
+    let store = StateStore::new(0u32);
+    let (notify_tx, notify_rx) = mpsc::channel::<()>();
+
+    // Симулируем data layer: обновляем store, шлём уведомление
+    store.update(|s| *s += 1);
+    let _ = notify_tx.send(());
+
+    // notify_rx должен получить сигнал
+    assert!(notify_rx.try_recv().is_ok());
+    // Состояние обновлено
+    assert_eq!(store.state(), 1);
+}
+
+#[test]
+fn test_store_clone_state_shares_channel() {
+    use crate::store::StateStore;
+
+    let store = StateStore::new(0u32);
+    let store_clone = store.clone_state();
+
+    // Клон меняет состояние
+    store_clone.update(|s| *s = 42);
+
+    // Оригинал видит изменение
+    assert_eq!(store.state(), 42);
+
+    // Подписчик оригинала тоже видит
+    let mut rx = store.subscribe();
+    store.update(|s| *s = 99);
+    assert!(rx.has_changed().unwrap());
+    let _ = rx.borrow_and_update();
+    assert_eq!(*rx.borrow(), 99);
+}
+
+// ─── Тесты: Component синхронизация из store ─────────────────────────────
+
+#[test]
+fn test_component_syncs_from_store() {
+    use crate::component::Component;
+    use crate::store::StateStore;
+
+    #[derive(Clone, Debug, PartialEq, Default)]
+    struct SimpleState {
+        value: u32,
+    }
+
+    struct SyncingComponent {
+        value: u32,
+        store: StateStore<SimpleState>,
+    }
+
+    impl LifecycleObserver for SyncingComponent {}
+
+    impl Component for SyncingComponent {
+        type State = u32;
+        type Message = ();
+        fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
+            vec![]
+        }
+        fn handle(&mut self, _msg: Self::Message) {}
+        fn state(&self) -> &Self::State {
+            &self.value
+        }
+    }
+
+    impl SyncingComponent {
+        fn new(store: StateStore<SimpleState>) -> Self {
+            let value = store.state().value;
+            Self { value, store }
+        }
+        fn sync_from_store(&mut self) {
+            self.value = self.store.state().value;
+        }
+    }
+
+    let store = StateStore::new(SimpleState { value: 0 });
+    let mut comp = SyncingComponent::new(store.clone_state());
+
+    // Начальное значение
+    assert_eq!(comp.value, 0);
+
+    // Data layer меняет store
+    store.update(|s| s.value = 42);
+
+    // Компонент синхронизируется
+    comp.sync_from_store();
+    assert_eq!(comp.value, 42);
+
+    // Ещё одно изменение
+    store.update(|s| s.value = 99);
+    comp.sync_from_store();
+    assert_eq!(comp.value, 99);
+}
+
+#[test]
+fn test_full_mvi_flow_state_store_only() {
+    // Тестирует полный MVI-поток без Android/egui зависимостей:
+    // View возвращает Message → handle обрабатывает → store обновляется
+    use crate::component::Component;
+    use crate::store::StateStore;
+
+    #[derive(Clone, Debug, PartialEq, Default)]
+    struct CounterState {
+        count: u32,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum CounterMsg {
+        Increment,
+    }
+
+    struct CounterComponent {
+        count: u32,
+        store: StateStore<CounterState>,
+    }
+
+    impl LifecycleObserver for CounterComponent {}
+
+    impl Component for CounterComponent {
+        type State = u32;
+        type Message = CounterMsg;
+        fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
+            if self.count < 5 {
+                vec![CounterMsg::Increment]
+            } else {
+                vec![]
+            }
+        }
+        fn handle(&mut self, msg: Self::Message) {
+            if let CounterMsg::Increment = msg {
+                self.store.update(|s| s.count += 1);
+            }
+        }
+        fn state(&self) -> &Self::State {
+            &self.count
+        }
+    }
+
+    impl CounterComponent {
+        fn new(store: StateStore<CounterState>) -> Self {
+            let count = store.state().count;
+            Self { count, store }
+        }
+        fn sync_from_store(&mut self) {
+            self.count = self.store.state().count;
+        }
+    }
+
+    let store = StateStore::new(CounterState { count: 0 });
+    let mut comp = CounterComponent::new(store.clone_state());
+
+    // Симулируем 5 кадров: render → handle → sync
+    for frame in 1..=5 {
+        let msgs = {
+            let ctx = egui::Context::default();
+            let raw = egui::RawInput::default();
+            let mut msgs = Vec::new();
+            let _ = ctx.run(raw, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    msgs = comp.render(ui);
+                });
+            });
+            msgs
+        };
+
+        assert!(!msgs.is_empty(), "Кадр {frame}: сообщения должны быть");
+        for msg in msgs {
+            comp.handle(msg);
+        }
+
+        // Синхронизация из store
+        comp.sync_from_store();
+
+        // После каждого кадра count увеличивается
+        assert_eq!(
+            comp.count, frame as u32,
+            "После {frame} кадров count должен быть {frame}"
+        );
+    }
+
+    // На 6 кадре render уже не возвращает сообщений
+    comp.sync_from_store();
+    let msgs = {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput::default();
+        let mut msgs = Vec::new();
+        let _ = ctx.run(raw, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                msgs = comp.render(ui);
+            });
+        });
+        msgs
+    };
+    assert!(
+        msgs.is_empty(),
+        "count >= 5 — render не должен возвращать сообщений"
+    );
+    assert_eq!(comp.count, 5);
 }
