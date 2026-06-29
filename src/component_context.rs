@@ -104,23 +104,7 @@ where
     pub fn is_alive(&self) -> bool {
         self.alive
     }
-
-    /// **Устарел.** Используйте `store().state()` для получения snapshot
-    /// или `store().subscribe()` для реактивной подписки.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Используйте store().state() вместо poll_events()"
-    )]
-    pub fn poll_events(&self) -> Vec<DataEvt> {
-        log::warn!("poll_events() устарел — состояние теперь в StateStore");
-        vec![]
-    }
 }
-
-/// Заглушка для обратной совместимости с `poll_events()`.
-/// Удалить в следующей версии.
-#[doc(hidden)]
-pub type DataEvt = ();
 
 /// Хранилище для ComponentContext.
 ///

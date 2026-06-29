@@ -13,7 +13,7 @@ use android_activity::{AndroidApp, MainEvent, PollEvent};
 use crate::android::egl_backend::EglState;
 use crate::android::input::{self, InputState};
 use crate::application::Application;
-use crate::ui_notifier::UiNotifier;
+use crate::ui_notifier::{AndroidWakeHandle, UiNotifier};
 
 use glow::HasContext;
 
@@ -44,7 +44,7 @@ pub fn run<A: Application>(app: AndroidApp) {
 
     // Создаём waker для Android event loop.
     let waker = app.create_waker();
-    let wake_handle = crate::AndroidWakeHandle::new(move || {
+    let wake_handle = AndroidWakeHandle::new(move || {
         waker.wake();
     });
     log::info!("run: Android waker создан");

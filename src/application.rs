@@ -65,8 +65,8 @@ pub trait Application: LifecycleObserver + Sized + 'static {
     fn create_notifier(
         &mut self,
         _ctx: &egui::Context,
-        _wake: crate::AndroidWakeHandle,
-    ) -> Option<crate::UiNotifier> {
+        _wake: crate::ui_notifier::AndroidWakeHandle,
+    ) -> Option<crate::ui_notifier::UiNotifier> {
         None
     }
 

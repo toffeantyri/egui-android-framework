@@ -35,27 +35,6 @@ pub trait Component: LifecycleObserver + Send + 'static {
     /// Обработать сообщение от View-функции.
     fn handle(&mut self, msg: Self::Message);
 
-    /// Получить событие из data layer.
-    ///
-    /// **Устарел.** Используйте `StateStore` + `EguiRepaintSubscriber`
-    /// для реактивного получения событий.
-    ///
-    /// Вызывается фреймворком после `poll()`, перед `frame()`.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Используйте StateStore вместо ручного on_event()"
-    )]
-    fn on_event(&mut self, _evt: DataEvent) {}
-
     /// Получить ссылку на текущее состояние.
     fn state(&self) -> &Self::State;
-}
-
-/// Событие от data layer.
-///
-/// Пока заглушка — в будущем заменится на конкретный тип.
-#[derive(Debug, Clone)]
-pub enum DataEvent {
-    #[doc(hidden)]
-    _Placeholder,
 }

@@ -106,7 +106,7 @@ impl<T: Clone + Send + Sync + 'static> StateStore<T> {
     /// подписчикам. Каждый подписчик должен в своём потоке
     /// опрашивать `has_changed()` и реагировать.
     ///
-    /// Для egui-интеграции используйте [`EguiRepaintSubscriber`](crate::egui_subscriber::EguiRepaintSubscriber).
+    /// Для egui-интеграции используйте [`UiNotifier`](crate::ui_notifier::UiNotifier).
     pub fn subscribe(&self) -> watch::Receiver<T> {
         self.rx.clone()
     }

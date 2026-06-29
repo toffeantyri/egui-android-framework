@@ -11,9 +11,45 @@
 //! - Не знает про Domain, Components, Reducer, Data Layer
 //! - Вызывается Runtime, не бизнес-логикой
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
-use crate::egui_subscriber::AndroidWakeHandle;
+/// Handle для пробуждения Android event loop.
+///
+/// Создаётся из замыкания, которое вызывает `AndroidApp::wake()`.
+/// В тестах можно использовать заглушку.
+///
+/// # Пример
+///
+/// ```ignore
+/// let wake = AndroidWakeHandle::new(move || { let _ = app.wake(); });
+/// ```
+pub struct AndroidWakeHandle {
+    wake_fn: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Clone for AndroidWakeHandle {
+    fn clone(&self) -> Self {
+        Self {
+            wake_fn: Arc::clone(&self.wake_fn),
+        }
+    }
+}
+
+impl AndroidWakeHandle {
+    /// Создать новый handle.
+    pub fn new(wake_fn: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            wake_fn: Arc::new(wake_fn),
+        }
+    }
+
+    /// Пробудить Android event loop.
+    ///
+    /// Вызывает `MainEvent::Wake` в главном цикле `run()`.
+    pub fn wake(&self) {
+        (self.wake_fn)();
+    }
+}
 
 /// Инфраструктурный уведомитель.
 ///
