@@ -10,7 +10,10 @@ description: Архитектура, правила и идиомы проект
 древовидная архитектура компонентов с однонаправленным потоком данных
 и реактивным состоянием.
 
-## Архитектура (MVI + Reactive State)
+Сообщения отправляются из View в момент события через `Dispatcher`,
+а не собираются в `Vec` и не возвращаются после рендера.
+
+## Архитектура (MVI + Reactive State + Dispatcher)
 
 ```
 ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
@@ -24,26 +27,30 @@ description: Архитектура, правила и идиомы проект
 ┌──────────────────────────────────────────────────────────┐
 │              egui-android-framework                        │
 │  ┌──────────────┐  ┌────────────────────────────────┐    │
-│  │  EGL backend  │  │  run() — lifecycle + input     │    │
-│  │  + OpenGL ES  │  │  + frame() + UiNotifier        │    │
-│  └──────────────┘  └────────────────────────────────┘    │
+│  │  Dispatcher   │  │  run() — lifecycle + input     │    │
+│  │  .dispatch()  │  │  + frame() + UiNotifier        │    │
+│  └──────┬───────┘  └────────────────────────────────┘    │
+│         │                                                 │
+│         └── Сообщение отправляется в момент события       │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Поток данных (реактивный):**
+**Поток данных (реактивный с Dispatcher):**
 
 ```
 UI (нажатие кнопки)
-  → View(state, ui) возвращает Vec<Message>
-    → Component::handle(msg) — отправляет команду в data layer
-      → Data Layer (фоновый поток) получает команду
-        → store.update(|s| s.count += 1)        ← ЕДИНСТВЕННАЯ ТОЧКА
-          → notify_tx.send(())                   ← сигнал в Runtime
-            → UiNotifier::check()
-              → ctx.request_repaint()
-              → waker.wake()
-                → poll_events() получает Wake
-                  → frame() → render(state) → новый UI
+  → dispatch.dispatch(Msg::Increment)           ← в момент клика
+    → Receiver (mpsc) накапливает сообщения
+      ← после render: drain receiver
+        → Component::handle(msg) — отправляет команду в data layer
+          → Data Layer (фоновый поток) получает команду
+            → store.update(|s| s.count += 1)    ← ЕДИНСТВЕННАЯ ТОЧКА
+              → notify_tx.send(())               ← сигнал в Runtime
+                → UiNotifier::check()
+                  → ctx.request_repaint()
+                  → waker.wake()
+                    → poll_events() получает Wake
+                      → frame() → render(state, &dispatcher) → новый UI
 ```
 
 Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
@@ -57,13 +64,20 @@ UI (нажатие кнопки)
 - `root() / root_ref()` — доступ к корневому компоненту.
 - `config() / config_mut()` — настройки (log_tag, target_fps).
 - `create_notifier(ctx, wake) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
-- `frame(ctx, raw_input) -> FullOutput` — один кадр: `sync → render → handle`.
+- `frame(ctx, raw_input) -> FullOutput` — один кадр: создаёт `Dispatcher`, вызывает `sync → render`, drain'ит receiver, обрабатывает сообщения через `handle()`.
 - Наследует `LifecycleObserver` — lifecycle делегируется в RootComponent.
+
+### `Dispatcher<M>`
+- Абстракция над `std::sync::mpsc::Sender`. Скрывает канал от View.
+- `new() -> (Self, Receiver<M>)` — создаёт пару dispatcher/receiver.
+- `dispatch(msg)` — отправляет сообщение в момент события (клик, переключение и т.д.).
+- `Clone` — можно передавать дочерним компонентам и в замыкания.
+- View не знает про канал внутри — только про `dispatch()`.
 
 ### `Component`
 - Узел дерева навигации. Хранит snapshot состояния + ссылку на Store.
-- `render(ui) -> Vec<Message>` — делегирует View-функции, возвращает сообщения.
-- `handle(msg)` — логирует/обрабатывает сообщение.
+- `render(ui, &dispatcher)` — делегирует View-функции, сообщения диспатчатся через `Dispatcher`.
+- `handle(msg)` — обрабатывает сообщение (отправляет команду в data layer).
 - `sync_from_store()` — синхронизирует snapshot из Store (вызывается перед render).
 - `state() -> &State` — текущий snapshot для View.
 - Наследует `LifecycleObserver`.
@@ -86,22 +100,63 @@ UI (нажатие кнопки)
 - `push / pop / replace / bring_to_front / clear`.
 - Аналог `ChildStack` из Decompose.
 
-## View — чистая функция
+## View — чистая функция с Dispatcher
 
 ```rust,ignore
-type ViewFn<S, M> = fn(state: &S, ui: &mut egui::Ui) -> Vec<M>;
+type ViewFn<S, M> = fn(state: &S, ui: &mut egui::Ui, dispatch: &Dispatcher<M>);
 ```
 
 View не хранит состояние, не знает о каналах, не имеет побочных эффектов.
+Сообщения отправляются через `dispatch.dispatch(msg)` в момент события,
+а не возвращаются списком после рендера.
+
 Функция легко тестируется и переиспользуется.
+
+### Пример View в новом стиле
+
+```rust,ignore
+fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
+    ui.label(format!("{}", state));
+    if ui.button("+1").clicked() {
+        dispatch.dispatch(Msg::Increment);
+    }
+}
+```
 
 ## Каналы
 
 | Канал | Тип | Откуда → Куда |
 |-------|-----|---------------|
-| `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component → Data Layer |
+| `dispatcher` / `receiver` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
+| `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
 | `notify_tx` / `notify_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
 | `store` | `StateStore<T>` (watch) | Data Layer ↔ Component |
+
+Dispatcher создаётся каждый кадр в `frame()` и живёт один кадр.
+Receiver drain'ится после render — все сообщения обрабатываются через `handle()`.
+
+## Типовой frame() в Application
+
+```rust,ignore
+fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
+    self.root.sync_from_store();
+
+    let (dispatcher, receiver) = Dispatcher::new();
+
+    let full_output = egui_ctx.run(raw_input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.root.render(ui, &dispatcher);
+        });
+    });
+
+    for msg in receiver.try_iter() {
+        self.root.handle(msg);
+        // Если нужно — отправить команду в data layer
+    }
+
+    full_output
+}
+```
 
 ## Android Lifecycle (как обрабатывается в run.rs)
 
@@ -119,17 +174,17 @@ Lifecycle вызывается через `LifecycleObserver` на `Application`
 
 ```
 src/
-├── lib.rs              — экспорт публичных трейтов и модуля android
+├── lib.rs              — экспорт публичных трейтов и модулей
 ├── application.rs      — trait Application + AppConfig + AppState
 ├── component.rs        — trait Component
-├── child_stack.rs      — ChildStack<C, Comp>
-├── store.rs            — StateStore<T> (реактивное состояние)
-├── ui_notifier.rs      — UiNotifier (инфраструктура)
 ├── component_context.rs
-├── view.rs             — type ViewFn<S, M>
+├── child_stack.rs      — ChildStack<C, Comp>
+├── dispatcher.rs       — Dispatcher<M> (новый: отправка сообщений из View)
+├── store.rs            — StateStore<T> (реактивное состояние)
+├── ui_notifier.rs      — UiNotifier + AndroidWakeHandle
+├── view.rs             — type ViewFn<S, M> (с &Dispatcher<M>)
 ├── lifecycle.rs        — LifecycleState + LifecycleObserver
 ├── error.rs            — AppError
-├── egui_subscriber.rs  — AndroidWakeHandle (устаревший, оставлен)
 ├── android/
 │   ├── mod.rs          — реэкспорт run()
 │   ├── egl_backend.rs  — EGL FFI bindings + EglState
@@ -140,10 +195,9 @@ src/
     ├── error_tests.rs
     ├── lifecycle_tests.rs
     ├── integration_tests.rs  — 22 теста (MVI, store, component, navigation)
-    └── ui_notifier_tests.rs  — 5 тестов UiNotifier
+    └── ui_notifier_tests.rs  — 6 тестов (UiNotifier + AndroidWakeHandle)
 examples/
-├── counter/            — старый пример (требует миграции)
-└── counter2/           — реактивный счётчик (Application + Component + Store)
+└── counter_example/    — реактивный счётчик (Application + Component + Store + Dispatcher)
 ```
 
 ## Зависимости (ключевые)
@@ -176,9 +230,8 @@ examples/
 
 ## Важные правила
 
-1. **Не использовать `OnceLock` / глобальные статические переменные`
 1. **Не использовать `OnceLock` / глобальные статические переменные** для хранения Sender'ов.
-   Sender хранится в Application или Component.
+   Sender хранится в Application или Component, Dispatcher создаётся каждый кадр.
    — *Почему:* `OnceLock` не сбрасывается между запусками процесса.
 
 2. **Не вызывать `std::process::exit(0)`** — фреймворк сам завершает цикл через `break`.
@@ -186,8 +239,7 @@ examples/
 3. **EGL display/context переживает InitWindow** — при смене окна пересоздаётся
    только surface.
 
-4. **Render возвращает `Vec<Message>`** — сообщения собираются в `render()`, потом
-   фреймворк обрабатывает их через `handle()`.
+4. **Сообщения отправляются через `Dispatcher::dispatch()` в момент события, а не возвращаются списком.** View не возвращает `Vec<Message>`, а диспатчит их сразу через `&Dispatcher`.
 
 5. **Все комментарии, логи и строки ошибок — на русском.**
 
@@ -204,10 +256,10 @@ examples/
 ## Сборка и запуск
 
 ```bash
-cd examples/counter2
+cd examples/counter_example
 x run --device adb:XXXXXXXX
 
 # Тесты (на хосте)
 cargo test
-# Все 55 тестов должны проходить
+# Все 51 тест должны проходить
 ```
