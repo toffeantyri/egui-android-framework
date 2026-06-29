@@ -11,11 +11,11 @@
 //! # Поток данных
 //!
 //! ```text
-//! Application::render(&mut self, ui)
-//!   → root.render_current(ui) → active_component.render(ui)
-//!     → active_component.handle_messages()
-//!       → RootComponent обрабатывает навигационные сообщения
-//!         → ChildStack::push/pop/replace
+//! Application::frame(&mut self, egui_ctx, raw_input)
+//!   → sync_from_store()
+//!     → Dispatcher::new()
+//!       → root.render(ui, &dispatcher) — View диспатчит сообщения в момент события
+//!         → drain receiver → handle(msg) → cmd_tx.send(msg)
 //! ```
 //!
 //! # Жизненный цикл
@@ -83,7 +83,7 @@ pub trait Application: LifecycleObserver + Sized + 'static {
     ///    вызвать `self.root().render(ui, &dispatcher)`.
     /// 2. После `ctx.run()` обработать сообщения через `root().handle()`.
     ///
-    /// См. пример `examples/counter2`.
+    /// См. пример `examples/counter_example`.
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
         // Заглушка — пустой кадр. Переопределите в вашем Application.
         egui_ctx.run(raw_input, |_ctx| {})

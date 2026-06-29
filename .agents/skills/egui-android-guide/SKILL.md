@@ -35,7 +35,7 @@ description: Архитектура, правила и идиомы проект
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Поток данных (реактивный с Dispatcher):**
+## Поток данных (реактивный с Dispatcher)
 
 ```
 UI (нажатие кнопки)
@@ -55,6 +55,35 @@ UI (нажатие кнопки)
 
 Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
 Состояние само уведомляет Runtime через `notify_tx`.
+
+## Упрощённая MVI-модель
+
+В проекте используется упрощённая модель, где **Intent и Message — это одно и то же**.
+
+В классической MVI (как описано в `android-egui-architecture`):
+```
+Intent (сырое событие UI) → Message (семантическое действие) → Reducer
+```
+
+У нас сразу:
+```
+Message = и событие, и семантика
+```
+
+Пример:
+```
+Клик по кнопке "+" → dispatch(Msg::Increment) → handle(Msg::Increment) → reducer
+```
+
+Это осознанное упрощение для снижения бойлерплейта.
+Архитектурный контракт (`android-egui-architecture`) описывает строгую модель с Intent,
+но в коде проекта Intent и Message объединены.
+
+Если проект вырастет и потребуется разделение (например, для валидации Intent
+до превращения в Message) — введём отдельный тип Intent.
+
+**Правило для агента:** не вводи разделение Intent/Message без явного указания.
+Используй `Message` (или `Msg`) как единый тип для событий UI.
 
 ## Трейты и их назначение
 
@@ -126,7 +155,7 @@ fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
 ## Каналы
 
 | Канал | Тип | Откуда → Куда |
-|-------|-----|---------------|
+|---|---|---|
 | `dispatcher` / `receiver` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
 | `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
 | `notify_tx` / `notify_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
@@ -151,7 +180,6 @@ fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui
 
     for msg in receiver.try_iter() {
         self.root.handle(msg);
-        // Если нужно — отправить команду в data layer
     }
 
     full_output
@@ -177,9 +205,9 @@ src/
 ├── lib.rs              — экспорт публичных трейтов и модулей
 ├── application.rs      — trait Application + AppConfig + AppState
 ├── component.rs        — trait Component
-├── component_context.rs
+├── component_context.rs — контекст компонента (dispatcher, store, lifecycle)
 ├── child_stack.rs      — ChildStack<C, Comp>
-├── dispatcher.rs       — Dispatcher<M> (новый: отправка сообщений из View)
+├── dispatcher.rs       — Dispatcher<M> (отправка сообщений из View)
 ├── store.rs            — StateStore<T> (реактивное состояние)
 ├── ui_notifier.rs      — UiNotifier + AndroidWakeHandle
 ├── view.rs             — type ViewFn<S, M> (с &Dispatcher<M>)
@@ -239,7 +267,8 @@ examples/
 3. **EGL display/context переживает InitWindow** — при смене окна пересоздаётся
    только surface.
 
-4. **Сообщения отправляются через `Dispatcher::dispatch()` в момент события, а не возвращаются списком.** View не возвращает `Vec<Message>`, а диспатчит их сразу через `&Dispatcher`.
+4. **Сообщения отправляются через `Dispatcher::dispatch()` в момент события**, а не возвращаются списком.
+   View не возвращает `Vec<Message>`, а диспатчит их сразу через `&Dispatcher`.
 
 5. **Все комментарии, логи и строки ошибок — на русском.**
 
@@ -253,6 +282,9 @@ examples/
 9. **Главный цикл событийный:** `poll_events(16ms)` + `notifier.check()` + `frame()`.
    Никаких `poll()`, `on_event()`, `needs_redraw`.
 
+10. **Упрощённая MVI-модель:** Intent и Message — это одно и то же (`Msg`).
+    Не вводи разделение Intent/Message без явного указания.
+
 ## Сборка и запуск
 
 ```bash
@@ -261,5 +293,5 @@ x run --device adb:XXXXXXXX
 
 # Тесты (на хосте)
 cargo test
-# Все 51 тест должны проходить
+# Все 51 тест должен проходить
 ```
