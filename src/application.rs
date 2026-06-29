@@ -80,7 +80,7 @@ pub trait Application: LifecycleObserver + Sized + 'static {
     /// Конкретное приложение **должно** переопределить этот метод,
     /// чтобы:
     /// 1. Запустить `egui_ctx.run(raw_input, ...)`, внутри которого
-    ///    вызвать `self.root().render(ui)`.
+    ///    вызвать `self.root().render(ui, &dispatcher)`.
     /// 2. После `ctx.run()` обработать сообщения через `root().handle()`.
     ///
     /// См. пример `examples/counter2`.
@@ -202,8 +202,11 @@ mod tests {
         type State = u32;
         type Message = ();
 
-        fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
-            vec![]
+        fn render(
+            &self,
+            _ui: &mut egui::Ui,
+            _dispatch: &crate::dispatcher::Dispatcher<Self::Message>,
+        ) {
         }
 
         fn handle(&mut self, _msg: Self::Message) {}

@@ -1,13 +1,14 @@
 //! View-функция счётчика.
 //!
 //! Чистая функция от состояния — не хранит состояние, не знает о каналах.
+//! Сообщения отправляются через `Dispatcher` в момент события.
+
+use egui_android_framework::Dispatcher;
 
 use crate::msg::Msg;
 
-/// View-функция счётчика: читает состояние, рисует UI, возвращает сообщения.
-pub fn counter_view(state: &u32, ui: &mut egui::Ui) -> Vec<Msg> {
-    let mut messages = vec![];
-
+/// View-функция счётчика: читает состояние, рисует UI, диспатчит сообщения.
+pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
     ui.vertical_centered(|ui| {
         ui.add_space(60.0);
         ui.heading("egui Counter (v2)");
@@ -24,9 +25,7 @@ pub fn counter_view(state: &u32, ui: &mut egui::Ui) -> Vec<Msg> {
             .clicked()
         {
             log::info!("UI: +1 clicked");
-            messages.push(Msg::Increment);
+            dispatch.dispatch(Msg::Increment);
         }
     });
-
-    messages
 }

@@ -2,7 +2,7 @@
 //!
 //! Читает состояние из `StateStore` реактивно.
 
-use egui_android_framework::{store::StateStore, Component, LifecycleObserver};
+use egui_android_framework::{store::StateStore, Component, Dispatcher, LifecycleObserver};
 
 use crate::msg::{CounterState, Msg};
 use crate::view::counter_view;
@@ -37,8 +37,8 @@ impl Component for CounterComponent {
     type State = u32;
     type Message = Msg;
 
-    fn render(&self, ui: &mut egui::Ui) -> Vec<Self::Message> {
-        counter_view(&self.count, ui)
+    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
+        counter_view(&self.count, ui, dispatch)
     }
 
     fn handle(&mut self, msg: Self::Message) {

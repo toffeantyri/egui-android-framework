@@ -238,8 +238,11 @@ mod tests {
         type State = ();
         type Message = ();
 
-        fn render(&self, _ui: &mut egui::Ui) -> Vec<Self::Message> {
-            vec![]
+        fn render(
+            &self,
+            _ui: &mut egui::Ui,
+            _dispatch: &crate::dispatcher::Dispatcher<Self::Message>,
+        ) {
         }
 
         fn handle(&mut self, _msg: Self::Message) {}

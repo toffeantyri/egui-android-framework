@@ -12,7 +12,7 @@
 //! `on_stop` / `on_destroy` вызываются фреймворком синхронно
 //! с Android lifecycle.
 
-use crate::LifecycleObserver;
+use crate::{dispatcher::Dispatcher, LifecycleObserver};
 
 /// Компонент — узел дерева навигации.
 ///
@@ -25,12 +25,15 @@ pub trait Component: LifecycleObserver + Send + 'static {
     /// Тип сообщения, возвращаемого View-функцией.
     type Message: 'static;
 
-    /// Отрисовать UI через View-функцию и вернуть сообщения.
+    /// Отрисовать UI через View-функцию.
     ///
     /// Вызывается фреймворком один раз за кадр.
+    /// Сообщения отправляются через `dispatch` в момент события,
+    /// а не возвращаются списком после рендера.
+    ///
     /// Компонент не должен вызывать `egui_ctx.run()` сам —
     /// это делает `run.rs`.
-    fn render(&self, ui: &mut egui::Ui) -> Vec<Self::Message>;
+    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>);
 
     /// Обработать сообщение от View-функции.
     fn handle(&mut self, msg: Self::Message);

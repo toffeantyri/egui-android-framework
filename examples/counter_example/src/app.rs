@@ -7,8 +7,8 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    store::StateStore, AndroidWakeHandle, AppConfig, Application, Component, LifecycleObserver,
-    UiNotifier,
+    store::StateStore, AndroidWakeHandle, AppConfig, Application, Component, Dispatcher,
+    LifecycleObserver, UiNotifier,
 };
 
 use crate::component::CounterComponent;
@@ -86,14 +86,15 @@ impl Application for CounterApp {
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
         self.root.sync_from_store();
 
-        let mut messages: Vec<Msg> = Vec::new();
+        let (dispatcher, receiver) = Dispatcher::new();
+
         let full_output = egui_ctx.run(raw_input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                messages = self.root.render(ui);
+                self.root.render(ui, &dispatcher);
             });
         });
 
-        for msg in messages {
+        for msg in receiver.try_iter() {
             self.root.handle(msg.clone());
             let _ = self.cmd_tx.send(msg);
         }
