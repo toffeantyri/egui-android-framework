@@ -155,8 +155,7 @@ where
 
     /// Очистить стек (уничтожить все компоненты).
     pub fn clear(&mut self) {
-        while !self.items.is_empty() {
-            let removed = self.items.pop().unwrap();
+        while let Some(removed) = self.items.pop() {
             let mut comp = removed.component;
             comp.on_pause();
             comp.on_stop();
@@ -209,7 +208,6 @@ mod tests {
     /// Тестовый компонент, логирующий вызовы lifecycle.
     #[derive(Default)]
     struct TestComp {
-        pub id: &'static str,
         pub events: Vec<&'static str>,
     }
 
@@ -257,13 +255,7 @@ mod tests {
         let mut stack = ChildStack::<&'static str, TestComp>::new();
         assert!(stack.is_empty());
 
-        stack.push(
-            "screen_a",
-            TestComp {
-                id: "a",
-                events: Vec::new(),
-            },
-        );
+        stack.push("screen_a", TestComp::default());
         assert_eq!(stack.len(), 1);
         assert_eq!(stack.active_config(), Some(&"screen_a"));
 
@@ -274,20 +266,8 @@ mod tests {
     #[test]
     fn test_pop_lifecycle() {
         let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push(
-            "a",
-            TestComp {
-                id: "a",
-                events: Vec::new(),
-            },
-        );
-        stack.push(
-            "b",
-            TestComp {
-                id: "b",
-                events: Vec::new(),
-            },
-        );
+        stack.push("a", TestComp::default());
+        stack.push("b", TestComp::default());
 
         assert_eq!(stack.len(), 2);
         let (config, comp) = stack.pop().unwrap();
@@ -303,21 +283,9 @@ mod tests {
     #[test]
     fn test_replace_lifecycle() {
         let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push(
-            "a",
-            TestComp {
-                id: "a",
-                events: Vec::new(),
-            },
-        );
+        stack.push("a", TestComp::default());
 
-        stack.replace(
-            "b",
-            TestComp {
-                id: "b",
-                events: Vec::new(),
-            },
-        );
+        stack.replace("b", TestComp::default());
 
         assert_eq!(stack.len(), 1);
         assert_eq!(stack.active_config(), Some(&"b"));
@@ -329,22 +297,10 @@ mod tests {
     #[test]
     fn test_bring_to_front_new_config() {
         let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push(
-            "a",
-            TestComp {
-                id: "a",
-                events: Vec::new(),
-            },
-        );
+        stack.push("a", TestComp::default());
 
         // Нету — заменяет верхний
-        stack.bring_to_front(
-            "b",
-            TestComp {
-                id: "b",
-                events: Vec::new(),
-            },
-        );
+        stack.bring_to_front("b", TestComp::default());
         assert_eq!(stack.active_config(), Some(&"b"));
         assert_eq!(stack.len(), 1);
     }
@@ -352,20 +308,8 @@ mod tests {
     #[test]
     fn test_clear_destroys_all() {
         let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push(
-            "a",
-            TestComp {
-                id: "a",
-                events: Vec::new(),
-            },
-        );
-        stack.push(
-            "b",
-            TestComp {
-                id: "b",
-                events: Vec::new(),
-            },
-        );
+        stack.push("a", TestComp::default());
+        stack.push("b", TestComp::default());
 
         stack.clear();
         assert!(stack.is_empty());
