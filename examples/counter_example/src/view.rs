@@ -2,11 +2,12 @@
 //!
 //! Чистая функция от состояния — не хранит состояние, не знает о каналах.
 //! Сообщения отправляются через `Dispatcher` в момент события.
-//! Использует контейнеры, виджеты и модификаторы.
+//! Использует контейнеры, виджеты, модификаторы и remember для локального состояния.
 
 use egui_android_framework::{
     containers::Column,
     modifiers::ModifierExt,
+    remember,
     widgets::{Button, Spacer, Text, Widget},
     Dispatcher,
 };
@@ -15,6 +16,9 @@ use crate::msg::Msg;
 
 /// View-функция счётчика: читает состояние, рисует UI через виджеты с модификаторами.
 pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
+    // Локальное состояние — показывать ли подробности
+    let mut show_details = remember(ui, "show_details", || false);
+
     ui.vertical_centered(|ui| {
         Column::empty()
             .child(Spacer::new(60.0))
@@ -33,5 +37,18 @@ pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
                     .background(egui::Color32::from_rgb(0, 128, 255)),
             )
             .render(ui, dispatch);
+
+        // Переключатель локального состояния
+        if ui.button("Toggle details").clicked() {
+            show_details.modify(|v| *v = !*v);
+        }
+
+        if *show_details.get() {
+            Spacer::new(8.0).render(ui, dispatch);
+            Text::new("Это локальное состояние, не в ViewModel!")
+                .padding(12.0)
+                .background(egui::Color32::from_gray(50))
+                .render(ui, dispatch);
+        }
     });
 }

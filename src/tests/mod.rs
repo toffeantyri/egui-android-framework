@@ -2,6 +2,7 @@ mod container_tests;
 mod error_tests;
 mod integration_tests;
 mod lifecycle_tests;
+mod remember_tests;
 mod theme_tests;
 mod ui_notifier_tests;
 mod widget_tests;
