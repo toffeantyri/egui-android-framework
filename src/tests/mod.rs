@@ -1,3 +1,4 @@
+mod animation_tests;
 mod container_tests;
 mod error_tests;
 mod integration_tests;

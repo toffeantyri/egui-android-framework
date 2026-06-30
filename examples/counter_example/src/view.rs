@@ -2,9 +2,10 @@
 //!
 //! Чистая функция от состояния — не хранит состояние, не знает о каналах.
 //! Сообщения отправляются через `Dispatcher` в момент события.
-//! Использует контейнеры, виджеты, модификаторы и remember для локального состояния.
+//! Использует контейнеры, виджеты, модификаторы, remember и анимации.
 
 use egui_android_framework::{
+    animation::{AnimatedVisibility, AnimationExt},
     containers::Column,
     modifiers::ModifierExt,
     remember,
@@ -43,12 +44,18 @@ pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
             show_details.modify(|v| *v = !*v);
         }
 
-        if *show_details.get() {
-            Spacer::new(8.0).render(ui, dispatch);
-            Text::new("Это локальное состояние, не в ViewModel!")
-                .padding(12.0)
-                .background(egui::Color32::from_gray(50))
-                .render(ui, dispatch);
-        }
+        // Анимированное появление/исчезновение с Fade
+        AnimatedVisibility::new(*show_details.get(), 0.4)
+            .child(
+                Text::new("Анимированное появление!")
+                    .padding(12.0)
+                    .background(egui::Color32::from_gray(50)),
+            )
+            .render(ui, dispatch);
+
+        // Полупрозрачный текст через Fade
+        Text::new("Fade-текст (прозрачность 0.5)")
+            .fade(0.5)
+            .render(ui, dispatch);
     });
 }

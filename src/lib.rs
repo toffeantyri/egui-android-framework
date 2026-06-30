@@ -1,4 +1,5 @@
 pub mod android;
+pub mod animation;
 pub mod application;
 pub mod child_stack;
 pub mod component;
@@ -15,6 +16,9 @@ pub mod ui_notifier;
 pub mod view;
 pub mod widgets;
 
+pub use animation::{
+    animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
+};
 pub use application::{AppConfig, AppState, Application, DataLayerHandle};
 pub use child_stack::ChildStack;
 pub use component::Component;
