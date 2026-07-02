@@ -178,19 +178,75 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-android-core"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui",
+ "egui-android-runtime",
+ "log",
+]
+
+[[package]]
 name = "egui-android-framework"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui-android-core",
+ "egui-android-navigation",
+ "egui-android-platform",
+ "egui-android-platform-android",
+ "egui-android-runtime",
+ "egui-android-ui",
+]
+
+[[package]]
+name = "egui-android-navigation"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui",
+ "egui-android-core",
+ "egui-android-ui",
+ "log",
+]
+
+[[package]]
+name = "egui-android-platform"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui",
+]
+
+[[package]]
+name = "egui-android-platform-android"
 version = "0.3.0-alpha.1"
 dependencies = [
  "android-activity",
  "android_logger",
  "egui",
+ "egui-android-platform",
  "egui_glow",
  "glow",
  "libc",
  "log",
  "ndk",
+]
+
+[[package]]
+name = "egui-android-runtime"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui",
+ "log",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "egui-android-ui"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "egui",
+ "egui-android-core",
+ "log",
 ]
 
 [[package]]

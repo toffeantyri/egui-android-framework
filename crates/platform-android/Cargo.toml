@@ -1,0 +1,25 @@
+[package]
+name = "egui-android-platform-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Android platform implementation for egui-android-framework"
+
+[target.'cfg(target_os = "android")'.dependencies]
+egui = { workspace = true }
+egui_glow = { workspace = true }
+glow = { workspace = true }
+log = { workspace = true }
+android-activity = { workspace = true }
+android_logger = { workspace = true }
+ndk = { workspace = true }
+libc = { workspace = true }
+
+egui-android-platform = { path = "../platform" }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+egui = { workspace = true }
+log = { workspace = true }
+
+egui-android-platform = { path = "../platform" }

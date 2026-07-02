@@ -1,0 +1,15 @@
+[package]
+name = "egui-android-framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Umbrella crate — re-exports all egui-android-* crates"
+
+[dependencies]
+egui-android-core = { path = "../core" }
+egui-android-ui = { path = "../ui" }
+egui-android-navigation = { path = "../navigation" }
+egui-android-runtime = { path = "../runtime" }
+egui-android-platform = { path = "../platform" }
+egui-android-platform-android = { path = "../platform-android" }

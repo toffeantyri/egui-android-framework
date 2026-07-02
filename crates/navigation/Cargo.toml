@@ -1,0 +1,14 @@
+[package]
+name = "egui-android-navigation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Navigation layer — ChildStack, Router"
+
+[dependencies]
+egui = { workspace = true }
+log = { workspace = true }
+
+egui-android-core = { path = "../core" }
+egui-android-ui = { path = "../ui" }

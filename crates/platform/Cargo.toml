@@ -1,0 +1,10 @@
+[package]
+name = "egui-android-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Abstract platform trait for egui-android-framework"
+
+[dependencies]
+egui = { workspace = true }
