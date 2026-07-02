@@ -68,7 +68,7 @@ Data Layer никогда не взаимодействует с UI.
 | Runtime | `egui-android-runtime` | Application, Dispatcher, StateStore, UiNotifier |
 | Application | `egui-android-runtime` | Application trait, frame(), DI корень |
 | Component | `egui-android-core` | Component trait, ComponentContext, lifecycle |
-| UI | `egui-android-core` + `egui-android-ui` | ViewFn, Widget, remember, builders, modifier |
+| UI | `egui-android-core` + `egui-android-ui` | ViewFn, Widget, remember, builders, modifier, widgets, containers, animation, theme |
 | State | `egui-android-runtime` | StateStore (tokio::sync::watch) |
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
 | Navigation | `egui-android-navigation` | ChildStack |
@@ -159,8 +159,12 @@ state.value = ...
 
 из UI.
 
-**Готовые компоненты (Button, Text, Spacer и т.д.) не входят в крейты фреймворка.**
-Они определяются в приложении с использованием нативных egui-вызовов или `Widget<M>` / `ModifierExt`.
+**Готовые компоненты входят в крейты фреймворка:**
+- `egui-android-ui/widgets`: `Button<M>`, `Text`, `Spacer`, `Icon` — все реализуют `Widget<M>`
+- `egui-android-ui/containers`: `Column<M>`, `Row<M>`, `Stack<M>`, `LazyColumn<M, T>` — контейнеры на `Box<dyn Widget<M>>`
+- `egui-android-ui/animation`: `AnimatedVisibility<M>`, `Fade<W,M>`, `Slide<W,M>`, `AnimationExt<M>`
+- `egui-android-ui/theme`: `Theme`, `ColorPalette`, `MaterialTheme`, `Typography`, `Shapes`
+- `egui-android-ui`: `remember()`, `ModifierExt<M>`, `AnimationExt<M>`, builders
 
 ---
 
