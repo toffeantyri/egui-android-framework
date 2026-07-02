@@ -6,3 +6,7 @@
 //! Зависит от `egui-android-core` (для Component, LifecycleObserver)
 //! и `egui-android-ui` (для Modifier, builders).
 //! НЕ знает про runtime, platform.
+
+pub mod child_stack;
+
+pub use child_stack::*;
