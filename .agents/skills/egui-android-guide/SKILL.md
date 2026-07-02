@@ -5,7 +5,8 @@ description: Архитектура, правила и идиомы проект
 
 # egui-android-framework: Архитектура и правила
 
-Этот крейт — MVI-фреймворк для запуска egui-приложений на Android.
+Проект — MVI-фреймворк для запуска egui-приложений на Android,
+разделённый на 7 крейтов в едином workspace.
 Вдохновлён [Decompose](https://github.com/arkivanov/Decompose) и Jetpack Compose:
 древовидная архитектура компонентов с однонаправленным потоком данных
 и реактивным состоянием.
@@ -16,23 +17,50 @@ description: Архитектура, правила и идиомы проект
 ## Архитектура (MVI + Reactive State + Dispatcher)
 
 ```
-┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│  Application  │      │  Component   │      │  Data Layer  │
-│  .frame()     │      │  .render()   │      │  store.rw    │
-│  .notify()    │  →   │  .handle()   │  ↔   │  notify_tx   │
-│  .root()      │      │  .state()    │      └──────┬───────┘
-└──────┬───────┘      └──────┬───────┘             │
-       │                     │                      │
-       ▼                     ▼                      ▼
-┌──────────────────────────────────────────────────────────┐
-│              egui-android-framework                        │
-│  ┌──────────────┐  ┌────────────────────────────────┐    │
-│  │  Dispatcher   │  │  run() — lifecycle + input     │    │
-│  │  .dispatch()  │  │  + frame() + UiNotifier        │    │
-│  └──────┬───────┘  └────────────────────────────────┘    │
-│         │                                                 │
-│         └── Сообщение отправляется в момент события       │
-└──────────────────────────────────────────────────────────┘
+                    ┌──────────────────────┐
+                    │   framework          │  umbrella, re-exports
+                    └──────┬───────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│  navigation  │   │     ui       │   │    core      │
+│  ChildStack  │   │  remember    │   │  Component   │
+│  Lifecycle   │   │  builders    │   │  ViewFn      │
+│              │   │  modifier    │   │  Widget      │
+└──────┬───────┘   └──────┬───────┘   │  Lifecycle   │
+       │                  │           │  Ctx         │
+       └──────────────────┼───────────┴──────┬───────┘
+                          │                  │
+                          ▼                  ▼
+                   ┌──────────────────────────────┐
+                   │         runtime              │
+                   │  Application | Dispatcher    │
+                   │  StateStore | UiNotifier     │
+                   │  AppConfig | AppError        │
+                   └──────────────┬───────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+          ┌─────────────────┐       ┌──────────────────────┐
+          │    platform     │       │  platform-android    │
+          │  Platform trait │◀──────│  EGL | NDK input    │
+          │  PlatformEvent  │       │  run<A: Application> │
+          │  FrameInput/Out │       │  egui_glow renderer  │
+          │  PlatformConfig │       └──────────────────────┘
+          └─────────────────┘
+```
+
+**Граф зависимостей (DAG, без циклов):**
+```
+platform-android → platform, runtime
+runtime          → egui, tokio
+core             → runtime
+ui               → core
+navigation       → core, ui
+framework        → core, ui, navigation, runtime, platform, platform-android
 ```
 
 ## Поток данных (реактивный с Dispatcher)
@@ -85,25 +113,25 @@ Message = и событие, и семантика
 **Правило для агента:** не вводи разделение Intent/Message без явного указания.
 Используй `Message` (или `Msg`) как единый тип для событий UI.
 
-## Трейты и их назначение
+## Трейты и их расположение по крейтам
 
-### `Application`
+### `Application` — `egui-android-runtime`
 - Корень DI. Владеет RootComponent, каналами, AppConfig.
 - `create()` — создаёт приложение, каналы, запускает data layer.
 - `root() / root_ref()` — доступ к корневому компоненту.
 - `config() / config_mut()` — настройки (log_tag, target_fps).
 - `create_notifier(ctx, wake) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
 - `frame(ctx, raw_input) -> FullOutput` — один кадр: создаёт `Dispatcher`, вызывает `sync → render`, drain'ит receiver, обрабатывает сообщения через `handle()`.
-- Наследует `LifecycleObserver` — lifecycle делегируется в RootComponent.
+- **Не наследует** `LifecycleObserver` (планируется, сейчас методы объявлены прямо в трейте).
 
-### `Dispatcher<M>`
+### `Dispatcher<M>` — `egui-android-runtime`
 - Абстракция над `std::sync::mpsc::Sender`. Скрывает канал от View.
 - `new() -> (Self, Receiver<M>)` — создаёт пару dispatcher/receiver.
 - `dispatch(msg)` — отправляет сообщение в момент события (клик, переключение и т.д.).
 - `Clone` — можно передавать дочерним компонентам и в замыкания.
 - View не знает про канал внутри — только про `dispatch()`.
 
-### `Component`
+### `Component` — `egui-android-core`
 - Узел дерева навигации. Хранит snapshot состояния + ссылку на Store.
 - `render(ui, &dispatcher)` — делегирует View-функции, сообщения диспатчатся через `Dispatcher`.
 - `handle(msg)` — обрабатывает сообщение (отправляет команду в data layer).
@@ -111,7 +139,7 @@ Message = и событие, и семантика
 - `state() -> &State` — текущий snapshot для View.
 - Наследует `LifecycleObserver`.
 
-### `StateStore<T>`
+### `StateStore<T>` — `egui-android-runtime`
 - Реактивное состояние на `tokio::sync::watch`.
 - `update(f)` — атомарно изменить состояние (+ уведомить подписчиков).
 - `dispatch(msg, reducer)` — MVI-диспатч через reducer.
@@ -119,15 +147,27 @@ Message = и событие, и семантика
 - `subscribe() -> watch::Receiver<T>` — подписка на изменения.
 - `clone_state() -> Self` — копия с разделяемым каналом.
 
-### `UiNotifier`
+### `UiNotifier` — `egui-android-runtime`
 - Инфраструктурный уведомитель. Вызывается в главном потоке.
 - `check()` — проверяет `mpsc::Receiver<()>` и при сигнале вызывает `repaint + wake`.
 - Не знает про Domain, Components, Reducer.
 
-### `ChildStack<C, Comp>`
+### `Widget<M>` — `egui-android-core`
+- Базовый трейт для всех виджетов и модификаторов.
+- `render(&self, ui, dispatch)` — рендерит виджет, может диспатчить сообщения.
+
+### `ModifierExt<M>` — `egui-android-ui`
+- Extension trait для применения модификаторов (padding, size, background, align, clickable).
+- Реализован blanket-impl для всех `Widget<M>`.
+
+### `ChildStack<C, Comp>` — `egui-android-navigation`
 - Стек дочерних компонентов с управлением жизненным циклом.
 - `push / pop / replace / bring_to_front / clear`.
 - Аналог `ChildStack` из Decompose.
+
+### `LifecycleObserver` — `egui-android-core`
+- Трейт с методами `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`.
+- Все методы имеют пустую реализацию по умолчанию.
 
 ## View — чистая функция с Dispatcher
 
@@ -159,7 +199,7 @@ fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
 | `dispatcher` / `receiver` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
 | `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
 | `notify_tx` / `notify_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
-| `store` | `StateStore<T>` (watch) | Data Layer ↔ Component |
+| `store` | `StateStore<T>` (watch) | Data Layer → Component (sync_from_store) |
 
 Dispatcher создаётся каждый кадр в `frame()` и живёт один кадр.
 Receiver drain'ится после render — все сообщения обрабатываются через `handle()`.
@@ -186,7 +226,7 @@ fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui
 }
 ```
 
-## Android Lifecycle (как обрабатывается в run.rs)
+## Android Lifecycle (как обрабатывается в platform-android)
 
 | Событие | Действие |
 |---|---|
@@ -196,50 +236,108 @@ fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui
 | `Stop` | `app_instance.on_stop()` — не чистить EGL |
 | `Destroy` | `app_instance.on_destroy()`, destroy painter/EGL, `break` из цикла |
 
-Lifecycle вызывается через `LifecycleObserver` на `Application`.
+Lifecycle вызывается методами `Application` (пока не через `LifecycleObserver`).
 
-## Структура проекта
+## Структура проекта (workspace)
 
 ```
-src/
-├── lib.rs              — экспорт публичных трейтов и модулей
-├── application.rs      — trait Application + AppConfig + AppState
-├── component.rs        — trait Component
-├── component_context.rs — контекст компонента (dispatcher, store, lifecycle)
-├── child_stack.rs      — ChildStack<C, Comp>
-├── dispatcher.rs       — Dispatcher<M> (отправка сообщений из View)
-├── store.rs            — StateStore<T> (реактивное состояние)
-├── ui_notifier.rs      — UiNotifier + AndroidWakeHandle
-├── view.rs             — type ViewFn<S, M> (с &Dispatcher<M>)
-├── lifecycle.rs        — LifecycleState + LifecycleObserver
-├── error.rs            — AppError
-├── android/
-│   ├── mod.rs          — реэкспорт run()
-│   ├── egl_backend.rs  — EGL FFI bindings + EglState
-│   ├── input.rs        — InputState + process_input_events()
-│   └── run.rs          — run<A: Application>() — событийный главный цикл
-└── tests/
-    ├── mod.rs
-    ├── error_tests.rs
-    ├── lifecycle_tests.rs
-    ├── integration_tests.rs  — 22 теста (MVI, store, component, navigation)
-    └── ui_notifier_tests.rs  — 6 тестов (UiNotifier + AndroidWakeHandle)
-examples/
-└── counter_example/    — реактивный счётчик (Application + Component + Store + Dispatcher)
+/
+├── Cargo.toml              — workspace root
+├── .agents/                — агентские скилы
+│
+├── crates/
+│   ├── platform/           — egui-android-platform
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── platform.rs  — trait Platform
+│   │       ├── event.rs     — PlatformEvent<W, I>
+│   │       ├── frame.rs     — FrameInput, FrameOutput
+│   │       └── config.rs    — PlatformConfig
+│   │
+│   ├── platform-android/   — egui-android-platform-android (cfg = android)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── run.rs       — run<A: Application>() — главный цикл
+│   │       ├── egl_backend.rs — EGL FFI + EglState
+│   │       └── input.rs     — InputState + process_input_events()
+│   │
+│   ├── runtime/            — egui-android-runtime
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── application.rs — trait Application + AppConfig + DataLayerHandle
+│   │       ├── dispatcher.rs  — Dispatcher<M>
+│   │       ├── store.rs       — StateStore<T> (+ 10 тестов)
+│   │       ├── ui_notifier.rs — UiNotifier + AndroidWakeHandle
+│   │       └── error.rs       — AppError
+│   │
+│   ├── core/               — egui-android-core
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── component.rs        — trait Component
+│   │       ├── component_context.rs — ComponentContext + ComponentContextHandle
+│   │       ├── lifecycle.rs        — LifecycleState + LifecycleObserver
+│   │       ├── view.rs             — type ViewFn<S, M>
+│   │       └── widget.rs           — trait Widget<M>
+│   │
+│   ├── ui/                 — egui-android-ui
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── remember.rs  — RememberState<T> + remember()
+│   │       ├── builders.rs  — column(), row(), boxed()
+│   │       └── modifier.rs  — Padded, SizedWidget, Background, Aligned, Clickable, ModifierExt
+│   │
+│   ├── navigation/         — egui-android-navigation
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── child_stack.rs — ChildStack<C, Comp> (+ 7 тестов)
+│   │
+│   └── framework/          — egui-android-framework (umbrella)
+│       ├── Cargo.toml
+│       └── src/
+│           └── lib.rs — pub use всех крейтов
+│
+└── examples/
+    ├── counter/            — реактивный счётчик
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── app.rs
+    │       ├── component.rs
+    │       ├── data_layer.rs
+    │       ├── msg.rs
+    │       └── view.rs
+    │
+    └── showcase/           — витрина всех возможностей
+        ├── Cargo.toml
+        └── src/
+            ├── lib.rs
+            ├── app.rs
+            ├── navigation.rs
+            ├── root_component.rs
+            ├── components/
+            └── screens/
 ```
 
 ## Зависимости (ключевые)
 
-| Крейт | Зачем |
-|---|---|
-| `egui` 0.31 | GUI-фреймворк |
-| `egui_glow` 0.31 | Рендеринг через OpenGL |
-| `glow` 0.16 | OpenGL context |
-| `android-activity` 0.6 | NativeActivity |
-| `ndk` 0.9 | NDK bindings (NativeWindow) |
-| `libc` 0.2 | dlopen/dlsym для GL |
-| `tokio` 1 (sync) | watch::channel для StateStore |
-| `log` 0.4 + `android_logger` 0.14 | Логирование |
+| Крейт | Где используется | Зачем |
+|---|---|---|
+| `egui` 0.31 | runtime, core, ui, platform | GUI-фреймворк |
+| `egui_glow` 0.31 | platform-android | Рендеринг через OpenGL |
+| `glow` 0.16 | platform-android | OpenGL context |
+| `android-activity` 0.6 | platform-android | NativeActivity (только Android) |
+| `ndk` 0.9 | platform-android | NDK bindings (NativeWindow) |
+| `libc` 0.2 | platform-android | dlopen/dlsym для GL |
+| `tokio` 1 (sync) | runtime | watch::channel для StateStore |
+| `thiserror` 2.0 | runtime | AppError derive |
+| `log` 0.4 | platform-android, runtime | Логирование |
+| `android_logger` 0.14 | platform-android | Логирование в logcat |
 
 Нет `crossbeam`, нет `OnceLock` — всё на стандартных `mpsc` + `tokio::sync::watch`.
 
@@ -285,13 +383,35 @@ examples/
 10. **Упрощённая MVI-модель:** Intent и Message — это одно и то же (`Msg`).
     Не вводи разделение Intent/Message без явного указания.
 
+11. **Импорты — через umbrella или напрямую:**
+    ```rust
+    // Через umbrella (если подключен egui-android-framework)
+    use egui_android_framework::runtime::{Application, Dispatcher};
+    use egui_android_framework::core::{Component, LifecycleObserver};
+
+    // Напрямую (если подключен только конкретный крейт)
+    use egui_android_runtime::Application;
+    use egui_android_core::Component;
+    ```
+
+12. **При изменении кода проверять изоляцию крейтов:**
+    - `runtime` не импортирует `core`, `ui`, `navigation`
+    - `core` не импортирует `navigation`
+    - `ui` не импортирует `navigation`
+    - `platform` не импортирует `runtime`, `core`, `ui`, `navigation`
+
 ## Сборка и запуск
 
 ```bash
-cd examples/counter_example
-x run --device adb:XXXXXXXX
+# Все крейты workspace
+cargo check --workspace
+cargo test --workspace
 
-# Тесты (на хосте)
-cargo test
-# Все 51 тест должен проходить
+# Только конкретный крейт
+cargo test -p egui-android-runtime
+cargo test -p egui-android-navigation
+
+# Пример counter (на хосте — только check, полный запуск — на Android)
+cd examples/counter
+x run --device adb:XXXXXXXX
 ```

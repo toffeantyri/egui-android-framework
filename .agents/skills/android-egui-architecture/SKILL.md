@@ -56,9 +56,32 @@ Data Layer никогда не взаимодействует с UI.
 
 ---
 
+Соответствие слоёв и крейтов
+
+Проект разделён на 7 крейтов в едином workspace.
+Каждый крейт реализует один или несколько архитектурных слоёв:
+
+| Архитектурный слой | Крейт | Ответственность |
+|---|---|---|
+| Platform | `egui-android-platform` | Абстрактный контракт платформы |
+| Platform (Android impl) | `egui-android-platform-android` | Android lifecycle, EGL, input, event loop |
+| Runtime | `egui-android-runtime` | Application, Dispatcher, StateStore, UiNotifier |
+| Application | `egui-android-runtime` | Application trait, frame(), DI корень |
+| Component | `egui-android-core` | Component trait, ComponentContext, lifecycle |
+| UI | `egui-android-core` + `egui-android-ui` | ViewFn, Widget, remember, builders, modifier |
+| State | `egui-android-runtime` | StateStore (tokio::sync::watch) |
+| Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
+| Navigation | `egui-android-navigation` | ChildStack |
+| Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, каналы |
+| Umbrella | `egui-android-framework` | Re-export всех крейтов |
+
+---
+
 Слои системы
 
-Platform Layer
+### Platform Layer
+
+**Крейт**: `egui-android-platform` (абстракция), `egui-android-platform-android` (Android)
 
 Ответственность:
 
@@ -76,10 +99,13 @@ Platform Layer
 - State
 - Reducer
 - Components
+- runtime, core, ui, navigation
 
 ---
 
-Runtime Layer
+### Runtime Layer
+
+**Крейт**: `egui-android-runtime`
 
 Ответственность:
 
@@ -87,12 +113,15 @@ Runtime Layer
 - создание RawInput
 - вызов Context::run()
 - передача FullOutput платформе
+- Application trait
+- Dispatcher, StateStore, UiNotifier
 
 Не знает:
 
 - бизнес-состояние
 - Data Layer
 - Domain
+- core, ui, navigation
 
 Runtime никогда не принимает решений.
 
@@ -100,7 +129,9 @@ Runtime никогда не принимает решений.
 
 ---
 
-UI Layer
+### UI Layer
+
+**Крейты**: `egui-android-core` (ViewFn, Widget), `egui-android-ui` (remember, builders, modifier)
 
 Ответственность:
 
@@ -114,6 +145,7 @@ UI ничего не знает:
 - про БД
 - про Android
 - про Effects
+- про navigation
 
 UI является полностью декларативным.
 
@@ -127,21 +159,32 @@ state.value = ...
 
 из UI.
 
+**Готовые компоненты (Button, Text, Spacer и т.д.) не входят в крейты фреймворка.**
+Они определяются в приложении с использованием нативных egui-вызовов или `Widget<M>` / `ModifierExt`.
+
 ---
 
-Component
+### Component
+
+**Крейт**: `egui-android-core`
 
 Component преобразует Intent в Message.
 
-Он не изменяет состояние.
+Он не изменяет состояние (только через `store.update()` из data layer).
 
 Он не обращается к Data Layer напрямую.
 
-Component ничего не рисует.
+Component ничего не рисует — делегирует View-функции.
+
+**Направление зависимости:** Component → StateStore (потребитель).
+Component использует Store как источник состояния (читает snapshot через `sync_from_store()`).
+Обратная зависимость (Store → Component) отсутствует.
 
 ---
 
-Reducer
+### Reducer
+
+**Крейт**: `egui-android-runtime` (как функция, передаваемая в `store.dispatch()`)
 
 Единственная точка изменения State.
 
@@ -161,7 +204,9 @@ Reducer:
 
 ---
 
-State
+### State
+
+**Крейт**: `egui-android-runtime` (StateStore)
 
 State является immutable snapshot.
 
@@ -176,7 +221,7 @@ State ничего не знает:
 
 ---
 
-Effect Layer
+### Effect Layer
 
 Единственное место для:
 
@@ -189,9 +234,13 @@ Effect не изменяет State.
 
 Effect может только отправить Message обратно в Reducer.
 
+Реализуется в приложении (data layer) через фоновые потоки с mpsc-каналами.
+
 ---
 
-Store
+### Store
+
+**Крейт**: `egui-android-runtime` (StateStore)
 
 Store является единственным владельцем State.
 
@@ -209,7 +258,9 @@ Store не знает:
 
 ---
 
-UiNotifier
+### UiNotifier
+
+**Крейт**: `egui-android-runtime`
 
 UiNotifier является инфраструктурой.
 
@@ -251,27 +302,32 @@ UI
 
 ---
 
+Граф зависимостей крейтов (DAG)
+
+```
+platform-android → platform, runtime
+runtime          → egui, tokio, thiserror, log
+core             → runtime
+ui               → core
+navigation       → core, ui
+framework        → core, ui, navigation, runtime, platform, platform-android
+```
+
+Циклические зависимости запрещены. Проверка: `cargo tree -e normal`.
+
+---
+
 Запрещённые зависимости
 
-UI → Repository
-
-UI → Android
-
-Reducer → UI
-
-Reducer → Runtime
-
-Reducer → Context
-
-Reducer → Android
-
-Store → Android
-
-Store → egui
-
-Effect → UI
-
-Platform → Domain
+| Слой / Крейт | Не должен знать о |
+|---|---|
+| UI (core, ui) | Repository, Android, Network |
+| Reducer | UI, Runtime, Android, Context |
+| Store | Android, egui, Components |
+| Effect | UI |
+| Platform | Domain, State, Reducer, runtime, core, ui |
+| Runtime | core, ui, navigation |
+| Core | navigation, ui (builders), platform |
 
 ---
 
@@ -348,45 +404,37 @@ Android не знает про Components.
 
 Перед любой реализацией агент обязан проверить:
 
-1. 
+1. Не нарушается ли однонаправленный поток данных?
 
-Не нарушается ли однонаправленный поток данных?
+2. Не появляется ли новая ответственность у существующего слоя?
 
-2. 
+3. Не знает ли слой больше, чем должен?
 
-Не появляется ли новая ответственность у существующего слоя?
+4. Не возникает ли циклическая зависимость?
 
-3. 
+5. Не превращается ли Runtime в бизнес-слой?
 
-Не знает ли слой больше, чем должен?
+6. Не превращается ли Store в UI слой?
 
-4. 
+7. Не превращается ли Reducer в сервис?
 
-Не возникает ли циклическая зависимость?
+8. Не содержит ли View бизнес-логики?
 
-5. 
+9. Не используется ли polling вместо событий?
 
-Не превращается ли Runtime в бизнес-слой?
+10. Не нарушается ли контракт egui?
 
-6. 
+---
 
-Не превращается ли Store в UI слой?
+Проверка изоляции крейтов (обязательно)
 
-7. 
-
-Не превращается ли Reducer в сервис?
-
-8. 
-
-Не содержит ли View бизнес-логики?
-
-9. 
-
-Не используется ли polling вместо событий?
-
-10. 
-
-Не нарушается ли контракт egui?
+```
+✔ Проверка изоляции:
+  * platform не видит runtime/core/ui/navigation — [да/нет]
+  * runtime не видит core/ui/navigation — [да/нет]
+  * core не видит navigation — [да/нет]
+  * ui не видит navigation — [да/нет]
+```
 
 ---
 
@@ -414,27 +462,27 @@ Android не знает про Components.
 
 Например:
 
-UI
+UI (egui-android-core + egui-android-ui)
 
 ↓
 
-Component
+Component (egui-android-core)
 
 ↓
 
-Store
+Store (egui-android-runtime)
 
 ↓
 
-Reducer
+Reducer (egui-android-runtime)
 
 ↓
 
-Effect
+Effect (приложение, data layer)
 
 ↓
 
-Repository
+Repository (приложение, data layer)
 
 но никогда не знает о слоях через один или два уровня.
 
