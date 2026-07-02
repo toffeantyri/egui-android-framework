@@ -13,6 +13,7 @@ pub mod builders;
 pub mod containers;
 pub mod modifier;
 pub mod remember;
+pub mod theme;
 pub mod widgets;
 
 pub use animation::{
@@ -22,4 +23,5 @@ pub use builders::*;
 pub use containers::{Column, LazyColumn, Row, Stack};
 pub use modifier::*;
 pub use remember::*;
+pub use theme::{ColorPalette, FontWeight, MaterialTheme, Shapes, TextStyle, Theme, Typography};
 pub use widgets::{Button, Icon, Spacer, Text, Widget};
