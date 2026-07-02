@@ -26,6 +26,9 @@ use std::marker::PhantomData;
 
 use egui_android_core::{widget::Widget, Dispatcher};
 
+/// Тип closure для `ClickableWith` — получает `Response`, `Ui` и `Dispatcher`.
+pub type ClickableCallback<M> = Box<dyn Fn(&egui::Response, &egui::Ui, &Dispatcher<M>)>;
+
 // ─── Padded ────────────────────────────────────────────────────────────────────
 
 /// Модификатор, добавляющий отступы вокруг виджета.
@@ -148,6 +151,52 @@ impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
     }
 }
 
+// ─── ClickableWith ─────────────────────────────────────────────────────────────
+
+/// Модификатор, делающий виджет кликабельным через closure.
+///
+/// В отличие от [`Clickable`], принимает closure с доступом к `Response`,
+/// `Ui` и `Dispatcher`. Позволяет выполнять произвольные UI-действия
+/// при клике (например, модифицировать remember).
+///
+/// # Пример
+///
+/// ```ignore
+/// let count = remember(ui, "counter", || 0i32);
+/// Text::new("Кликни")
+///     .clickable_with(move |response, _ui, _dispatch| {
+///         if response.clicked() {
+///             count.modify(|c| *c += 1);
+///         }
+///     })
+///     .render(ui, dispatch);
+/// ```
+pub struct ClickableWith<W, M> {
+    inner: W,
+    callback: ClickableCallback<M>,
+}
+
+impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
+    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+        // Сначала рендерим внутренний виджет, получаем размер его области
+        let (inner_rect, _inner_response) =
+            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        let mut child_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("clickable_with_inner")
+                .max_rect(inner_rect)
+                .layout(*ui.layout()),
+        );
+        self.inner.render(&mut child_ui, dispatch);
+        let widget_size = child_ui.min_size();
+
+        // Затем аллоцируем кликабельную область только этого размера
+        let (_rect, response) = ui.allocate_exact_size(widget_size, egui::Sense::click());
+
+        (self.callback)(&response, ui, dispatch);
+    }
+}
+
 // ─── ModifierExt ───────────────────────────────────────────────────────────────
 
 /// Extension trait для применения модификаторов к виджетам.
@@ -173,6 +222,15 @@ pub trait ModifierExt<M>: Widget<M> + Sized {
     fn clickable(self, msg: M) -> Clickable<Self, M>
     where
         M: Clone;
+
+    /// Сделать виджет кликабельным через closure.
+    ///
+    /// Closure получает `&Response`, `&Ui` и `&Dispatcher<M>`.
+    /// Используется для локальных UI-действий, например изменения `remember`.
+    fn clickable_with<F>(self, callback: F) -> ClickableWith<Self, M>
+    where
+        F: Fn(&egui::Response, &egui::Ui, &Dispatcher<M>) + 'static,
+        M: 'static;
 }
 
 impl<T: Widget<M>, M> ModifierExt<M> for T {
@@ -217,6 +275,17 @@ impl<T: Widget<M>, M> ModifierExt<M> for T {
             inner: self,
             msg,
             _marker: PhantomData,
+        }
+    }
+
+    fn clickable_with<F>(self, callback: F) -> ClickableWith<Self, M>
+    where
+        F: Fn(&egui::Response, &egui::Ui, &Dispatcher<M>) + 'static,
+        M: 'static,
+    {
+        ClickableWith {
+            inner: self,
+            callback: Box::new(callback),
         }
     }
 }

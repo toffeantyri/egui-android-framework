@@ -93,6 +93,72 @@ fn test_button_dispatches_message_on_click() {
 }
 
 #[test]
+fn test_button_on_click_with_no_panic() {
+    // on_click_with closure не должен паниковать при рендере
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let btn = Button::<()>::new("With closure").on_click_with(|_ui, _dispatch| {
+            // closure просто не паникует
+        });
+        btn.render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_button_on_click_with_both_msg_and_closure() {
+    // on_click(msg) + on_click_with(closure) не должны паниковать
+    let (dispatch, rx) = Dispatcher::<&'static str>::new();
+    with_ui(|ui| {
+        let btn = Button::new("Both")
+            .on_click("msg_dispatched")
+            .on_click_with(|_ui, _dispatch| {
+                // closure тоже не паникует
+            });
+        btn.render(ui, &dispatch);
+
+        // Сообщение должно быть в канале (проверяем что нет паники)
+        for _ in rx.try_iter() {}
+    });
+}
+
+#[test]
+fn test_button_on_click_with_remember_modify() {
+    // on_click_with может модифицировать remember напрямую
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let count = egui_android_ui::remember(ui, "test_btn_cnt", || 0i32);
+        assert_eq!(*count.get(), 0);
+
+        // Рендер кнопки с on_click_with — в тестовой среде click не происходит,
+        // но проверяем что нет паники и структура корректна
+        let btn = Button::<()>::new("+1").on_click_with({
+            let count = count.clone();
+            move |_ui, _dispatch| {
+                count.modify(|c| *c += 1);
+            }
+        });
+        btn.render(ui, &dispatch);
+
+        // remember не изменится без реального клика, это ожидаемо.
+        // Тест проверяет отсутствие паники.
+        assert_eq!(*count.get(), 0);
+    });
+}
+
+#[test]
+fn test_clickable_with_modifier_renders() {
+    // clickable_with модификатор не должен паниковать при рендере
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Click me")
+            .clickable_with(|_response, _ui, _dispatch| {
+                // closure не паникует
+            })
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
 fn test_spacer_widget_renders() {
     with_ui(|ui| {
         let spacer = Spacer::new(16.0);

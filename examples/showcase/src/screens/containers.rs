@@ -71,21 +71,32 @@ impl ContainersScreen {
 
             Spacer::new(8.0).render(ui, dispatch);
 
-            // LazyColumn с remember для каждого элемента
-            Text::new("LazyColumn с remember:").render(ui, dispatch);
+            // LazyColumn с remember + on_click_with для каждого элемента
+            Text::new("LazyColumn + on_click_with:").render(ui, dispatch);
             let items: Vec<i32> = (1..=5).collect();
             LazyColumn::new(items, ui, dispatch, |i, ui, dispatch| {
                 // remember для каждого элемента списка — уникальный ключ
                 let clicked = remember(ui, &format!("item_clicked_{}", i), || false);
 
                 Row::new(ui, dispatch, |ui, dispatch| {
-                    Text::new(format!("Элемент {} (выбран: {})", i, clicked.get()))
+                    Text::new(format!("Элемент {}", i))
                         .background(if *clicked.get() {
                             egui::Color32::from_rgb(0, 100, 200)
                         } else {
                             egui::Color32::from_gray(40)
                         })
                         .padding(6.0)
+                        .render(ui, dispatch);
+
+                    // Кнопка переключает remember напрямую через on_click_with
+                    Button::new(if *clicked.get() { "✓" } else { "○" })
+                        .on_click_with({
+                            let clicked = clicked.clone();
+                            move |_ui, _dispatch| {
+                                clicked.modify(|c| *c = !*c);
+                            }
+                        })
+                        .padding(4.0)
                         .render(ui, dispatch);
                 });
             });
