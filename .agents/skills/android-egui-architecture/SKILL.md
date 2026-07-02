@@ -161,7 +161,7 @@ state.value = ...
 
 **Готовые компоненты входят в крейты фреймворка:**
 - `egui-android-ui/widgets`: `Button<M>`, `Text`, `Spacer`, `Icon` — все реализуют `Widget<M>`
-- `egui-android-ui/containers`: `Column<M>`, `Row<M>`, `Stack<M>`, `LazyColumn<M, T>` — контейнеры на `Box<dyn Widget<M>>`
+- `egui-android-ui/containers`: `Column`, `Row`, `Stack`, `LazyColumn` — контейнеры на замыканиях (без generic M)
 - `egui-android-ui/animation`: `AnimatedVisibility<M>`, `Fade<W,M>`, `Slide<W,M>`, `AnimationExt<M>`
 - `egui-android-ui/theme`: `Theme`, `ColorPalette`, `MaterialTheme`, `Typography`, `Shapes`
 - `egui-android-ui`: `remember()`, `ModifierExt<M>`, `AnimationExt<M>`, builders
