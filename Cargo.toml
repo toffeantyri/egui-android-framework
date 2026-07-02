@@ -8,7 +8,7 @@ members = [
     "crates/ui",
     "crates/navigation",
     "crates/framework",
-    "examples/counter_example",
+    "examples/counter",
     "examples/showcase",
 ]
 
