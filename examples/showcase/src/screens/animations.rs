@@ -1,8 +1,15 @@
-//! AnimationsScreen — демонстрация анимаций.
+//! AnimationsScreen — демонстрация анимаций AnimatedVisibility, Fade, Slide, AnimationExt, animate_bool.
 
-use egui::Frame;
-use egui_android_framework::runtime::Dispatcher;
-use egui_android_framework::ui::remember;
+use egui_android_framework::{
+    runtime::Dispatcher,
+    ui::{
+        animation::{AnimatedVisibility, AnimationExt, SlideDirection},
+        containers::Column,
+        modifier::ModifierExt,
+        remember,
+        widgets::{Button, Spacer, Text, Widget},
+    },
+};
 
 use crate::root_component::RootMsg;
 
@@ -18,10 +25,38 @@ impl AnimationsScreen {
         let mut show_box = remember(ui, "anim_show", || false);
         let mut slide_open = remember(ui, "anim_slide", || false);
 
-        ui.heading("Анимации");
-        ui.add_space(8.0);
+        Column::<RootMsg>::empty()
+            .child(Spacer::new(16.0))
+            .child(Text::new("Анимации").padding(8.0))
+            .child(Spacer::new(8.0))
+            // AnimatedVisibility
+            .child(Text::new("AnimatedVisibility:"))
+            .child(
+                AnimatedVisibility::new(*show_box.get(), 0.3).child(
+                    Text::new("Появляющийся текст")
+                        .padding(12.0)
+                        .background(egui::Color32::from_gray(40)),
+                ),
+            )
+            .child(Spacer::new(8.0))
+            // Fade (прозрачность через AnimationExt)
+            .child(Text::new("Fade (прозрачность):"))
+            .child(Text::new("Текст с fade 0.6").fade(0.6).padding(8.0))
+            .child(Spacer::new(8.0))
+            // Slide через AnimationExt
+            .child(Text::new("Slide:"))
+            .child(
+                AnimatedVisibility::new(*slide_open.get(), 0.3).child(
+                    Text::new("Слайд вниз")
+                        .slide(SlideDirection::Down, 20.0)
+                        .padding(8.0),
+                ),
+            )
+            .child(Spacer::new(16.0))
+            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
+            .render(ui, dispatch);
 
-        ui.label("AnimatedVisibility:");
+        // Кнопки для remember-состояния (вне Column — RememberState требует прямого доступа)
         if ui
             .button(if *show_box.get() {
                 "Скрыть"
@@ -32,24 +67,6 @@ impl AnimationsScreen {
         {
             show_box.modify(|v| *v = !*v);
         }
-        if *show_box.get() {
-            ui.set_opacity(1.0);
-        } else {
-            ui.set_opacity(0.0);
-        }
-        Frame::new().inner_margin(12.0).show(ui, |ui| {
-            ui.label("Появляющийся текст");
-        });
-        ui.set_opacity(1.0);
-
-        ui.add_space(8.0);
-        ui.label("Fade (прозрачность):");
-        ui.set_opacity(0.6);
-        ui.label("Текст с fade");
-        ui.set_opacity(1.0);
-
-        ui.add_space(8.0);
-        ui.label("Slide:");
         if ui
             .button(if *slide_open.get() {
                 "Закрыть"
@@ -59,15 +76,6 @@ impl AnimationsScreen {
             .clicked()
         {
             slide_open.modify(|v| *v = !*v);
-        }
-        if *slide_open.get() {
-            ui.add_space(20.0);
-            ui.label("Слайд вниз");
-        }
-
-        ui.add_space(16.0);
-        if ui.button("Назад").clicked() {
-            dispatch.dispatch(RootMsg::Back);
         }
     }
 }

@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::Component, core::LifecycleObserver, runtime::AndroidWakeHandle, runtime::AppConfig,
     runtime::Application, runtime::Dispatcher, runtime::StateStore, runtime::UiNotifier,
+    ui::theme::MaterialTheme,
 };
 
 use crate::root_component::RootComponent;
@@ -77,9 +78,9 @@ impl Application for ShowcaseApplication {
         // Применяем тему в зависимости от состояния
         let app_state = self.state.state();
         if app_state.is_dark_mode {
-            egui_ctx.set_visuals(egui::Visuals::dark());
+            MaterialTheme::dark().apply(egui_ctx);
         } else {
-            egui_ctx.set_visuals(egui::Visuals::light());
+            MaterialTheme::light().apply(egui_ctx);
         }
 
         self.root.sync_from_store();

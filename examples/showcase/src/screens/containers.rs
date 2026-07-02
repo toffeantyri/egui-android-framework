@@ -1,7 +1,13 @@
-//! ContainersScreen — демонстрация контейнеров.
+//! ContainersScreen — демонстрация контейнеров Column, Row, Stack, LazyColumn.
 
-use egui::Frame;
-use egui_android_framework::runtime::Dispatcher;
+use egui_android_framework::{
+    runtime::Dispatcher,
+    ui::{
+        containers::{Column, LazyColumn, Row, Stack},
+        modifier::ModifierExt,
+        widgets::{Button, Spacer, Text, Widget},
+    },
+};
 
 use crate::root_component::RootMsg;
 
@@ -14,53 +20,76 @@ impl ContainersScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
-        ui.heading("Контейнеры");
-        ui.add_space(8.0);
-
-        ui.label("Column (вертикально):");
-        ui.vertical(|ui| {
-            ui.colored_label(egui::Color32::from_gray(50), "A");
-            ui.add_space(4.0);
-            ui.colored_label(egui::Color32::from_gray(60), "B");
-        });
-
-        ui.add_space(8.0);
-        ui.label("Row (горизонтально):");
-        ui.horizontal(|ui| {
-            ui.colored_label(egui::Color32::from_gray(50), "X");
-            ui.add_space(8.0);
-            ui.colored_label(egui::Color32::from_gray(60), "Y");
-            ui.add_space(8.0);
-            ui.colored_label(egui::Color32::from_gray(70), "Z");
-        });
-
-        ui.add_space(8.0);
-        ui.label("Stack (наложение):");
-        Frame::new().fill(egui::Color32::BLUE).show(ui, |ui| {
-            ui.label("Фон");
-        });
-        ui.label("Поверх");
-
-        ui.add_space(8.0);
-        ui.label("LazyColumn (список):");
-        egui::ScrollArea::vertical()
-            .max_height(200.0)
-            .show(ui, |ui| {
-                for i in 1..=10 {
-                    let resp = Frame::new()
-                        .fill(egui::Color32::from_gray(40))
-                        .inner_margin(4.0)
-                        .show(ui, |ui| {
-                            ui.label(format!("Элемент {}", i));
-                        });
-                    ui.add_space(2.0);
-                    let _ = resp;
-                }
-            });
-
-        ui.add_space(16.0);
-        if ui.button("Назад").clicked() {
-            dispatch.dispatch(RootMsg::Back);
-        }
+        Column::<RootMsg>::empty()
+            .child(Spacer::new(16.0))
+            .child(Text::new("Контейнеры").padding(8.0))
+            .child(Spacer::new(8.0))
+            // Column (вертикально)
+            .child(Text::new("Column (вертикально):"))
+            .child(
+                Column::<RootMsg>::empty()
+                    .child(
+                        Text::new("A")
+                            .background(egui::Color32::from_gray(50))
+                            .padding(4.0),
+                    )
+                    .child(Spacer::new(4.0))
+                    .child(
+                        Text::new("B")
+                            .background(egui::Color32::from_gray(60))
+                            .padding(4.0),
+                    ),
+            )
+            .child(Spacer::new(8.0))
+            // Row (горизонтально)
+            .child(Text::new("Row (горизонтально):"))
+            .child(
+                Row::<RootMsg>::empty()
+                    .child(
+                        Text::new("X")
+                            .background(egui::Color32::from_gray(50))
+                            .padding(4.0),
+                    )
+                    .child(Spacer::new(8.0))
+                    .child(
+                        Text::new("Y")
+                            .background(egui::Color32::from_gray(60))
+                            .padding(4.0),
+                    )
+                    .child(Spacer::new(8.0))
+                    .child(
+                        Text::new("Z")
+                            .background(egui::Color32::from_gray(70))
+                            .padding(4.0),
+                    ),
+            )
+            .child(Spacer::new(8.0))
+            // Stack (наложение)
+            .child(Text::new("Stack (наложение):"))
+            .child(
+                Stack::<RootMsg>::empty()
+                    .child(
+                        Text::new("Фон")
+                            .background(egui::Color32::BLUE)
+                            .padding(8.0),
+                    )
+                    .child(Text::new("Поверх").padding(8.0)),
+            )
+            .child(Spacer::new(8.0))
+            // LazyColumn (список)
+            .child(Text::new("LazyColumn (список):"))
+            .child(LazyColumn::<RootMsg, i32>::new(
+                (1..=10).collect(),
+                |i, _dispatch| {
+                    Box::new(
+                        Text::new(format!("Элемент {}", i))
+                            .background(egui::Color32::from_gray(40))
+                            .padding(4.0),
+                    )
+                },
+            ))
+            .child(Spacer::new(16.0))
+            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
+            .render(ui, dispatch);
     }
 }

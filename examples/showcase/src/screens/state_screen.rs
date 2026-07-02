@@ -1,8 +1,15 @@
 //! StateScreen — демонстрация локального состояния через remember.
 
-use egui::Frame;
-use egui_android_framework::runtime::Dispatcher;
-use egui_android_framework::ui::remember;
+use egui_android_framework::{
+    runtime::Dispatcher,
+    ui::{
+        animation::AnimatedVisibility,
+        containers::Column,
+        modifier::ModifierExt,
+        remember,
+        widgets::{Button, Spacer, Text, Widget},
+    },
+};
 
 use crate::root_component::RootMsg;
 
@@ -18,26 +25,38 @@ impl StateScreen {
         let mut expanded = remember(ui, "ss_expanded", || false);
         let mut local_count = remember(ui, "ss_local_count", || 0i32);
 
-        ui.heading("Локальное состояние (remember)");
-        ui.add_space(8.0);
+        Column::<RootMsg>::empty()
+            .child(Spacer::new(16.0))
+            .child(Text::new("Локальное состояние (remember)").padding(8.0))
+            .child(Spacer::new(8.0))
+            // Счётчик
+            .child(Text::new("Счётчик (локальный):"))
+            .child(
+                Text::new(format!("{}", *local_count.get()))
+                    .padding(16.0)
+                    .background(egui::Color32::from_gray(60)),
+            )
+            .child(Spacer::new(8.0))
+            // Аккордеон
+            .child(Text::new("Аккордеон (remember):"))
+            .child(
+                AnimatedVisibility::new(*expanded.get(), 0.2).child(
+                    Text::new("Этот контент управляется remember.")
+                        .padding(12.0)
+                        .background(egui::Color32::from_gray(50)),
+                ),
+            )
+            .child(Spacer::new(16.0))
+            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
+            .render(ui, dispatch);
 
-        ui.label("Счётчик (локальный):");
-        Frame::new()
-            .fill(egui::Color32::from_gray(60))
-            .inner_margin(16.0)
-            .show(ui, |ui| {
-                ui.label(format!("{}", *local_count.get()));
-            });
-
+        // Кнопки управления remember (вне Column)
         if ui.button("+").clicked() {
             local_count.modify(|c| *c += 1);
         }
         if ui.button("-").clicked() {
             local_count.modify(|c| *c -= 1);
         }
-
-        ui.add_space(8.0);
-        ui.label("Аккордеон (remember):");
         if ui
             .button(if *expanded.get() {
                 "Свернуть ▲"
@@ -47,20 +66,6 @@ impl StateScreen {
             .clicked()
         {
             expanded.modify(|v| *v = !*v);
-        }
-
-        if *expanded.get() {
-            Frame::new()
-                .fill(egui::Color32::from_gray(50))
-                .inner_margin(12.0)
-                .show(ui, |ui| {
-                    ui.label("Этот контент управляется remember.");
-                });
-        }
-
-        ui.add_space(16.0);
-        if ui.button("Назад").clicked() {
-            dispatch.dispatch(RootMsg::Back);
         }
     }
 }

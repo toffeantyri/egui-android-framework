@@ -1,8 +1,14 @@
-//! ModifiersScreen — демонстрация модификаторов.
+//! ModifiersScreen — демонстрация модификаторов padding, size, background, align, clickable.
 
-use egui::Frame;
-use egui_android_framework::runtime::Dispatcher;
-use egui_android_framework::ui::remember;
+use egui_android_framework::{
+    runtime::Dispatcher,
+    ui::{
+        containers::Column,
+        modifier::ModifierExt,
+        remember,
+        widgets::{Button, Spacer, Text, Widget},
+    },
+};
 
 use crate::root_component::RootMsg;
 
@@ -17,47 +23,58 @@ impl ModifiersScreen {
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
         let mut click_count = remember(ui, "mod_click_count", || 0i32);
 
-        ui.heading("Модификаторы");
-        ui.add_space(8.0);
+        Column::<RootMsg>::empty()
+            .child(Spacer::new(16.0))
+            .child(Text::new("Модификаторы").padding(8.0))
+            .child(Spacer::new(8.0))
+            // Padding
+            .child(Text::new("Padding 8px:"))
+            .child(
+                Text::new("Текст с padding")
+                    .padding(8.0)
+                    .background(egui::Color32::from_gray(60)),
+            )
+            .child(Spacer::new(8.0))
+            // Background
+            .child(Text::new("Background:"))
+            .child(
+                Text::new("Синий фон")
+                    .background(egui::Color32::from_rgb(0, 80, 200))
+                    .padding(12.0),
+            )
+            .child(Spacer::new(8.0))
+            // Size + Background
+            .child(Text::new("Size + Background:"))
+            .child(
+                Text::new("200x48")
+                    .size(200.0, 48.0)
+                    .background(egui::Color32::from_gray(50)),
+            )
+            .child(Spacer::new(8.0))
+            // Clickable через модификатор (диспатчит RootMsg::Back)
+            .child(Text::new("Clickable (нажми на текст):"))
+            .child(
+                Text::new("Нажми меня — назад")
+                    .padding(8.0)
+                    .background(egui::Color32::from_gray(60))
+                    .clickable(RootMsg::Back),
+            )
+            .child(Spacer::new(8.0))
+            // Счётчик через remember
+            .child(Text::new("Счётчик (remember):"))
+            .child(
+                Text::new(format!("Значение: {}", *click_count.get()))
+                    .padding(8.0)
+                    .background(egui::Color32::from_gray(60)),
+            )
+            .child(Spacer::new(16.0))
+            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
+            .render(ui, dispatch);
 
-        ui.label("Padding 8px:");
-        Frame::new()
-            .fill(egui::Color32::from_gray(60))
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.label("Текст с padding");
-            });
-
-        ui.add_space(8.0);
-        ui.label("Background:");
-        Frame::new()
-            .fill(egui::Color32::from_rgb(0, 80, 200))
-            .inner_margin(12.0)
-            .show(ui, |ui| {
-                ui.label("Синий фон");
-            });
-
-        ui.add_space(8.0);
-        ui.label("Size + Background:");
-        Frame::new()
-            .fill(egui::Color32::from_gray(50))
-            .inner_margin(12.0)
-            .show(ui, |ui| {
-                ui.label("200x48 (fixed size not available)");
-            });
-
-        ui.add_space(8.0);
-        ui.label("Clickable:");
-        if ui
-            .button(format!("Нажатий: {}", *click_count.get()))
-            .clicked()
-        {
+        // Кнопка для изменения локального remember-состояния
+        // (не может быть внутри Column, так как RememberState требует прямого доступа)
+        if ui.button("+1").clicked() {
             click_count.modify(|c| *c += 1);
-        }
-
-        ui.add_space(16.0);
-        if ui.button("Назад").clicked() {
-            dispatch.dispatch(RootMsg::Back);
         }
     }
 }
