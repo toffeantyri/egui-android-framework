@@ -1,9 +1,10 @@
 //! StateScreen — демонстрация локального состояния через remember.
+//!
+//! Показывает использование remember внутри замыканий Column.
 
 use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
-        animation::AnimatedVisibility,
         containers::Column,
         modifier::ModifierExt,
         remember,
@@ -22,33 +23,39 @@ impl StateScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
-        let mut expanded = remember(ui, "ss_expanded", || false);
-        let mut local_count = remember(ui, "ss_local_count", || 0i32);
-
         Column::new(ui, dispatch, |ui, dispatch| {
             Text::new("Локальное состояние (remember)")
                 .padding(8.0)
                 .render(ui, dispatch);
             Spacer::new(8.0).render(ui, dispatch);
 
-            // Счётчик
-            Text::new("Счётчик (локальный):").render(ui, dispatch);
-            Text::new(format!("{}", *local_count.get()))
-                .padding(16.0)
+            // ──────────────────────────────────────
+            // remember ВНУТРИ замыкания Column
+            // (теперь работает благодаря RwLock)
+            // ──────────────────────────────────────
+            Text::new("remember внутри замыкания:").render(ui, dispatch);
+
+            let count = remember(ui, "ss_count", || 0i32);
+            Text::new(format!("Счётчик: {}", count.get()))
+                .padding(12.0)
                 .background(egui::Color32::from_gray(60))
                 .render(ui, dispatch);
 
-            Spacer::new(8.0).render(ui, dispatch);
+            let expanded = remember(ui, "ss_expanded", || false);
 
-            // Аккордеон
-            Text::new("Аккордеон (remember):").render(ui, dispatch);
-            AnimatedVisibility::new(*expanded.get(), 0.2)
-                .child(
-                    Text::new("Этот контент управляется remember.")
-                        .padding(12.0)
-                        .background(egui::Color32::from_gray(50)),
-                )
-                .render(ui, dispatch);
+            Text::new("Состояние expanded:").render(ui, dispatch);
+            Text::new(format!(
+                "{}",
+                if *expanded.get() { "true" } else { "false" }
+            ))
+            .padding(8.0)
+            .background(egui::Color32::from_gray(50))
+            .render(ui, dispatch);
+
+            Spacer::new(4.0).render(ui, dispatch);
+
+            Text::new("Значения remember сохраняются между кадрами").render(ui, dispatch);
+            Text::new("и сбрасываются при пересоздании контекста egui.").render(ui, dispatch);
 
             Spacer::new(16.0).render(ui, dispatch);
             Button::new("← Назад")
@@ -56,23 +63,5 @@ impl StateScreen {
                 .padding(8.0)
                 .render(ui, dispatch);
         });
-
-        // Кнопки управления remember (вне Column — RememberState требует &mut)
-        if ui.button("+").clicked() {
-            local_count.modify(|c| *c += 1);
-        }
-        if ui.button("-").clicked() {
-            local_count.modify(|c| *c -= 1);
-        }
-        if ui
-            .button(if *expanded.get() {
-                "Свернуть ▲"
-            } else {
-                "Развернуть ▼"
-            })
-            .clicked()
-        {
-            expanded.modify(|v| *v = !*v);
-        }
     }
 }

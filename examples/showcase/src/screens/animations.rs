@@ -1,4 +1,4 @@
-//! AnimationsScreen — демонстрация анимаций AnimatedVisibility, Fade, Slide, AnimationExt, animate_bool.
+//! AnimationsScreen — демонстрация анимаций AnimatedVisibility, Fade, Slide, AnimationExt.
 
 use egui_android_framework::{
     runtime::Dispatcher,
@@ -22,15 +22,21 @@ impl AnimationsScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
-        let mut show_box = remember(ui, "anim_show", || false);
-        let mut slide_open = remember(ui, "anim_slide", || false);
+        // remember можно объявить снаружи замыкания и использовать внутри
+        let show_box = remember(ui, "anim_show", || false);
+        let slide_open = remember(ui, "anim_slide", || false);
 
         Column::new(ui, dispatch, |ui, dispatch| {
             Text::new("Анимации").padding(8.0).render(ui, dispatch);
             Spacer::new(8.0).render(ui, dispatch);
 
-            // AnimatedVisibility
+            // AnimatedVisibility (снаружи замыкания через remember)
             Text::new("AnimatedVisibility:").render(ui, dispatch);
+            Text::new(format!("visible = {}", *show_box.get()))
+                .padding(4.0)
+                .background(egui::Color32::from_gray(50))
+                .render(ui, dispatch);
+
             AnimatedVisibility::new(*show_box.get(), 0.3)
                 .child(
                     Text::new("Появляющийся текст")
@@ -50,8 +56,13 @@ impl AnimationsScreen {
 
             Spacer::new(8.0).render(ui, dispatch);
 
-            // Slide через AnimationExt
+            // Slide
             Text::new("Slide:").render(ui, dispatch);
+            Text::new(format!("slide_open = {}", *slide_open.get()))
+                .padding(4.0)
+                .background(egui::Color32::from_gray(50))
+                .render(ui, dispatch);
+
             AnimatedVisibility::new(*slide_open.get(), 0.3)
                 .child(
                     Text::new("Слайд вниз")
@@ -66,27 +77,5 @@ impl AnimationsScreen {
                 .padding(8.0)
                 .render(ui, dispatch);
         });
-
-        // Кнопки для remember-состояния (вне Column — RememberState требует &mut)
-        if ui
-            .button(if *show_box.get() {
-                "Скрыть"
-            } else {
-                "Показать"
-            })
-            .clicked()
-        {
-            show_box.modify(|v| *v = !*v);
-        }
-        if ui
-            .button(if *slide_open.get() {
-                "Закрыть"
-            } else {
-                "Открыть"
-            })
-            .clicked()
-        {
-            slide_open.modify(|v| *v = !*v);
-        }
     }
 }

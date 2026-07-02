@@ -19,11 +19,11 @@ use crate::msg::Msg;
 
 /// View-функция счётчика: читает состояние, рисует UI.
 pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
-    // Локальное состояние — показывать ли подробности
-    let mut show_details = remember(ui, "show_details", || false);
-
     // ── Вертикальная колонка с виджетами ──────────────────────────
     Column::new(ui, dispatch, |ui, dispatch| {
+        // remember ВНУТРИ замыкания (работает благодаря RwLock)
+        let show_details = remember(ui, "show_details", || false);
+
         Text::new("egui Counter (v2)").render(ui, dispatch);
         Spacer::new(16.0).render(ui, dispatch);
         Text::new(format!("{}", state))
@@ -35,24 +35,29 @@ pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
             .padding(8.0)
             .background(egui::Color32::from_rgb(0, 128, 255))
             .render(ui, dispatch);
+
+        // Toggle details — кнопка on_click отправляет Msg, а не замыкание
+        Button::new(if *show_details.get() {
+            "Скрыть details"
+        } else {
+            "Показать details"
+        })
+        .on_click(Msg::ToggleDetails)
+        .padding(8.0)
+        .render(ui, dispatch);
+
+        // Анимированное появление (внутри Column)
+        AnimatedVisibility::<Msg>::new(*show_details.get(), 0.4)
+            .child(
+                Text::new("Анимированное появление!")
+                    .padding(12.0)
+                    .background(egui::Color32::from_gray(50)),
+            )
+            .render(ui, dispatch);
+
+        // Fade-текст через AnimationExt
+        Text::new("Fade-текст (прозрачность 0.5)")
+            .fade(0.5)
+            .render(ui, dispatch);
     });
-
-    // ── Toggle details (нативный egui) ────────────────────────────
-    if ui.button("Toggle details").clicked() {
-        show_details.modify(|v| *v = !*v);
-    }
-
-    // ── Анимированное появление ───────────────────────────────────
-    AnimatedVisibility::<Msg>::new(*show_details.get(), 0.4)
-        .child(
-            Text::new("Анимированное появление!")
-                .padding(12.0)
-                .background(egui::Color32::from_gray(50)),
-        )
-        .render(ui, dispatch);
-
-    // ── Fade-текст через AnimationExt ─────────────────────────────
-    Text::new("Fade-текст (прозрачность 0.5)")
-        .fade(0.5)
-        .render(ui, dispatch);
 }

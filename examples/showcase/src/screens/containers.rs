@@ -5,6 +5,7 @@ use egui_android_framework::{
     ui::{
         containers::{Column, LazyColumn, Row, Stack},
         modifier::ModifierExt,
+        remember,
         widgets::{Button, Spacer, Text, Widget},
     },
 };
@@ -70,13 +71,23 @@ impl ContainersScreen {
 
             Spacer::new(8.0).render(ui, dispatch);
 
-            // LazyColumn (список)
-            Text::new("LazyColumn (список):").render(ui, dispatch);
-            LazyColumn::new((1..=10).collect(), ui, dispatch, |i, ui, _dispatch| {
-                Text::new(format!("Элемент {}", i))
-                    .background(egui::Color32::from_gray(40))
-                    .padding(4.0)
-                    .render(ui, _dispatch);
+            // LazyColumn с remember для каждого элемента
+            Text::new("LazyColumn с remember:").render(ui, dispatch);
+            let items: Vec<i32> = (1..=5).collect();
+            LazyColumn::new(items, ui, dispatch, |i, ui, dispatch| {
+                // remember для каждого элемента списка — уникальный ключ
+                let clicked = remember(ui, &format!("item_clicked_{}", i), || false);
+
+                Row::new(ui, dispatch, |ui, dispatch| {
+                    Text::new(format!("Элемент {} (выбран: {})", i, clicked.get()))
+                        .background(if *clicked.get() {
+                            egui::Color32::from_rgb(0, 100, 200)
+                        } else {
+                            egui::Color32::from_gray(40)
+                        })
+                        .padding(6.0)
+                        .render(ui, dispatch);
+                });
             });
 
             Spacer::new(16.0).render(ui, dispatch);

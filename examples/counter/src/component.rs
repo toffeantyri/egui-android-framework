@@ -49,6 +49,11 @@ impl Component for CounterComponent {
             Msg::Increment => {
                 log::info!("Component: handle Increment — data layer обновит store");
             }
+            Msg::ToggleDetails => {
+                // ToggleDetails управляется remember внутри View, до компонента не доходит.
+                // Это заглушка на случай, если в будущем remember заменится на стейт в store.
+                log::info!("Component: ToggleDetails (управляется remember)");
+            }
         }
     }
 

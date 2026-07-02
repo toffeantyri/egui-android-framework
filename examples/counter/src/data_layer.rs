@@ -25,6 +25,10 @@ pub fn data_layer_worker(
                 // Уведомить Runtime об изменении
                 let _ = notify_tx.send(());
             }
+            Ok(Msg::ToggleDetails) => {
+                // ToggleDetails управляется remember внутри View, data layer игнорирует
+                log::info!("DataLayer: ToggleDetails (управляется remember)");
+            }
             Err(_) => {
                 log::info!("DataLayer: канал закрыт, завершаемся");
                 break;

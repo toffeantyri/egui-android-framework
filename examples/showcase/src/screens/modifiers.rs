@@ -5,6 +5,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::ModifierExt,
+        remember,
         widgets::{Button, Spacer, Text, Widget},
     },
 };
@@ -20,6 +21,9 @@ impl ModifiersScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+        // remember ВНУТРИ замыкания (работает благодаря RwLock)
+        let click_count = remember(ui, "mod_click_count", || 0i32);
+
         Column::new(ui, dispatch, |ui, dispatch| {
             Text::new("Модификаторы").padding(8.0).render(ui, dispatch);
             Spacer::new(8.0).render(ui, dispatch);
@@ -57,6 +61,14 @@ impl ModifiersScreen {
                 .padding(8.0)
                 .background(egui::Color32::from_gray(60))
                 .clickable(RootMsg::Back)
+                .render(ui, dispatch);
+
+            // Счётчик через remember внутри замыкания
+            Spacer::new(8.0).render(ui, dispatch);
+            Text::new("Счётчик (remember внутри замыкания):").render(ui, dispatch);
+            Text::new(format!("Значение: {}", click_count.get()))
+                .padding(8.0)
+                .background(egui::Color32::from_gray(60))
                 .render(ui, dispatch);
 
             Spacer::new(8.0).render(ui, dispatch);
