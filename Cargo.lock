@@ -187,7 +187,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui-android-counter2"
+name = "egui-android-counter"
 version = "0.1.0"
 dependencies = [
  "android-activity",
