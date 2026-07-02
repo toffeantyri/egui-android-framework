@@ -2,7 +2,10 @@
 //!
 //! Читает состояние из `StateStore` реактивно.
 
-use egui_android_framework::{store::StateStore, Component, Dispatcher, LifecycleObserver};
+use egui_android_framework::{
+    core::{Component, LifecycleObserver},
+    runtime::{Dispatcher, StateStore},
+};
 
 use crate::msg::{CounterState, Msg};
 use crate::view::counter_view;

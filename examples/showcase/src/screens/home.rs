@@ -1,9 +1,6 @@
 //! HomeScreen — главный экран со списком демо-экранов.
 
-use egui_android_framework::{
-    dispatcher::Dispatcher,
-    widgets::{Button, Spacer, Text, Widget},
-};
+use egui_android_framework::runtime::Dispatcher;
 
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
@@ -46,24 +43,21 @@ impl HomeScreen {
             ),
         ];
 
-        Text::new("Showcase").render(ui, dispatch);
-        Spacer::new(4.0).render(ui, dispatch);
-        Text::new("Демонстрация возможностей фреймворка").render(ui, dispatch);
-        Spacer::new(16.0).render(ui, dispatch);
+        ui.heading("Showcase");
+        ui.add_space(4.0);
+        ui.label("Демонстрация возможностей фреймворка");
+        ui.add_space(16.0);
 
         for (route, title, desc) in &demos {
             ui.separator();
-            Text::new(*title).render(ui, dispatch);
-            Text::new(*desc).render(ui, dispatch);
-            Spacer::new(4.0).render(ui, dispatch);
+            ui.label(*title);
+            ui.label(*desc);
+            ui.add_space(4.0);
+            ui.add_enabled_ui(false, |ui| if ui.button("Открыть").clicked() {});
             if ui.button("Открыть").clicked() {
-                // dispatch через Dispatcher (RootMsg не Clone — используем кнопку)
+                dispatch.dispatch(RootMsg::Navigate(route.clone()));
             }
-            // Через Button widget:
-            Button::new("Открыть")
-                .on_click(RootMsg::Navigate(route.clone()))
-                .render(ui, dispatch);
-            Spacer::new(8.0).render(ui, dispatch);
+            ui.add_space(8.0);
         }
     }
 }

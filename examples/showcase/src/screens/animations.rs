@@ -1,12 +1,8 @@
 //! AnimationsScreen — демонстрация анимаций.
 
-use egui_android_framework::{
-    animation::{AnimatedVisibility, AnimationExt, SlideDirection},
-    dispatcher::Dispatcher,
-    modifiers::ModifierExt,
-    remember,
-    widgets::{Button, Spacer, Text, Widget},
-};
+use egui::Frame;
+use egui_android_framework::runtime::Dispatcher;
+use egui_android_framework::ui::remember;
 
 use crate::root_component::RootMsg;
 
@@ -18,14 +14,14 @@ impl AnimationsScreen {
         Self
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
         let mut show_box = remember(ui, "anim_show", || false);
         let mut slide_open = remember(ui, "anim_slide", || false);
 
-        Text::new("Анимации").render(ui, _dispatch);
-        Spacer::new(8.0).render(ui, _dispatch);
+        ui.heading("Анимации");
+        ui.add_space(8.0);
 
-        Text::new("AnimatedVisibility:").render(ui, _dispatch);
+        ui.label("AnimatedVisibility:");
         if ui
             .button(if *show_box.get() {
                 "Скрыть"
@@ -36,16 +32,24 @@ impl AnimationsScreen {
         {
             show_box.modify(|v| *v = !*v);
         }
-        AnimatedVisibility::new(*show_box.get(), 0.4)
-            .child(Text::new("Появляющийся текст").padding(12.0))
-            .render(ui, _dispatch);
+        if *show_box.get() {
+            ui.set_opacity(1.0);
+        } else {
+            ui.set_opacity(0.0);
+        }
+        Frame::new().inner_margin(12.0).show(ui, |ui| {
+            ui.label("Появляющийся текст");
+        });
+        ui.set_opacity(1.0);
 
-        Spacer::new(8.0).render(ui, _dispatch);
-        Text::new("Fade (прозрачность):").render(ui, _dispatch);
-        Text::new("Текст с fade").fade(0.6).render(ui, _dispatch);
+        ui.add_space(8.0);
+        ui.label("Fade (прозрачность):");
+        ui.set_opacity(0.6);
+        ui.label("Текст с fade");
+        ui.set_opacity(1.0);
 
-        Spacer::new(8.0).render(ui, _dispatch);
-        Text::new("Slide:").render(ui, _dispatch);
+        ui.add_space(8.0);
+        ui.label("Slide:");
         if ui
             .button(if *slide_open.get() {
                 "Закрыть"
@@ -57,14 +61,13 @@ impl AnimationsScreen {
             slide_open.modify(|v| *v = !*v);
         }
         if *slide_open.get() {
-            Text::new("Слайд вниз")
-                .slide(SlideDirection::Down, 20.0)
-                .render(ui, _dispatch);
+            ui.add_space(20.0);
+            ui.label("Слайд вниз");
         }
 
-        Spacer::new(16.0).render(ui, _dispatch);
-        Button::new("Назад")
-            .on_click(RootMsg::Back)
-            .render(ui, _dispatch);
+        ui.add_space(16.0);
+        if ui.button("Назад").clicked() {
+            dispatch.dispatch(RootMsg::Back);
+        }
     }
 }

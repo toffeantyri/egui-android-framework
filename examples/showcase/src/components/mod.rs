@@ -3,7 +3,8 @@
 //! Каждый экран — это структура, которая реализует простой render-метод,
 //! получая `Dispatcher<RootMsg>` для навигации и управления.
 
-use egui_android_framework::{Component, Dispatcher, LifecycleObserver};
+use egui_android_framework::core::{Component, LifecycleObserver};
+use egui_android_framework::runtime::Dispatcher;
 
 use crate::navigation::Route;
 use crate::root_component::RootMsg;

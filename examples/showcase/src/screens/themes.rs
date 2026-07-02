@@ -1,11 +1,7 @@
 //! ThemesScreen — демонстрация тем (light/dark).
 
-use egui_android_framework::{
-    dispatcher::Dispatcher,
-    modifiers::ModifierExt,
-    widgets::{Button, Spacer, Text, Widget},
-    Theme,
-};
+use egui::Frame;
+use egui_android_framework::runtime::Dispatcher;
 
 use crate::root_component::RootMsg;
 
@@ -22,55 +18,48 @@ impl ThemesScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
-        let theme = Theme::current_from_ui(ui);
+        let visuals = ui.visuals().clone();
 
-        Text::new("Темы").render(ui, dispatch);
-        Spacer::new(8.0).render(ui, dispatch);
+        ui.heading("Темы");
+        ui.add_space(8.0);
 
-        Text::new("Текущая тема:").render(ui, dispatch);
-        Text::new(if self.is_dark_mode {
-            "Тёмная"
-        } else {
-            "Светлая"
-        })
-        .padding(8.0)
-        .background(theme.colors.primary)
-        .render(ui, dispatch);
+        ui.label("Текущая тема:");
+        Frame::new()
+            .fill(visuals.selection.bg_fill)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                ui.label(if self.is_dark_mode {
+                    "Тёмная"
+                } else {
+                    "Светлая"
+                });
+            });
 
-        Spacer::new(8.0).render(ui, dispatch);
-        Text::new("Палитра цветов:").render(ui, dispatch);
+        ui.add_space(8.0);
+        ui.label("Палитра цветов:");
 
         let colors = [
-            ("Primary", theme.colors.primary, theme.colors.on_primary),
-            (
-                "Secondary",
-                theme.colors.secondary,
-                theme.colors.on_secondary,
-            ),
-            (
-                "Background",
-                theme.colors.background,
-                theme.colors.on_background,
-            ),
-            ("Surface", theme.colors.surface, theme.colors.on_surface),
-            ("Error", theme.colors.error, theme.colors.on_error),
+            ("Widgets bg", visuals.widgets.noninteractive.bg_fill),
+            ("Faint bg", visuals.window_fill()),
+            ("Panel fill", visuals.panel_fill),
+            ("Hyperlink", visuals.hyperlink_color),
+            ("Selection", visuals.selection.bg_fill),
         ];
 
-        for (name, bg, _fg) in &colors {
-            Text::new(*name)
-                .background(*bg)
-                .padding(8.0)
-                .render(ui, dispatch);
+        for (name, color) in &colors {
+            Frame::new().fill(*color).inner_margin(8.0).show(ui, |ui| {
+                ui.label(*name);
+            });
         }
 
-        Spacer::new(8.0).render(ui, dispatch);
-        Button::new("Переключить тему")
-            .on_click(RootMsg::ToggleTheme)
-            .render(ui, dispatch);
+        ui.add_space(8.0);
+        if ui.button("Переключить тему").clicked() {
+            dispatch.dispatch(RootMsg::ToggleTheme);
+        }
 
-        Spacer::new(16.0).render(ui, dispatch);
-        Button::new("Назад")
-            .on_click(RootMsg::Back)
-            .render(ui, dispatch);
+        ui.add_space(16.0);
+        if ui.button("Назад").clicked() {
+            dispatch.dispatch(RootMsg::Back);
+        }
     }
 }

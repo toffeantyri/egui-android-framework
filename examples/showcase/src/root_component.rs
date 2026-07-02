@@ -1,7 +1,8 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
 
 use egui_android_framework::{
-    store::StateStore, ChildStack, Component, Dispatcher, LifecycleObserver,
+    core::Component, core::LifecycleObserver, navigation::ChildStack, runtime::Dispatcher,
+    runtime::StateStore,
 };
 
 use crate::app::AppState;

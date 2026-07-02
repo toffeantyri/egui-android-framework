@@ -1,11 +1,8 @@
 //! StateScreen — демонстрация локального состояния через remember.
 
-use egui_android_framework::{
-    dispatcher::Dispatcher,
-    modifiers::ModifierExt,
-    remember,
-    widgets::{Button, Spacer, Text, Widget},
-};
+use egui::Frame;
+use egui_android_framework::runtime::Dispatcher;
+use egui_android_framework::ui::remember;
 
 use crate::root_component::RootMsg;
 
@@ -17,18 +14,20 @@ impl StateScreen {
         Self
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
         let mut expanded = remember(ui, "ss_expanded", || false);
         let mut local_count = remember(ui, "ss_local_count", || 0i32);
 
-        Text::new("Локальное состояние (remember)").render(ui, _dispatch);
-        Spacer::new(8.0).render(ui, _dispatch);
+        ui.heading("Локальное состояние (remember)");
+        ui.add_space(8.0);
 
-        Text::new("Счётчик (локальный):").render(ui, _dispatch);
-        Text::new(format!("{}", *local_count.get()))
-            .padding(16.0)
-            .background(egui::Color32::from_gray(60))
-            .render(ui, _dispatch);
+        ui.label("Счётчик (локальный):");
+        Frame::new()
+            .fill(egui::Color32::from_gray(60))
+            .inner_margin(16.0)
+            .show(ui, |ui| {
+                ui.label(format!("{}", *local_count.get()));
+            });
 
         if ui.button("+").clicked() {
             local_count.modify(|c| *c += 1);
@@ -37,8 +36,8 @@ impl StateScreen {
             local_count.modify(|c| *c -= 1);
         }
 
-        Spacer::new(8.0).render(ui, _dispatch);
-        Text::new("Аккордеон (remember):").render(ui, _dispatch);
+        ui.add_space(8.0);
+        ui.label("Аккордеон (remember):");
         if ui
             .button(if *expanded.get() {
                 "Свернуть ▲"
@@ -51,15 +50,17 @@ impl StateScreen {
         }
 
         if *expanded.get() {
-            Text::new("Этот контент управляется remember.")
-                .padding(12.0)
-                .background(egui::Color32::from_gray(50))
-                .render(ui, _dispatch);
+            Frame::new()
+                .fill(egui::Color32::from_gray(50))
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.label("Этот контент управляется remember.");
+                });
         }
 
-        Spacer::new(16.0).render(ui, _dispatch);
-        Button::new("Назад")
-            .on_click(RootMsg::Back)
-            .render(ui, _dispatch);
+        ui.add_space(16.0);
+        if ui.button("Назад").clicked() {
+            dispatch.dispatch(RootMsg::Back);
+        }
     }
 }

@@ -7,8 +7,8 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    store::StateStore, AndroidWakeHandle, AppConfig, Application, Component, Dispatcher,
-    LifecycleObserver, MaterialTheme, Theme, UiNotifier,
+    core::{Component, LifecycleObserver},
+    runtime::{AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier},
 };
 
 use crate::component::CounterComponent;
@@ -84,9 +84,6 @@ impl Application for CounterApp {
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
-        // Устанавливаем тёмную тему
-        MaterialTheme::dark().apply(egui_ctx);
-
         self.root.sync_from_store();
 
         let (dispatcher, receiver) = Dispatcher::new();

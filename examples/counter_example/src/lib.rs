@@ -13,7 +13,7 @@ pub mod msg;
 pub mod view;
 
 #[cfg(target_os = "android")]
-use egui_android_framework::android::run;
+use egui_android_framework::platform_android::run;
 
 #[cfg(target_os = "android")]
 #[no_mangle]
