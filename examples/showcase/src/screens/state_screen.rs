@@ -25,32 +25,39 @@ impl StateScreen {
         let mut expanded = remember(ui, "ss_expanded", || false);
         let mut local_count = remember(ui, "ss_local_count", || 0i32);
 
-        Column::<RootMsg>::empty()
-            .child(Spacer::new(16.0))
-            .child(Text::new("Локальное состояние (remember)").padding(8.0))
-            .child(Spacer::new(8.0))
+        Column::new(ui, dispatch, |ui, dispatch| {
+            Text::new("Локальное состояние (remember)")
+                .padding(8.0)
+                .render(ui, dispatch);
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Счётчик
-            .child(Text::new("Счётчик (локальный):"))
-            .child(
-                Text::new(format!("{}", *local_count.get()))
-                    .padding(16.0)
-                    .background(egui::Color32::from_gray(60)),
-            )
-            .child(Spacer::new(8.0))
+            Text::new("Счётчик (локальный):").render(ui, dispatch);
+            Text::new(format!("{}", *local_count.get()))
+                .padding(16.0)
+                .background(egui::Color32::from_gray(60))
+                .render(ui, dispatch);
+
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Аккордеон
-            .child(Text::new("Аккордеон (remember):"))
-            .child(
-                AnimatedVisibility::new(*expanded.get(), 0.2).child(
+            Text::new("Аккордеон (remember):").render(ui, dispatch);
+            AnimatedVisibility::new(*expanded.get(), 0.2)
+                .child(
                     Text::new("Этот контент управляется remember.")
                         .padding(12.0)
                         .background(egui::Color32::from_gray(50)),
-                ),
-            )
-            .child(Spacer::new(16.0))
-            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
-            .render(ui, dispatch);
+                )
+                .render(ui, dispatch);
 
-        // Кнопки управления remember (вне Column)
+            Spacer::new(16.0).render(ui, dispatch);
+            Button::new("← Назад")
+                .on_click(RootMsg::Back)
+                .padding(8.0)
+                .render(ui, dispatch);
+        });
+
+        // Кнопки управления remember (вне Column — RememberState требует &mut)
         if ui.button("+").clicked() {
             local_count.modify(|c| *c += 1);
         }

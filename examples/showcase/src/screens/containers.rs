@@ -20,76 +20,70 @@ impl ContainersScreen {
     }
 
     pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
-        Column::<RootMsg>::empty()
-            .child(Spacer::new(16.0))
-            .child(Text::new("Контейнеры").padding(8.0))
-            .child(Spacer::new(8.0))
+        Column::new(ui, dispatch, |ui, dispatch| {
+            Text::new("Контейнеры").padding(8.0).render(ui, dispatch);
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Column (вертикально)
-            .child(Text::new("Column (вертикально):"))
-            .child(
-                Column::<RootMsg>::empty()
-                    .child(
-                        Text::new("A")
-                            .background(egui::Color32::from_gray(50))
-                            .padding(4.0),
-                    )
-                    .child(Spacer::new(4.0))
-                    .child(
-                        Text::new("B")
-                            .background(egui::Color32::from_gray(60))
-                            .padding(4.0),
-                    ),
-            )
-            .child(Spacer::new(8.0))
+            Text::new("Column (вертикально):").render(ui, dispatch);
+            Column::new(ui, dispatch, |ui, dispatch| {
+                Text::new("A")
+                    .background(egui::Color32::from_gray(50))
+                    .padding(4.0)
+                    .render(ui, dispatch);
+                Text::new("B")
+                    .background(egui::Color32::from_gray(60))
+                    .padding(4.0)
+                    .render(ui, dispatch);
+            });
+
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Row (горизонтально)
-            .child(Text::new("Row (горизонтально):"))
-            .child(
-                Row::<RootMsg>::empty()
-                    .child(
-                        Text::new("X")
-                            .background(egui::Color32::from_gray(50))
-                            .padding(4.0),
-                    )
-                    .child(Spacer::new(8.0))
-                    .child(
-                        Text::new("Y")
-                            .background(egui::Color32::from_gray(60))
-                            .padding(4.0),
-                    )
-                    .child(Spacer::new(8.0))
-                    .child(
-                        Text::new("Z")
-                            .background(egui::Color32::from_gray(70))
-                            .padding(4.0),
-                    ),
-            )
-            .child(Spacer::new(8.0))
+            Text::new("Row (горизонтально):").render(ui, dispatch);
+            Row::new(ui, dispatch, |ui, dispatch| {
+                Text::new("X")
+                    .background(egui::Color32::from_gray(50))
+                    .padding(4.0)
+                    .render(ui, dispatch);
+                Text::new("Y")
+                    .background(egui::Color32::from_gray(60))
+                    .padding(4.0)
+                    .render(ui, dispatch);
+                Text::new("Z")
+                    .background(egui::Color32::from_gray(70))
+                    .padding(4.0)
+                    .render(ui, dispatch);
+            });
+
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Stack (наложение)
-            .child(Text::new("Stack (наложение):"))
-            .child(
-                Stack::<RootMsg>::empty()
-                    .child(
-                        Text::new("Фон")
-                            .background(egui::Color32::BLUE)
-                            .padding(8.0),
-                    )
-                    .child(Text::new("Поверх").padding(8.0)),
-            )
-            .child(Spacer::new(8.0))
+            Text::new("Stack (наложение):").render(ui, dispatch);
+            Stack::new(ui, dispatch, |ui, dispatch| {
+                Text::new("Фон")
+                    .background(egui::Color32::BLUE)
+                    .padding(8.0)
+                    .render(ui, dispatch);
+                Text::new("Поверх").padding(8.0).render(ui, dispatch);
+            });
+
+            Spacer::new(8.0).render(ui, dispatch);
+
             // LazyColumn (список)
-            .child(Text::new("LazyColumn (список):"))
-            .child(LazyColumn::<RootMsg, i32>::new(
-                (1..=10).collect(),
-                |i, _dispatch| {
-                    Box::new(
-                        Text::new(format!("Элемент {}", i))
-                            .background(egui::Color32::from_gray(40))
-                            .padding(4.0),
-                    )
-                },
-            ))
-            .child(Spacer::new(16.0))
-            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
-            .render(ui, dispatch);
+            Text::new("LazyColumn (список):").render(ui, dispatch);
+            LazyColumn::new((1..=10).collect(), ui, dispatch, |i, ui, _dispatch| {
+                Text::new(format!("Элемент {}", i))
+                    .background(egui::Color32::from_gray(40))
+                    .padding(4.0)
+                    .render(ui, _dispatch);
+            });
+
+            Spacer::new(16.0).render(ui, dispatch);
+            Button::new("← Назад")
+                .on_click(RootMsg::Back)
+                .padding(8.0)
+                .render(ui, dispatch);
+        });
     }
 }

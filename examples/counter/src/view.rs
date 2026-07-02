@@ -22,42 +22,37 @@ pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
     // Локальное состояние — показывать ли подробности
     let mut show_details = remember(ui, "show_details", || false);
 
-    ui.vertical_centered(|ui| {
-        // ── Вертикальная колонка с виджетами ──────────────────────────
-        Column::<Msg>::empty()
-            .child(Spacer::new(60.0))
-            .child(Text::new("egui Counter (v2)"))
-            .child(Spacer::new(16.0))
-            .child(
-                Text::new(format!("{}", state))
-                    .padding(16.0)
-                    .background(egui::Color32::from_gray(40)),
-            )
-            .child(
-                Button::new("+1")
-                    .on_click(Msg::Increment)
-                    .padding(8.0)
-                    .background(egui::Color32::from_rgb(0, 128, 255)),
-            )
+    // ── Вертикальная колонка с виджетами ──────────────────────────
+    Column::new(ui, dispatch, |ui, dispatch| {
+        Text::new("egui Counter (v2)").render(ui, dispatch);
+        Spacer::new(16.0).render(ui, dispatch);
+        Text::new(format!("{}", state))
+            .padding(16.0)
+            .background(egui::Color32::from_gray(40))
             .render(ui, dispatch);
-
-        // ── Toggle details (нативный egui) ────────────────────────────
-        if ui.button("Toggle details").clicked() {
-            show_details.modify(|v| *v = !*v);
-        }
-
-        // ── Анимированное появление ───────────────────────────────────
-        AnimatedVisibility::<Msg>::new(*show_details.get(), 0.4)
-            .child(
-                Text::new("Анимированное появление!")
-                    .padding(12.0)
-                    .background(egui::Color32::from_gray(50)),
-            )
-            .render(ui, dispatch);
-
-        // ── Fade-текст через AnimationExt ─────────────────────────────
-        Text::new("Fade-текст (прозрачность 0.5)")
-            .fade(0.5)
+        Button::new("+1")
+            .on_click(Msg::Increment)
+            .padding(8.0)
+            .background(egui::Color32::from_rgb(0, 128, 255))
             .render(ui, dispatch);
     });
+
+    // ── Toggle details (нативный egui) ────────────────────────────
+    if ui.button("Toggle details").clicked() {
+        show_details.modify(|v| *v = !*v);
+    }
+
+    // ── Анимированное появление ───────────────────────────────────
+    AnimatedVisibility::<Msg>::new(*show_details.get(), 0.4)
+        .child(
+            Text::new("Анимированное появление!")
+                .padding(12.0)
+                .background(egui::Color32::from_gray(50)),
+        )
+        .render(ui, dispatch);
+
+    // ── Fade-текст через AnimationExt ─────────────────────────────
+    Text::new("Fade-текст (прозрачность 0.5)")
+        .fade(0.5)
+        .render(ui, dispatch);
 }

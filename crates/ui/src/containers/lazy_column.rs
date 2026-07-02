@@ -1,37 +1,52 @@
-use egui_android_core::{widget::Widget, Dispatcher};
+//! Контейнер [`LazyColumn`] — скроллируемый вертикальный список.
+//!
+//! Аналог `LazyColumn` в Jetpack Compose.
+//! Каждый элемент рендерится с уникальным id на основе индекса,
+//! что позволяет корректно использовать `remember` внутри item_builder.
+//!
+//! # Пример
+//!
+//! ```ignore
+//! LazyColumn::new(items, ui, dispatch, |item, ui, dispatch| {
+//!     let mut state = remember(ui, "clicked", || false);
+//!     Text::new(&item.title).render(ui, dispatch);
+//! });
+//! ```
 
-pub type ItemBuilder<M, T> = Box<dyn Fn(&T, &Dispatcher<M>) -> Box<dyn Widget<M>>>;
+use egui_android_core::Dispatcher;
 
-pub struct LazyColumn<M, T> {
-    items: Vec<T>,
-    item_spacing: f32,
-    item_builder: ItemBuilder<M, T>,
-}
+/// Скроллируемый вертикальный список с ленивым рендерингом элементов.
+pub struct LazyColumn;
 
-impl<M: 'static, T: 'static> LazyColumn<M, T> {
-    pub fn new<F>(items: Vec<T>, item_builder: F) -> Self
-    where
-        F: Fn(&T, &Dispatcher<M>) -> Box<dyn Widget<M>> + 'static,
+impl LazyColumn {
+    /// Создать LazyColumn с замыканием-билдером для каждого элемента.
+    ///
+    /// Каждый элемент получает уникальный `ui.push_id(index)`, что позволяет
+    /// использовать `remember()` внутри item_builder без коллизий id.
+    ///
+    /// # Параметры
+    ///
+    /// * `items` — коллекция элементов для отображения
+    /// * `ui` — текущий Ui
+    /// * `dispatch` — диспетчер сообщений
+    /// * `item_builder` — замыкание, вызываемое для каждого элемента;
+    ///   получает ссылку на элемент, ui и dispatch
+    pub fn new<M: 'static, T, F>(
+        items: Vec<T>,
+        ui: &mut egui::Ui,
+        dispatch: &Dispatcher<M>,
+        item_builder: F,
+    ) where
+        F: FnMut(&T, &mut egui::Ui, &Dispatcher<M>),
     {
-        Self {
-            items,
-            item_spacing: 4.0,
-            item_builder: Box::new(item_builder),
-        }
-    }
-    pub fn item_spacing(mut self, spacing: f32) -> Self {
-        self.item_spacing = spacing;
-        self
-    }
-}
-
-impl<M: 'static, T: 'static> Widget<M> for LazyColumn<M, T> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+        let spacing = 4.0;
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, self.item_spacing);
-            for item in &self.items {
-                let widget = (self.item_builder)(item, dispatch);
-                widget.render(ui, dispatch);
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, spacing);
+            let mut builder = item_builder;
+            for (index, item) in items.iter().enumerate() {
+                ui.push_id(index, |ui| {
+                    builder(item, ui, dispatch);
+                });
             }
         });
     }

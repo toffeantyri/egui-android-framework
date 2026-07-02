@@ -1,38 +1,61 @@
 //! Контейнер [`Row`] — горизонтальное расположение дочерних виджетов.
+//!
+//! Аналог `Row` в Jetpack Compose. Использует замыкание вместо builder pattern.
+//!
+//! # Пример
+//!
+//! ```ignore
+//! Row::new(ui, dispatch, |ui, dispatch| {
+//!     Text::new("Левый").render(ui, dispatch);
+//!     Text::new("Правый").render(ui, dispatch);
+//! });
+//! ```
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::Dispatcher;
 
-pub struct Row<M> {
-    children: Vec<Box<dyn Widget<M>>>,
-    spacing: Option<f32>,
+/// Контейнер с горизонтальным расположением дочерних виджетов.
+///
+/// По умолчанию spacing между элементами — 8.0.
+/// Можно переопределить через [`Row::spacing`].
+pub struct Row {
+    spacing: f32,
 }
 
-impl<M: 'static> Row<M> {
-    pub fn new(children: Vec<Box<dyn Widget<M>>>) -> Self {
-        Self { children, spacing: None }
+impl Default for Row {
+    fn default() -> Self {
+        Self { spacing: 8.0 }
     }
-    pub fn empty() -> Self {
-        Self { children: Vec::new(), spacing: None }
+}
+
+impl Row {
+    /// Создать Row с замыканием-рендером и spacing по умолчанию (8.0).
+    ///
+    /// # Параметры
+    ///
+    /// * `ui` — текущий Ui
+    /// * `dispatch` — диспетчер сообщений
+    /// * `content` — замыкание, в котором рендерятся дочерние виджеты
+    pub fn new<M: 'static, F>(ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    where
+        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+    {
+        Self::default().render(ui, dispatch, content);
     }
-    pub fn child(mut self, child: impl Widget<M> + 'static) -> Self {
-        self.children.push(Box::new(child));
-        self
-    }
+
+    /// Установить spacing между элементами.
     pub fn spacing(mut self, spacing: f32) -> Self {
-        self.spacing = Some(spacing);
+        self.spacing = spacing;
         self
     }
-}
 
-impl<M: 'static> Widget<M> for Row<M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    /// Рендер с заданным spacing.
+    fn render<M: 'static, F>(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    where
+        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+    {
         ui.horizontal(|ui| {
-            if let Some(spacing) = self.spacing {
-                ui.spacing_mut().item_spacing = egui::vec2(spacing, spacing);
-            }
-            for child in &self.children {
-                child.render(ui, dispatch);
-            }
+            ui.spacing_mut().item_spacing = egui::vec2(self.spacing, self.spacing);
+            content(ui, dispatch);
         });
     }
 }

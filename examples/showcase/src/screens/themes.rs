@@ -34,61 +34,60 @@ impl ThemesScreen {
 
         let theme = Theme::current(ui.ctx());
 
-        Column::<RootMsg>::empty()
-            .child(Spacer::new(16.0))
-            .child(Text::new("Темы").padding(8.0))
-            .child(Spacer::new(8.0))
+        Column::new(ui, dispatch, |ui, dispatch| {
+            Text::new("Темы").padding(8.0).render(ui, dispatch);
+            Spacer::new(8.0).render(ui, dispatch);
+
             // Текущая тема
-            .child(Text::new("Текущая тема:"))
-            .child(
-                Text::new(if self.is_dark_mode {
-                    "Тёмная"
-                } else {
-                    "Светлая"
-                })
-                .padding(8.0)
-                .background(theme.colors.primary),
-            )
-            .child(Spacer::new(8.0))
-            // Палитра цветов
-            .child(Text::new("Палитра цветов:"))
-            .child(
-                Text::new("Primary")
-                    .padding(8.0)
-                    .background(theme.colors.primary),
-            )
-            .child(
-                Text::new("Secondary")
-                    .padding(8.0)
-                    .background(theme.colors.secondary),
-            )
-            .child(
-                Text::new("Background")
-                    .padding(8.0)
-                    .background(theme.colors.background),
-            )
-            .child(
-                Text::new("Surface")
-                    .padding(8.0)
-                    .background(theme.colors.surface),
-            )
-            .child(
-                Text::new("Error")
-                    .padding(8.0)
-                    .background(theme.colors.error),
-            )
-            .child(Spacer::new(8.0))
-            // Кнопка переключения темы
-            .child(Text::new(
-                "Переключение темы использует RootMsg::ToggleTheme:",
-            ))
-            .child(
-                Button::new("Переключить тему")
-                    .on_click(RootMsg::ToggleTheme)
-                    .padding(8.0),
-            )
-            .child(Spacer::new(16.0))
-            .child(Button::new("← Назад").on_click(RootMsg::Back).padding(8.0))
+            Text::new("Текущая тема:").render(ui, dispatch);
+            Text::new(if self.is_dark_mode {
+                "Тёмная"
+            } else {
+                "Светлая"
+            })
+            .padding(8.0)
+            .background(theme.colors.primary)
             .render(ui, dispatch);
+
+            Spacer::new(8.0).render(ui, dispatch);
+
+            // Палитра цветов
+            Text::new("Палитра цветов:").render(ui, dispatch);
+            Text::new("Primary")
+                .padding(8.0)
+                .background(theme.colors.primary)
+                .render(ui, dispatch);
+            Text::new("Secondary")
+                .padding(8.0)
+                .background(theme.colors.secondary)
+                .render(ui, dispatch);
+            Text::new("Background")
+                .padding(8.0)
+                .background(theme.colors.background)
+                .render(ui, dispatch);
+            Text::new("Surface")
+                .padding(8.0)
+                .background(theme.colors.surface)
+                .render(ui, dispatch);
+            Text::new("Error")
+                .padding(8.0)
+                .background(theme.colors.error)
+                .render(ui, dispatch);
+
+            Spacer::new(8.0).render(ui, dispatch);
+
+            // Кнопка переключения темы
+            Text::new("Переключение темы использует RootMsg::ToggleTheme:").render(ui, dispatch);
+            Button::new("Переключить тему")
+                .on_click(RootMsg::ToggleTheme)
+                .padding(8.0)
+                .render(ui, dispatch);
+
+            Spacer::new(16.0).render(ui, dispatch);
+            Button::new("← Назад")
+                .on_click(RootMsg::Back)
+                .padding(8.0)
+                .render(ui, dispatch);
+        });
     }
 }

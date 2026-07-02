@@ -210,22 +210,6 @@ fn test_dispatcher_drain_empty() {
 }
 
 #[test]
-fn test_column_renders() {
-    with_ui(|ui| {
-        let col = Column::<()>::empty();
-        col.render(ui, &Dispatcher::<()>::new().0);
-    });
-}
-
-#[test]
-fn test_row_renders() {
-    with_ui(|ui| {
-        let row = Row::<()>::empty();
-        row.render(ui, &Dispatcher::<()>::new().0);
-    });
-}
-
-#[test]
 fn test_shared_state_via_dispatcher() {
     let (dispatch, rx) = Dispatcher::<i32>::new();
     let d2 = dispatch.clone();
@@ -260,9 +244,11 @@ fn test_text_multiple_renders() {
 
 #[test]
 fn test_column_empty() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::<()>::empty();
-        col.render(ui, &Dispatcher::new().0);
+        Column::new(ui, &dispatch, |_ui, _dispatch| {
+            // пустая колонка — ничего не рендерим
+        });
     });
 }
 
@@ -270,11 +256,10 @@ fn test_column_empty() {
 fn test_column_with_children() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::new(vec![
-            Box::new(Text::new("A")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("B")),
-        ]);
-        col.render(ui, &dispatch);
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("A").render(ui, dispatch);
+            Text::new("B").render(ui, dispatch);
+        });
     });
 }
 
@@ -282,23 +267,11 @@ fn test_column_with_children() {
 fn test_column_with_spacing() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::new(vec![
-            Box::new(Text::new("A")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("B")),
-        ])
-        .spacing(8.0);
-        col.render(ui, &dispatch);
-    });
-}
-
-#[test]
-fn test_column_builder_child() {
-    let (dispatch, _rx) = Dispatcher::<()>::new();
-    with_ui(|ui| {
-        let col = Column::<()>::empty()
-            .child(Text::new("X"))
-            .child(Text::new("Y"));
-        col.render(ui, &dispatch);
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("A").render(ui, dispatch);
+            Text::new("B").render(ui, dispatch);
+        });
+        // spacing по умолчанию 8.0 — проверяем что не паникует
     });
 }
 
@@ -306,9 +279,12 @@ fn test_column_builder_child() {
 fn test_column_nested() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let inner = Column::<()>::empty().child(Text::new("Inner"));
-        let outer = Column::new(vec![Box::new(inner) as Box<dyn WidgetTrait<()>>]);
-        outer.render(ui, &dispatch);
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Outer").render(ui, dispatch);
+            Column::new(ui, dispatch, |ui, dispatch| {
+                Text::new("Inner").render(ui, dispatch);
+            });
+        });
     });
 }
 
@@ -316,12 +292,11 @@ fn test_column_nested() {
 fn test_column_with_text_widgets() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::new(vec![
-            Box::new(Text::new("Item 1")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("Item 2")),
-            Box::new(Text::new("Item 3")),
-        ]);
-        col.render(ui, &dispatch);
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Item 1").render(ui, dispatch);
+            Text::new("Item 2").render(ui, dispatch);
+            Text::new("Item 3").render(ui, dispatch);
+        });
     });
 }
 
@@ -329,20 +304,21 @@ fn test_column_with_text_widgets() {
 fn test_column_ordering_no_panic() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::new(vec![
-            Box::new(Text::new("First")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("Second")),
-        ]);
-        col.render(ui, &dispatch);
-        // порядок гарантируется ui.vertical — не паникует
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("First").render(ui, dispatch);
+            Text::new("Second").render(ui, dispatch);
+            // порядок гарантируется ui.vertical — не паникует
+        });
     });
 }
 
 #[test]
 fn test_row_empty() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let row = Row::<()>::empty();
-        row.render(ui, &Dispatcher::<()>::new().0);
+        Row::new(ui, &dispatch, |_ui, _dispatch| {
+            // пустая строка — ничего не рендерим
+        });
     });
 }
 
@@ -350,11 +326,10 @@ fn test_row_empty() {
 fn test_row_with_children() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let row = Row::new(vec![
-            Box::new(Text::new("A")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("B")),
-        ]);
-        row.render(ui, &dispatch);
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("A").render(ui, dispatch);
+            Text::new("B").render(ui, dispatch);
+        });
     });
 }
 
@@ -362,23 +337,11 @@ fn test_row_with_children() {
 fn test_row_with_spacing() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let row = Row::new(vec![
-            Box::new(Text::new("A")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("B")),
-        ])
-        .spacing(16.0);
-        row.render(ui, &dispatch);
-    });
-}
-
-#[test]
-fn test_row_builder_pattern() {
-    let (dispatch, _rx) = Dispatcher::<()>::new();
-    with_ui(|ui| {
-        let row = Row::<()>::empty()
-            .child(Text::new("Left"))
-            .child(Text::new("Right"));
-        row.render(ui, &dispatch);
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("A").render(ui, dispatch);
+            Text::new("B").render(ui, dispatch);
+        });
+        // spacing по умолчанию 8.0 — проверяем что не паникует
     });
 }
 
@@ -386,9 +349,12 @@ fn test_row_builder_pattern() {
 fn test_row_nested() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let inner = Row::<()>::empty().child(Text::new("Inner"));
-        let outer = Row::new(vec![Box::new(inner) as Box<dyn WidgetTrait<()>>]);
-        outer.render(ui, &dispatch);
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Outer").render(ui, dispatch);
+            Row::new(ui, dispatch, |ui, dispatch| {
+                Text::new("Inner").render(ui, dispatch);
+            });
+        });
     });
 }
 
@@ -396,19 +362,20 @@ fn test_row_nested() {
 fn test_row_ordering_no_panic() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let row = Row::new(vec![
-            Box::new(Text::new("Left")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("Right")),
-        ]);
-        row.render(ui, &dispatch);
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Left").render(ui, dispatch);
+            Text::new("Right").render(ui, dispatch);
+        });
     });
 }
 
 #[test]
 fn test_stack_empty() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let stack = Stack::<()>::empty();
-        stack.render(ui, &Dispatcher::new().0);
+        Stack::new(ui, &dispatch, |_ui, _dispatch| {
+            // пустой стек — ничего не рендерим
+        });
     });
 }
 
@@ -416,11 +383,10 @@ fn test_stack_empty() {
 fn test_stack_with_children() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let stack = Stack::new(vec![
-            Box::new(Text::new("Layer 1")) as Box<dyn WidgetTrait<()>>,
-            Box::new(Text::new("Layer 2")),
-        ]);
-        stack.render(ui, &dispatch);
+        Stack::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Layer 1").render(ui, dispatch);
+            Text::new("Layer 2").render(ui, dispatch);
+        });
     });
 }
 
@@ -428,8 +394,10 @@ fn test_stack_with_children() {
 fn test_lazy_column_empty() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let lc = LazyColumn::<(), String>::new(vec![], |_, _| Box::new(Spacer::new(0.0)));
-        lc.render(ui, &dispatch);
+        let items: Vec<String> = vec![];
+        LazyColumn::new(items, ui, &dispatch, |_item, _ui, _dispatch| {
+            // пустой список — ничего не рендерим
+        });
     });
 }
 
@@ -438,23 +406,9 @@ fn test_lazy_column_with_data() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let items = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let lc = LazyColumn::new(items, |item, _| {
-            Box::new(Text::new(item.clone())) as Box<dyn WidgetTrait<()>>
+        LazyColumn::new(items, ui, &dispatch, |item, ui, dispatch| {
+            Text::new(item.clone()).render(ui, dispatch);
         });
-        lc.render(ui, &dispatch);
-    });
-}
-
-#[test]
-fn test_lazy_column_custom_spacing() {
-    let (dispatch, _rx) = Dispatcher::<()>::new();
-    with_ui(|ui| {
-        let items = vec![1, 2, 3];
-        let lc = LazyColumn::new(items, |i, _| {
-            Box::new(Text::new(i.to_string())) as Box<dyn WidgetTrait<()>>
-        })
-        .item_spacing(12.0);
-        lc.render(ui, &dispatch);
     });
 }
 
@@ -462,14 +416,13 @@ fn test_lazy_column_custom_spacing() {
 fn test_containers_mixed() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let col = Column::<()>::empty()
-            .child(
-                Row::<()>::empty()
-                    .child(Text::new("A"))
-                    .child(Text::new("B")),
-            )
-            .child(Text::new("C"));
-        col.render(ui, &dispatch);
+        Column::new(ui, &dispatch, |ui, dispatch| {
+            Row::new(ui, dispatch, |ui, dispatch| {
+                Text::new("A").render(ui, dispatch);
+                Text::new("B").render(ui, dispatch);
+            });
+            Text::new("C").render(ui, dispatch);
+        });
     });
 }
 

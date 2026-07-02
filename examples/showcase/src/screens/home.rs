@@ -30,22 +30,16 @@ impl HomeScreen {
             Route::Animations,
         ];
 
-        Column::<RootMsg>::empty()
-            .child(Spacer::new(30.0))
-            .child(Text::new("Showcase").padding(8.0))
-            .child(Spacer::new(16.0))
-            .child(Text::new("Выберите демо:"))
-            .child(
-                routes
-                    .into_iter()
-                    .fold(Column::<RootMsg>::empty(), |col, route| {
-                        col.child(
-                            Button::new(route.title())
-                                .on_click(RootMsg::Navigate(route))
-                                .padding(8.0),
-                        )
-                    }),
-            )
-            .render(ui, dispatch);
+        Column::new(ui, dispatch, |ui, dispatch| {
+            Text::new("Showcase").padding(8.0).render(ui, dispatch);
+            Spacer::new(16.0).render(ui, dispatch);
+            Text::new("Выберите демо:").render(ui, dispatch);
+            for route in routes {
+                Button::new(route.title())
+                    .on_click(RootMsg::Navigate(route))
+                    .padding(8.0)
+                    .render(ui, dispatch);
+            }
+        });
     }
 }
