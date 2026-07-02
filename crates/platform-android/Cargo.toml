@@ -17,6 +17,7 @@ ndk = { workspace = true }
 libc = { workspace = true }
 
 egui-android-platform = { path = "../platform" }
+egui-android-runtime = { path = "../runtime" }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 egui = { workspace = true }
