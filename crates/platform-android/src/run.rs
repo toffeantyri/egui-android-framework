@@ -27,7 +27,7 @@ pub fn run<A: Application>(app: AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default()
             .with_tag(app_instance.config().log_tag.as_str())
-            .with_max_level(log::LevelFilter::Info),
+            .with_max_level(log::LevelFilter::Debug),
     );
     log::info!("run: запуск egui-android-framework");
 
@@ -241,21 +241,25 @@ pub fn run<A: Application>(app: AndroidApp) {
                     .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }));
 
                 let (events_for_frame, split_info) = if has_down {
-                    let mut split_idx = None;
-                    for (i, e) in new_events.iter().enumerate() {
-                        if matches!(e, egui::Event::PointerButton { pressed: true, .. }) {
-                            split_idx = Some(i + 1);
-                            break;
+                    // Если в кадре есть Down — откладываем ВСЕ события, оставляя
+                    // только PointerButton { pressed: true } в текущем кадре.
+                    // Иначе pointer.delta() на первом кадре drag будет содержать
+                    // дельту между latest_pos (от UP) и позицией Move, пришедшего
+                    // в том же кадре что и Down, что вызывает мгновенный скачок.
+                    let mut events_for_frame: Vec<egui::Event> = Vec::new();
+                    let mut deferred_this_frame: Vec<egui::Event> = Vec::new();
+                    for e in new_events.drain(..) {
+                        if matches!(&e, egui::Event::PointerButton { pressed: true, .. }) {
+                            // Down идёт в кадр, но все события ДО него уже в deferred_events
+                            events_for_frame.push(e);
+                        } else {
+                            deferred_this_frame.push(e);
                         }
                     }
-                    if let Some(idx) = split_idx {
-                        let deferred = new_events.split_off(idx);
-                        let deferred_count = deferred.len();
-                        deferred_events = deferred;
-                        (new_events, Some(deferred_count))
-                    } else {
-                        (new_events, None)
-                    }
+                    // Добавляем отложенные этого кадра к глобальным deferred
+                    deferred_events.extend(deferred_this_frame);
+                    let deferred_count = deferred_events.len();
+                    (events_for_frame, Some(deferred_count))
                 } else {
                     (new_events, None)
                 };
@@ -274,14 +278,15 @@ pub fn run<A: Application>(app: AndroidApp) {
                         .iter()
                         .filter(|e| matches!(e, egui::Event::PointerMoved(_)))
                         .count();
-                    if down_c > 0 || up_c > 0 {
+                    if down_c > 0 || up_c > 0 || move_c > 0 {
                         log::warn!(
-                            "[BATCH] Кадр: Down={} Move={} Up={} | отложено={} | всего_в_кадре={}",
+                            "[BATCH] Кадр: Down={} Move={} Up={} | отложено={} | всего_в_кадре={} | deferred_events={}",
                             down_c,
                             move_c,
                             up_c,
                             split_info.unwrap_or(0),
-                            events_for_frame.len()
+                            events_for_frame.len(),
+                            deferred_events.len(),
                         );
                         log::warn!(
                             "[BATCH] Viewport: rect=(0,{:.0}),({:.0},{:.0}) pp={} | native=({},{}) | insets=top:{:.0}(px:{}) bot:{:.0}(px:{})",
@@ -303,13 +308,21 @@ pub fn run<A: Application>(app: AndroidApp) {
                     egui::Pos2::new(0.0, top_inset),
                     egui::vec2(w as f32 / pp, (h as f32 / pp) - top_inset - bottom_inset),
                 );
+                // Время с предыдущего кадра — для стабильной децелерации fling.
+                // Используем elapsed, а не Instant::now() — egui внутри пересчитывает dt.
+                let predicted_dt = target_dt.as_secs_f64() as f32;
+                // Устанавливаем time = Instant::now() как f64.
+                // Без этого egui использует self.time + predicted_dt и время между кадрами
+                // может быть неправильным, что вызывает дёрганье скролла при повторном касании.
+                let time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64();
                 let raw_input = egui::RawInput {
                     screen_rect: Some(screen_rect),
                     events: events_for_frame,
-                    // Устанавливаем время для стабильной децелерации fling-анимации
-                    // НЕ устанавливаем time — egui использует Instant::now() внутри,
-                    // а переданное время может вызвать 'Time shouldn\'t move backwards'
-                    // при неравномерном FPS. Пусть egui сам управляет временем.
+                    predicted_dt,
+                    time: Some(time),
                     ..egui::RawInput::default()
                 };
 

@@ -21,7 +21,7 @@ repository = "https://gitverse.ru/Tofy3434/egui-android-framework"
 [workspace.dependencies]
 thiserror = "2.0"
 log = "0.4"
-egui = "0.31"
+egui = { version = "0.31", features = ["log"] }
 egui_glow = { version = "0.31" }
 glow = { version = "0.16" }
 tokio = { version = "1", features = ["sync"] }
@@ -36,3 +36,6 @@ lto = true
 codegen-units = 1
 strip = true
 debug = "none"
+
+[patch.crates-io]
+egui = { path = "patches/egui" }
