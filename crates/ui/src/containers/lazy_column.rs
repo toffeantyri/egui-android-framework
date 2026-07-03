@@ -16,7 +16,15 @@
 use egui_android_core::Dispatcher;
 
 /// Скроллируемый вертикальный список с ленивым рендерингом элементов.
-pub struct LazyColumn;
+pub struct LazyColumn {
+    item_spacing: f32,
+}
+
+impl Default for LazyColumn {
+    fn default() -> Self {
+        Self { item_spacing: 4.0 }
+    }
+}
 
 impl LazyColumn {
     /// Создать LazyColumn с замыканием-билдером для каждого элемента.
@@ -39,9 +47,27 @@ impl LazyColumn {
     ) where
         F: FnMut(&T, &mut egui::Ui, &Dispatcher<M>),
     {
-        let spacing = 4.0;
+        Self::default().render(items, ui, dispatch, item_builder);
+    }
+
+    /// Установить расстояние между элементами (по умолчанию 4.0).
+    pub fn item_spacing(mut self, spacing: f32) -> Self {
+        self.item_spacing = spacing;
+        self
+    }
+
+    /// Рендер с заданным spacing.
+    fn render<M: 'static, T, F>(
+        &self,
+        items: Vec<T>,
+        ui: &mut egui::Ui,
+        dispatch: &Dispatcher<M>,
+        item_builder: F,
+    ) where
+        F: FnMut(&T, &mut egui::Ui, &Dispatcher<M>),
+    {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, spacing);
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, self.item_spacing);
             let mut builder = item_builder;
             for (index, item) in items.iter().enumerate() {
                 ui.push_id(index, |ui| {

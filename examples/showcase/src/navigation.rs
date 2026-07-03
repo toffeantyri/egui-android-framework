@@ -17,6 +17,8 @@ pub enum Route {
     State,
     /// Анимации.
     Animations,
+    /// Новая Modifier value type.
+    ModifierValue,
 }
 
 impl Route {
@@ -30,6 +32,7 @@ impl Route {
             Route::Themes => "Темы",
             Route::State => "Локальное состояние",
             Route::Animations => "Анимации",
+            Route::ModifierValue => "Modifier Value",
         }
     }
 
@@ -43,6 +46,7 @@ impl Route {
             Route::Themes => "MaterialTheme, ColorPalette, Typography",
             Route::State => "remember, RememberState",
             Route::Animations => "AnimatedVisibility, Fade, Slide",
+            Route::ModifierValue => "Новая Modifier value type system",
         }
     }
 }

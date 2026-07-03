@@ -10,8 +10,8 @@ use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::{
     animations::AnimationsScreen, containers::ContainersScreen, home::HomeScreen,
-    modifiers::ModifiersScreen, state_screen::StateScreen, themes::ThemesScreen,
-    widgets::WidgetsScreen,
+    modifier_value::ModifierValueScreen, modifiers::ModifiersScreen, state_screen::StateScreen,
+    themes::ThemesScreen, widgets::WidgetsScreen,
 };
 
 /// Единый enum для всех экранов.
@@ -23,6 +23,7 @@ pub enum ScreenComponent {
     Themes(ThemesScreen),
     StateRef(StateScreen),
     Animations(AnimationsScreen),
+    ModifierValue(ModifierValueScreen),
 }
 
 impl ScreenComponent {
@@ -41,6 +42,7 @@ impl ScreenComponent {
             Route::Themes => Self::Themes(ThemesScreen::new()),
             Route::State => Self::StateRef(StateScreen::new()),
             Route::Animations => Self::Animations(AnimationsScreen::new()),
+            Route::ModifierValue => Self::ModifierValue(ModifierValueScreen::new()),
         }
     }
 
@@ -61,6 +63,7 @@ impl ScreenComponent {
             Self::Themes(s) => s.render(ui, dispatch),
             Self::StateRef(s) => s.render(ui, dispatch),
             Self::Animations(s) => s.render(ui, dispatch),
+            Self::ModifierValue(s) => s.render(ui, dispatch),
         }
     }
 }

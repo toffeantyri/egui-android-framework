@@ -312,7 +312,7 @@ fn test_text_multiple_renders() {
 fn test_column_empty() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |_ui, _dispatch| {
+        Column::with_content(ui, &dispatch, |_ui, _dispatch| {
             // пустая колонка — ничего не рендерим
         });
     });
@@ -322,7 +322,7 @@ fn test_column_empty() {
 fn test_column_with_children() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Text::new("A").render(ui, dispatch);
             Text::new("B").render(ui, dispatch);
         });
@@ -333,7 +333,7 @@ fn test_column_with_children() {
 fn test_column_with_spacing() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Text::new("A").render(ui, dispatch);
             Text::new("B").render(ui, dispatch);
         });
@@ -345,9 +345,9 @@ fn test_column_with_spacing() {
 fn test_column_nested() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Text::new("Outer").render(ui, dispatch);
-            Column::new(ui, dispatch, |ui, dispatch| {
+            Column::with_content(ui, dispatch, |ui, dispatch| {
                 Text::new("Inner").render(ui, dispatch);
             });
         });
@@ -358,7 +358,7 @@ fn test_column_nested() {
 fn test_column_with_text_widgets() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Text::new("Item 1").render(ui, dispatch);
             Text::new("Item 2").render(ui, dispatch);
             Text::new("Item 3").render(ui, dispatch);
@@ -370,7 +370,7 @@ fn test_column_with_text_widgets() {
 fn test_column_ordering_no_panic() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Text::new("First").render(ui, dispatch);
             Text::new("Second").render(ui, dispatch);
             // порядок гарантируется ui.vertical — не паникует
@@ -482,7 +482,7 @@ fn test_lazy_column_with_data() {
 fn test_containers_mixed() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new(ui, &dispatch, |ui, dispatch| {
+        Column::with_content(ui, &dispatch, |ui, dispatch| {
             Row::new(ui, dispatch, |ui, dispatch| {
                 Text::new("A").render(ui, dispatch);
                 Text::new("B").render(ui, dispatch);

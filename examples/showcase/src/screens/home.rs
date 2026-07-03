@@ -28,18 +28,21 @@ impl HomeScreen {
             Route::Themes,
             Route::State,
             Route::Animations,
+            Route::ModifierValue,
         ];
 
-        Column::new(ui, dispatch, |ui, dispatch| {
-            Text::new("Showcase").padding(8.0).render(ui, dispatch);
-            Spacer::new(16.0).render(ui, dispatch);
-            Text::new("Выберите демо:").render(ui, dispatch);
-            for route in routes {
-                Button::new(route.title())
-                    .on_click(RootMsg::Navigate(route))
-                    .padding(8.0)
-                    .render(ui, dispatch);
-            }
-        });
+        Column::new()
+            .scrollable()
+            .show(ui, dispatch, |ui, dispatch| {
+                Text::new("Showcase").padding(8.0).render(ui, dispatch);
+                Spacer::new(16.0).render(ui, dispatch);
+                Text::new("Выберите демо:").render(ui, dispatch);
+                for route in routes {
+                    Button::new(route.title())
+                        .on_click(RootMsg::Navigate(route))
+                        .padding(8.0)
+                        .render(ui, dispatch);
+                }
+            });
     }
 }

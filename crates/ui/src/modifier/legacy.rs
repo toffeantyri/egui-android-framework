@@ -120,8 +120,9 @@ impl<W: Widget<M>, M> Widget<M> for Aligned<W, M> {
 /// Модификатор, делающий виджет кликабельным.
 ///
 /// При клике по области виджета диспатчит заданное сообщение.
-/// В отличие от предыдущей версии, размер кликабельной области
-/// определяется размером внутреннего виджета, а не всей доступной областью.
+///
+/// ИСПРАВЛЕНИЕ БАГА: кликабельная область определяется
+/// реальным размером отрисованного контента, а не `available_size()`.
 pub struct Clickable<W, M> {
     inner: W,
     msg: M,
@@ -130,20 +131,19 @@ pub struct Clickable<W, M> {
 
 impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        // Сначала рендерим внутренний виджет, получаем размер его области
-        let (inner_rect, _inner_response) =
-            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        // 1. Рендерим внутренний виджет, измеряем реальный размер
+        let (content_rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("clickable_inner")
-                .max_rect(inner_rect)
+                .max_rect(content_rect)
                 .layout(*ui.layout()),
         );
         self.inner.render(&mut child_ui, dispatch);
-        let widget_size = child_ui.min_size();
+        let widget_min = child_ui.min_size();
 
-        // Затем аллоцируем кликабельную область только этого размера
-        let (_rect, response) = ui.allocate_exact_size(widget_size, egui::Sense::click());
+        // 2. Аллоцируем кликабельную область ровно по размеру контента
+        let (_rect, response) = ui.allocate_exact_size(widget_min, egui::Sense::click());
 
         if response.clicked() {
             dispatch.dispatch(self.msg.clone());
@@ -154,10 +154,14 @@ impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
 // ─── ClickableWith ─────────────────────────────────────────────────────────────
 
 /// Модификатор, делающий виджет кликабельным через closure.
+/// При клике по области виджета диспатчит заданное сообщение через closure.
 ///
 /// В отличие от [`Clickable`], принимает closure с доступом к `Response`,
 /// `Ui` и `Dispatcher`. Позволяет выполнять произвольные UI-действия
 /// при клике (например, модифицировать remember).
+///
+/// ИСПРАВЛЕНИЕ БАГА: кликабельная область определяется
+/// реальным размером отрисованного контента, а не `available_size()`.
 ///
 /// # Пример
 ///
@@ -178,7 +182,7 @@ pub struct ClickableWith<W, M> {
 
 impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        // Сначала рендерим внутренний виджет, получаем размер его области
+        // 1. Рендерим внутренний виджет, измеряем реальный размер
         let (inner_rect, _inner_response) =
             ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
         let mut child_ui = ui.new_child(
@@ -190,7 +194,7 @@ impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
         self.inner.render(&mut child_ui, dispatch);
         let widget_size = child_ui.min_size();
 
-        // Затем аллоцируем кликабельную область только этого размера
+        // 2. Аллоцируем кликабельную область ровно по размеру контента
         let (_rect, response) = ui.allocate_exact_size(widget_size, egui::Sense::click());
 
         (self.callback)(&response, ui, dispatch);
