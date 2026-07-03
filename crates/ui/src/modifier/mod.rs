@@ -15,10 +15,29 @@
 //! - создавать цепочки методов: `.padding(8.0).background(RED).clickable(msg)`
 //! - комбинировать layout, appearance и interaction модификаторы
 //!
-//! # Обратная совместимость
+//! # Приоритет модификаторов
+//!
+//! Модификаторы применяются **в порядке добавления** (первый — самый внешний):
+//!
+//! ```ignore
+//! Modifier::new()
+//!     .fill_max_width()       // 1. Резервирует всю ширину
+//!     .padding(16.0)           // 2. Внутри — отступ
+//!     .background(RED)         // 3. Фон рисуется поверх padding
+//!     .clickable(Msg::Click)   // 4. Кликабельная область = размер контента
+//! ```
+//!
+//! ### Порядок имеет значение
+//!
+//! - `.fill_max_width().padding(16.0)` — padding внутри полной ширины
+//! - `.padding(16.0).fill_max_width()` — сначала padding, потом растяжение (может не дать эффекта)
+//! - `.background(RED).padding(16.0)` — padding снаружи фона
+//! - `.padding(16.0).background(RED)` — фон поверх padding
+//!
+//! ### Обратная совместимость
 //!
 //! Старая система (`ModifierExt` blanket-impl) продолжает работать.
-//! Новая система доступна через [`ModifierExt2`].
+//! Новая система доступна через [`ModifierApply`].
 //!
 //! ```ignore
 //! // Новый API
@@ -245,7 +264,7 @@ mod value {
         }
 
         /// Скругление углов.
-        pub fn corner_radius(mut self, radius: f32) -> Self {
+        pub fn rounding(mut self, radius: f32) -> Self {
             self.nodes.push(ModifierNode::CornerRadius(radius));
             self
         }
@@ -461,13 +480,13 @@ mod value {
 
 /// Виджет с применённым модификатором.
 ///
-/// Создаётся через [`ModifierExt2::modifier()`].
-pub struct ModifiedWidget<W, M> {
+/// Создаётся через [`ModifierApply::modifier()`].
+pub struct Modified<W, M> {
     inner: W,
     modifier: Modifier<M>,
 }
 
-impl<W: Widget<M>, M: 'static + Clone> Widget<M> for ModifiedWidget<W, M> {
+impl<W: Widget<M>, M: 'static + Clone> Widget<M> for Modified<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
         self.modifier.apply(ui, dispatch, |ui, dispatch| {
             self.inner.render(ui, dispatch);
@@ -478,19 +497,19 @@ impl<W: Widget<M>, M: 'static + Clone> Widget<M> for ModifiedWidget<W, M> {
 /// Extension trait для использования новой Modifier системы.
 ///
 /// Добавляет метод `.modifier()` ко всем типам, реализующим `Widget<M>`.
-pub trait ModifierExt2<M>: Widget<M> + Sized {
+pub trait ModifierApply<M>: Widget<M> + Sized {
     /// Применить [`Modifier`] к виджету.
-    fn modifier(self, modifier: Modifier<M>) -> ModifiedWidget<Self, M>
+    fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone;
 }
 
-impl<T: Widget<M>, M> ModifierExt2<M> for T {
-    fn modifier(self, modifier: Modifier<M>) -> ModifiedWidget<Self, M>
+impl<T: Widget<M>, M> ModifierApply<M> for T {
+    fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone,
     {
-        ModifiedWidget {
+        Modified {
             inner: self,
             modifier,
         }

@@ -18,7 +18,7 @@ pub use animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
 pub use containers::{Column, LazyColumn, Row, Stack};
-pub use modifier::{legacy::ModifierExt, ModifiedWidget, Modifier, ModifierExt2};
+pub use modifier::{legacy::ModifierExt, Modified, Modifier, ModifierApply};
 pub use remember::*;
 pub use theme::{ColorPalette, FontWeight, MaterialTheme, Shapes, TextStyle, Theme, Typography};
 pub use widgets::{Button, Icon, Spacer, Text, Widget};

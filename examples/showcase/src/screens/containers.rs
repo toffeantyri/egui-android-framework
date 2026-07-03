@@ -29,7 +29,7 @@ impl ContainersScreen {
 
                 // Column (вертикально)
                 Text::new("Column (вертикально):").render(ui, dispatch);
-                Column::with_content(ui, dispatch, |ui, dispatch| {
+                Column::new().show(ui, dispatch, |ui, dispatch| {
                     Text::new("A")
                         .background(egui::Color32::from_gray(50))
                         .padding(4.0)

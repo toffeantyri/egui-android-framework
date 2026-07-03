@@ -53,11 +53,11 @@ impl Column {
     /// Компактный вариант: создать и сразу отобразить Column с содержимым.
     ///
     /// Эквивалентно `Column::new().show(ui, dispatch, content)`.
-    ///
-    /// Если нужен скролл, используй:
-    /// ```ignore
-    /// Column::new().scrollable().show(ui, dispatch, |ui, dispatch| { ... });
-    /// ```
+    /// Если нужен скролл, используй `Column::new().scrollable().show(...)`.
+    #[deprecated(
+        since = "0.4.0",
+        note = "используйте Column::new().show(ui, dispatch, content) или Column::new().scrollable().show(...)"
+    )]
     pub fn with_content<M: 'static, F>(ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
     where
         F: FnOnce(&mut egui::Ui, &Dispatcher<M>),

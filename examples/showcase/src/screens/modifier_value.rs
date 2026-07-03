@@ -1,7 +1,7 @@
 //! ModifierValueScreen — демонстрация новой Modifier value type системы.
 //!
 //! Показывает все возможности Modifier<M>: padding, fill_max_width, size,
-//! border, corner_radius, alpha, clickable и их комбинации.
+//! border, rounding, alpha, clickable и их комбинации.
 
 use egui::Color32;
 use egui_android_framework::{
@@ -9,7 +9,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::legacy::ModifierExt,
-        modifier::{Modifier, ModifierExt2},
+        modifier::{Modifier, ModifierApply},
         widgets::{Button, Spacer, Text, Widget},
     },
 };
@@ -66,14 +66,14 @@ impl ModifierValueScreen {
 
                 Spacer::new(8.0).render(ui, dispatch);
 
-                // 4. Border + corner radius
-                Text::new("Border + corner radius").render(ui, dispatch);
+                // 4. Border + rounding
+                Text::new("Border + rounding").render(ui, dispatch);
                 Text::new("Рамка 2px, скругление 8px")
                     .modifier(
                         Modifier::new()
                             .padding(12.0)
                             .border(2.0, Color32::WHITE)
-                            .corner_radius(8.0),
+                            .rounding(8.0),
                     )
                     .render(ui, dispatch);
 
@@ -100,7 +100,7 @@ impl ModifierValueScreen {
                             .fill_max_width()
                             .padding(16.0)
                             .background(Color32::from_rgb(40, 40, 80))
-                            .corner_radius(12.0)
+                            .rounding(12.0)
                             .border(1.0, Color32::GRAY)
                             .alpha(0.9),
                     )

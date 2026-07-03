@@ -116,7 +116,7 @@ impl<T: Clone> Clone for RememberState<T> {
 /// assert_eq!(*count.get(), 43);
 ///
 /// // Внутри замыкания Column:
-/// Column::with_content(ui, dispatch, |ui, dispatch| {
+/// Column::new().show(ui, dispatch, |ui, dispatch| {
 ///     let count = remember(ui, "counter", || 0i32);
 ///     Text::new(format!("{}", count.get())).render(ui, dispatch);
 ///     Button::new("+1").on_click({
