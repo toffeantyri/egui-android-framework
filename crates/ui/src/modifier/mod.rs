@@ -61,7 +61,7 @@ pub use legacy::*;
 pub use value::Modifier;
 
 mod value {
-    use egui::{Color32, CornerRadius, Rect, Response, Sense, Ui};
+    use egui::{Color32, CornerRadius, Response, Sense, Ui};
     use egui_android_core::Dispatcher;
 
     /// Единый тип модификатора — value type с цепочкой методов.
@@ -531,30 +531,44 @@ mod value {
 
                 // ===== INTERACTION =====
                 ModifierNode::Clickable(msg) => {
-                    // ИСПРАВЛЕНИЕ БАГА:
-                    // 1. Сначала рендерим content, чтобы измерить его размер
-                    // 2. Затем создаём интерактивную область ровно по этому размеру
-                    let mut content_rect = Rect::NOTHING;
+                    // ИСПРАВЛЕНИЕ БАГА (v2):
+                    // Резервируем интерактивную область ДО рендера контента,
+                    // чтобы egui корректно зарегистрировал взаимодействие.
+                    let content_rect = ui.available_rect_before_wrap();
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(content_rect.width(), content_rect.height()),
+                        Sense::click(),
+                    );
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("clickable")
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
+                    );
+                    // Убираем визуальное выделение при наведении/клике
+                    child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
+                    rest(&mut child_ui, dispatch);
 
-                    ui.scope(|ui| {
-                        rest(ui, dispatch);
-                        content_rect = ui.min_rect();
-                    });
-
-                    let response = ui.interact(content_rect, ui.next_auto_id(), Sense::click());
                     if response.clicked() {
                         dispatch.dispatch(msg.clone());
                     }
                 }
                 ModifierNode::ClickableWith(handler) => {
-                    let mut content_rect = Rect::NOTHING;
+                    let content_rect = ui.available_rect_before_wrap();
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(content_rect.width(), content_rect.height()),
+                        Sense::click(),
+                    );
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("clickable_with")
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
+                    );
+                    // Убираем визуальное выделение при наведении/клике
+                    child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
+                    rest(&mut child_ui, dispatch);
 
-                    ui.scope(|ui| {
-                        rest(ui, dispatch);
-                        content_rect = ui.min_rect();
-                    });
-
-                    let response = ui.interact(content_rect, ui.next_auto_id(), Sense::click());
                     if response.clicked() {
                         handler(&response, ui, dispatch);
                     }
