@@ -61,7 +61,7 @@ pub use legacy::*;
 pub use value::Modifier;
 
 mod value {
-    use egui::{Color32, Rect, Response, Sense, Ui};
+    use egui::{Color32, CornerRadius, Rect, Response, Sense, Ui};
     use egui_android_core::Dispatcher;
 
     /// Единый тип модификатора — value type с цепочкой методов.
@@ -99,6 +99,8 @@ mod value {
         // Size constraints
         FillMaxWidth,
         FillMaxSize,
+        WrapContentWidth,
+        WrapContentSize,
         Width(f32),
         Height(f32),
         WidthIn {
@@ -118,6 +120,8 @@ mod value {
         },
         CornerRadius(f32),
         Alpha(f32),
+        Clip(CornerRadius),
+        Shadow(f32),
 
         // Interaction
         Clickable(M),
@@ -151,6 +155,8 @@ mod value {
                     .finish(),
                 ModifierNode::FillMaxWidth => f.debug_tuple("FillMaxWidth").finish(),
                 ModifierNode::FillMaxSize => f.debug_tuple("FillMaxSize").finish(),
+                ModifierNode::WrapContentWidth => f.debug_tuple("WrapContentWidth").finish(),
+                ModifierNode::WrapContentSize => f.debug_tuple("WrapContentSize").finish(),
                 ModifierNode::Width(v) => f.debug_tuple("Width").field(v).finish(),
                 ModifierNode::Height(v) => f.debug_tuple("Height").field(v).finish(),
                 ModifierNode::WidthIn { min, max } => f
@@ -171,6 +177,8 @@ mod value {
                     .finish(),
                 ModifierNode::CornerRadius(v) => f.debug_tuple("CornerRadius").field(v).finish(),
                 ModifierNode::Alpha(v) => f.debug_tuple("Alpha").field(v).finish(),
+                ModifierNode::Clip(r) => f.debug_tuple("Clip").field(r).finish(),
+                ModifierNode::Shadow(v) => f.debug_tuple("Shadow").field(v).finish(),
                 ModifierNode::Clickable(m) => f.debug_tuple("Clickable").field(m).finish(),
                 ModifierNode::ClickableWith(_) => f.debug_tuple("ClickableWith").finish(),
             }
@@ -225,6 +233,18 @@ mod value {
             self
         }
 
+        /// Ширина равна ширине содержимого (не растягивается на всю ширину родителя).
+        pub fn wrap_content_width(mut self) -> Self {
+            self.nodes.push(ModifierNode::WrapContentWidth);
+            self
+        }
+
+        /// Размер равен размеру содержимого (и ширина, и высота — по контенту).
+        pub fn wrap_content_size(mut self) -> Self {
+            self.nodes.push(ModifierNode::WrapContentSize);
+            self
+        }
+
         /// Фиксированная ширина.
         pub fn width(mut self, w: f32) -> Self {
             self.nodes.push(ModifierNode::Width(w));
@@ -272,6 +292,23 @@ mod value {
         /// Прозрачность (0.0 — полностью прозрачный, 1.0 — непрозрачный).
         pub fn alpha(mut self, alpha: f32) -> Self {
             self.nodes.push(ModifierNode::Alpha(alpha.clamp(0.0, 1.0)));
+            self
+        }
+
+        /// Обрезка содержимого по скруглению.
+        ///
+        /// Полезно для контейнеров с закруглёнными углами.
+        pub fn clip(mut self, rounding: CornerRadius) -> Self {
+            self.nodes.push(ModifierNode::Clip(rounding));
+            self
+        }
+
+        /// Тень (имитация через stroke).
+        ///
+        /// `elevation` — высота тени. Чем больше значение, тем толще и темнее тень.
+        /// В egui нет нативной поддержки теней — реализовано через `Frame.stroke()`.
+        pub fn shadow(mut self, elevation: f32) -> Self {
+            self.nodes.push(ModifierNode::Shadow(elevation));
             self
         }
 
@@ -389,6 +426,29 @@ mod value {
                         rest(ui, dispatch);
                     });
                 }
+                ModifierNode::WrapContentWidth => {
+                    // Измеряем размер содержимого, рендерим один раз
+                    let response = ui.scope(|ui| {
+                        rest(ui, dispatch);
+                        ui.min_rect().size()
+                    });
+                    let content_size = response.inner;
+                    // Аллоцируем ровно эту ширину
+                    ui.allocate_exact_size(
+                        egui::vec2(content_size.x, content_size.y),
+                        Sense::hover(),
+                    );
+                }
+                ModifierNode::WrapContentSize => {
+                    // Измеряем размер содержимого, рендерим один раз
+                    let response = ui.scope(|ui| {
+                        rest(ui, dispatch);
+                        ui.min_rect().size()
+                    });
+                    let content_size = response.inner;
+                    // Аллоцируем ровно этот размер
+                    ui.allocate_exact_size(content_size, Sense::hover());
+                }
                 ModifierNode::Width(w) => {
                     ui.allocate_ui_with_layout(
                         egui::vec2(*w, ui.available_height()),
@@ -441,6 +501,32 @@ mod value {
                         ui.multiply_opacity(*alpha);
                         rest(ui, dispatch);
                     });
+                }
+                ModifierNode::Clip(rounding) => {
+                    // Обрезаем содержимое по скруглению через Frame
+                    let frame = egui::Frame::NONE
+                        .corner_radius(*rounding)
+                        .inner_margin(egui::Margin::ZERO);
+                    frame.show(ui, |ui| {
+                        rest(ui, dispatch);
+                    });
+                }
+                ModifierNode::Shadow(elevation) => {
+                    if *elevation > 0.0 {
+                        // Имитация тени через stroke
+                        let alpha = ((*elevation * 20.0) as u8).min(100);
+                        let shadow_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, alpha);
+                        let shadow_radius = (*elevation as u8).min(16);
+                        let frame = egui::Frame::NONE
+                            .stroke(egui::Stroke::new(1.0, shadow_color))
+                            .corner_radius(egui::CornerRadius::same(shadow_radius))
+                            .inner_margin(egui::Margin::same(*elevation as i8));
+                        frame.show(ui, |ui| {
+                            rest(ui, dispatch);
+                        });
+                    } else {
+                        rest(ui, dispatch);
+                    }
                 }
 
                 // ===== INTERACTION =====

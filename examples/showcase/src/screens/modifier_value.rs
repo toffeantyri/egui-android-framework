@@ -133,7 +133,59 @@ impl ModifierValueScreen {
 
                 Spacer::new(8.0).render(ui, dispatch);
 
-                // 9. Кнопка назад
+                // ─── Новое в Этапе 2 ────────────────────────────────────────
+
+                // 9. wrap_content_width
+                Text::new("wrap_content_width").render(ui, dispatch);
+                Text::new("Короткий текст (wrap_content_width)")
+                    .modifier(
+                        Modifier::new()
+                            .wrap_content_width()
+                            .background(Color32::RED),
+                    )
+                    .render(ui, dispatch);
+
+                Spacer::new(8.0).render(ui, dispatch);
+
+                // 10. wrap_content_size
+                Text::new("wrap_content_size").render(ui, dispatch);
+                Text::new("Короткий (wrap_content_size)")
+                    .modifier(
+                        Modifier::new()
+                            .wrap_content_size()
+                            .background(Color32::BLUE),
+                    )
+                    .render(ui, dispatch);
+
+                Spacer::new(8.0).render(ui, dispatch);
+
+                // 11. clip
+                Text::new("clip").render(ui, dispatch);
+                Text::new("Длинный текст, который будет обрезан по скруглению")
+                    .modifier(
+                        Modifier::new()
+                            .clip(egui::CornerRadius::same(8))
+                            .padding(8.0)
+                            .background(Color32::from_rgb(40, 80, 40)),
+                    )
+                    .render(ui, dispatch);
+
+                Spacer::new(8.0).render(ui, dispatch);
+
+                // 12. shadow
+                Text::new("shadow").render(ui, dispatch);
+                Text::new("С тенью")
+                    .modifier(
+                        Modifier::new()
+                            .padding(16.0)
+                            .shadow(4.0)
+                            .background(Color32::WHITE),
+                    )
+                    .render(ui, dispatch);
+
+                Spacer::new(8.0).render(ui, dispatch);
+
+                // 13. Кнопка назад
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
                     .padding(8.0)

@@ -8,7 +8,7 @@ use egui_android_ui::animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
 use egui_android_ui::containers::{Column, LazyColumn, Row, Stack};
-use egui_android_ui::modifier::ModifierExt;
+use egui_android_ui::modifier::{Modifier, ModifierApply, ModifierExt};
 use egui_android_ui::theme::{MaterialTheme, Shapes, Theme};
 use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
 
@@ -887,4 +887,98 @@ fn test_typography_default_sizes() {
     assert_eq!(typography.headline_large.size, 22.0);
     // body_medium: 14px
     assert_eq!(typography.body_medium.size, 14.0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// STAGE 2: NEW MODIFIER TESTS (wrap_content_width, wrap_content_size, clip, shadow)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_wrap_content_width_renders_without_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Короткий")
+            .modifier(
+                Modifier::new()
+                    .wrap_content_width()
+                    .background(egui::Color32::RED),
+            )
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_wrap_content_size_renders_without_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Короткий")
+            .modifier(
+                Modifier::new()
+                    .wrap_content_size()
+                    .background(egui::Color32::BLUE),
+            )
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_clip_renders_without_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Обрезаемый текст")
+            .modifier(
+                Modifier::new()
+                    .clip(egui::CornerRadius::same(8))
+                    .padding(8.0),
+            )
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_shadow_renders_without_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("С тенью")
+            .modifier(
+                Modifier::new()
+                    .padding(16.0)
+                    .shadow(4.0)
+                    .background(egui::Color32::WHITE),
+            )
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_wrap_content_width_in_row_does_not_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Левый")
+                .modifier(
+                    Modifier::new()
+                        .wrap_content_width()
+                        .background(egui::Color32::DARK_GRAY),
+                )
+                .render(ui, dispatch);
+            Text::new("Правый")
+                .modifier(
+                    Modifier::new()
+                        .wrap_content_width()
+                        .background(egui::Color32::DARK_BLUE),
+                )
+                .render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_shadow_zero_does_not_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Без тени")
+            .modifier(Modifier::new().shadow(0.0))
+            .render(ui, &dispatch);
+    });
 }
