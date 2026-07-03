@@ -14,6 +14,7 @@
 
 pub mod egl_backend;
 pub mod input;
+pub mod insets;
 pub mod run;
 
 #[cfg(target_os = "android")]

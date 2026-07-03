@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Своя тема для NativeActivity: без ActionBar и без TitleBar.
+         Родительская тема Theme.Material.Light.NoActionBar
+         гарантирует, что даже MIUI не добавит ActionBar.
+         windowNoTitle и NoActionBar — redundant, для совместимости. -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+</resources>

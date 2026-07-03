@@ -11,6 +11,16 @@ use android_activity::{
     InputStatus,
 };
 
+/// Диагностический лог для ввода. Активен только в debug-сборке.
+macro_rules! input_log {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        {
+            log::debug!($($arg)*);
+        }
+    };
+}
+
 /// Результат обработки ввода за кадр.
 pub(crate) struct InputState {
     /// Накопленные события egui (pointer, keyboard и т.д.)
@@ -65,7 +75,16 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
             let pointer = motion.pointers().next();
             match (action, pointer) {
                 (MotionAction::Down, Some(p)) | (MotionAction::PointerDown, Some(p)) => {
+                    // Координаты в системных пикселях.
+                    // egui сам учтёт screen_rect.min.y при трансформации.
                     let pos = egui::pos2(p.x() / pp, p.y() / pp);
+                    input_log!(
+                        "[INPUT] Touch Down: screen_pos=({:.1}, {:.1}) native_px=({:.0}, {:.0})",
+                        pos.x,
+                        pos.y,
+                        p.x(),
+                        p.y()
+                    );
                     state.pointer_pos = Some(pos);
                     state.events.push(egui::Event::PointerButton {
                         pos,
@@ -78,6 +97,11 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
                 (MotionAction::Up, _)
                 | (MotionAction::PointerUp, _)
                 | (MotionAction::Cancel, _) => {
+                    input_log!(
+                        "[INPUT] Touch Up/Cancel: action={:?} last_screen_pos={:?}",
+                        action,
+                        state.pointer_pos
+                    );
                     if let Some(pos) = state.pointer_pos {
                         state.events.push(egui::Event::PointerButton {
                             pos,
@@ -93,6 +117,11 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
                     let pos = egui::pos2(p.x() / pp, p.y() / pp);
                     state.pointer_pos = Some(pos);
                     state.events.push(egui::Event::PointerMoved(pos));
+                    input_log!(
+                        "[INPUT] Touch Move: screen_pos=({:.1}, {:.1})",
+                        pos.x,
+                        pos.y
+                    );
                     InputStatus::Handled
                 }
                 _ => InputStatus::Unhandled,

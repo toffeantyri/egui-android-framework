@@ -44,6 +44,7 @@ pub fn run<A: Application>(app: AndroidApp) {
 
     let mut input_state = InputState::new();
     let mut surface_needs_recreation = false;
+    let mut deferred_events: Vec<egui::Event> = Vec::new();
 
     // Создаём waker для Android event loop.
     let waker = app.create_waker();
@@ -67,6 +68,9 @@ pub fn run<A: Application>(app: AndroidApp) {
                 MainEvent::InitWindow { .. } => {
                     log::info!("Lifecycle: InitWindow");
                     surface_needs_recreation = true;
+                    // Флаги set_window_flags не применяем — они ломают рендеринг на MIUI.
+                    // ActionBar скрываем через тему @android:style/Theme.Material.Light.NoActionBar.Fullscreen
+                    // в AndroidManifest.xml.
                 }
                 MainEvent::Resume { .. } => {
                     log::info!("Lifecycle: Resume");
@@ -209,19 +213,103 @@ pub fn run<A: Application>(app: AndroidApp) {
                 }
 
                 let pp = egui_ctx.pixels_per_point();
-                let top_inset = 45.0_f32.min(h as f32 / pp * 0.06);
-                let bottom_inset = 48.0_f32.min(h as f32 / pp * 0.06);
+                let content_rect = app.content_rect();
+                // content_rect.top на MIUI включает DisplayCutout (334px вместо 152px).
+                // content_rect.bottom работает корректно.
+                let top_inset = crate::insets::get_top_inset_pt(h as i32, content_rect.top, pp);
+                let bottom_inset = (h as i32 - content_rect.bottom) as f32 / pp;
 
-                // Забираем ВСЕ накопившиеся события одним блоком —
-                // DOWN и UP, пришедшие между кадрами, попадают в один run().
-                let events = std::mem::take(&mut input_state.events);
+                #[cfg(debug_assertions)]
+                log::warn!(
+                    "[BATCH] content_rect raw: left={} top={} right={} bottom={} | native_size=({},{}) pp={} | insets=top:{:.0}(fixed) bot:{:.0}(from-content)",
+                    content_rect.left, content_rect.top, content_rect.right, content_rect.bottom,
+                    w, h, pp,
+                    top_inset, bottom_inset
+                );
 
+                // ─── Умная упаковка событий в кадр ─────────────────────────
+                let mut new_events = std::mem::take(&mut input_state.events);
+
+                if !deferred_events.is_empty() {
+                    let mut prev = std::mem::take(&mut deferred_events);
+                    prev.append(&mut new_events);
+                    new_events = prev;
+                }
+
+                let has_down = new_events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }));
+
+                let (events_for_frame, split_info) = if has_down {
+                    let mut split_idx = None;
+                    for (i, e) in new_events.iter().enumerate() {
+                        if matches!(e, egui::Event::PointerButton { pressed: true, .. }) {
+                            split_idx = Some(i + 1);
+                            break;
+                        }
+                    }
+                    if let Some(idx) = split_idx {
+                        let deferred = new_events.split_off(idx);
+                        let deferred_count = deferred.len();
+                        deferred_events = deferred;
+                        (new_events, Some(deferred_count))
+                    } else {
+                        (new_events, None)
+                    }
+                } else {
+                    (new_events, None)
+                };
+
+                #[cfg(debug_assertions)]
+                {
+                    let down_c = events_for_frame
+                        .iter()
+                        .filter(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }))
+                        .count();
+                    let up_c = events_for_frame
+                        .iter()
+                        .filter(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. }))
+                        .count();
+                    let move_c = events_for_frame
+                        .iter()
+                        .filter(|e| matches!(e, egui::Event::PointerMoved(_)))
+                        .count();
+                    if down_c > 0 || up_c > 0 {
+                        log::warn!(
+                            "[BATCH] Кадр: Down={} Move={} Up={} | отложено={} | всего_в_кадре={}",
+                            down_c,
+                            move_c,
+                            up_c,
+                            split_info.unwrap_or(0),
+                            events_for_frame.len()
+                        );
+                        log::warn!(
+                            "[BATCH] Viewport: rect=(0,{:.0}),({:.0},{:.0}) pp={} | native=({},{}) | insets=top:{:.0}(px:{}) bot:{:.0}(px:{})",
+                            top_inset,
+                            w as f32 / pp,
+                            (h as f32 / pp) - top_inset - bottom_inset,
+                            pp,
+                            w,
+                            h,
+                            top_inset,
+                            (top_inset * pp) as i32,
+                            bottom_inset,
+                            (bottom_inset * pp) as i32
+                        );
+                    }
+                }
+
+                let screen_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(0.0, top_inset),
+                    egui::vec2(w as f32 / pp, (h as f32 / pp) - top_inset - bottom_inset),
+                );
                 let raw_input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::new(0.0, top_inset),
-                        egui::vec2(w as f32 / pp, (h as f32 / pp) - top_inset - bottom_inset),
-                    )),
-                    events,
+                    screen_rect: Some(screen_rect),
+                    events: events_for_frame,
+                    // Устанавливаем время для стабильной децелерации fling-анимации
+                    // НЕ устанавливаем time — egui использует Instant::now() внутри,
+                    // а переданное время может вызвать 'Time shouldn\'t move backwards'
+                    // при неравномерном FPS. Пусть egui сам управляет временем.
                     ..egui::RawInput::default()
                 };
 
@@ -256,8 +344,12 @@ pub fn run<A: Application>(app: AndroidApp) {
 }
 
 fn compute_pixels_per_point(width: i32, height: i32) -> f32 {
+    // Диагональ экрана в пикселях, нормализация к 400pt базе
+    // На современных телефонах (1080p-1440p) даёт pp ≈ 2.5..3.5
     let w = width.max(height) as f32;
-    (w / 400.0).max(1.0).min(5.0)
+    let pp = (w / 450.0).max(1.5).min(4.0);
+    log::info!("compute_pixels_per_point: {}x{} → pp={}", width, height, pp);
+    pp
 }
 
 unsafe fn gl_clear(gl: &glow::Context) {
