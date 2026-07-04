@@ -16,6 +16,7 @@ android-activity = { workspace = true }
 android_logger = { workspace = true }
 ndk = { workspace = true }
 libc = { workspace = true }
+jni = "0.21"
 
 egui-android-platform = { version = "0.3.2-alpha.1", path = "../platform" }
 egui-android-runtime = { version = "0.3.2-alpha.1", path = "../runtime" }

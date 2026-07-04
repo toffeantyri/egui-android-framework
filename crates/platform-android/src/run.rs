@@ -67,6 +67,21 @@ pub fn run<A: Application>(app: AndroidApp) {
                 MainEvent::InitWindow { .. } => {
                     log::info!("Lifecycle: InitWindow");
                     surface_needs_recreation = true;
+
+                    // После создания окна запрашиваем insets через JNI на главном Java-потоке.
+                    // В этот момент DecorView уже существует, getRootWindowInsets() вернёт корректные значения.
+                    let vm_ptr = app.vm_as_ptr() as usize;
+                    let activity_ptr = app.activity_as_ptr() as usize;
+                    app.run_on_java_main_thread(Box::new(move || {
+                        let vm = vm_ptr as *mut std::ffi::c_void;
+                        let activity = activity_ptr as *mut std::ffi::c_void;
+                        if let Some(insets) = crate::insets::get_system_insets_jni(vm, activity) {
+                            crate::insets::store_insets(&insets);
+                        } else {
+                            log::warn!("JNI insets не получены — будет использован fallback");
+                        }
+                    }));
+
                     // Флаги set_window_flags не применяем — они ломают рендеринг на MIUI.
                     // ActionBar скрываем через тему @android:style/Theme.Material.Light.NoActionBar.Fullscreen
                     // в AndroidManifest.xml.
@@ -128,7 +143,8 @@ pub fn run<A: Application>(app: AndroidApp) {
                                     gl_clear(&*painter.gl());
                                 }
                             }
-                            let pp = compute_pixels_per_point(nw.width(), nw.height());
+                            // При пересоздании surface обновляем pp на случай смены конфигурации
+                            let pp = get_pixels_per_point(&app, nw.width(), nw.height());
                             egui_ctx.set_pixels_per_point(pp);
                         }
                         Err(e) => {
@@ -168,7 +184,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                                     gl_clear(&*painter.gl());
                                 }
                                 egui_ctx.set_fonts(egui::FontDefinitions::default());
-                                let pp = compute_pixels_per_point(nw.width(), nw.height());
+                                let pp = get_pixels_per_point(&app, nw.width(), nw.height());
                                 egui_ctx.set_pixels_per_point(pp);
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
@@ -213,17 +229,14 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                 let pp = egui_ctx.pixels_per_point();
                 let content_rect = app.content_rect();
-                // content_rect.top на MIUI включает DisplayCutout (334px вместо 152px).
-                // content_rect.bottom работает корректно.
-                let top_inset = crate::insets::get_top_inset_pt(h as i32, content_rect.top, pp);
-                let bottom_inset = (h as i32 - content_rect.bottom) as f32 / pp;
+                let (left_inset, top_inset, right_inset, bottom_inset) =
+                    crate::insets::get_insets_pt(w as i32, h as i32, &content_rect, pp);
 
                 #[cfg(debug_assertions)]
                 log::warn!(
-                    "[BATCH] content_rect raw: left={} top={} right={} bottom={} | native_size=({},{}) pp={} | insets=top:{:.0}(fixed) bot:{:.0}(from-content)",
-                    content_rect.left, content_rect.top, content_rect.right, content_rect.bottom,
+                    "[BATCH] native_size=({},{}) pp={} | insets=left:{:.1} top:{:.1} right:{:.1} bottom:{:.1}",
                     w, h, pp,
-                    top_inset, bottom_inset
+                    left_inset, top_inset, right_inset, bottom_inset
                 );
 
                 // Все события в кадре — батчинг не нужен, патч egui сам обнуляет
@@ -231,8 +244,11 @@ pub fn run<A: Application>(app: AndroidApp) {
                 let events_for_frame = std::mem::take(&mut input_state.events);
 
                 let screen_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(0.0, top_inset),
-                    egui::vec2(w as f32 / pp, (h as f32 / pp) - top_inset - bottom_inset),
+                    egui::Pos2::new(left_inset, top_inset),
+                    egui::vec2(
+                        (w as f32 / pp) - left_inset - right_inset,
+                        (h as f32 / pp) - top_inset - bottom_inset,
+                    ),
                 );
                 // Время с предыдущего кадра — для стабильной децелерации fling.
                 // Используем elapsed, а не Instant::now() — egui внутри пересчитывает dt.
@@ -282,13 +298,13 @@ pub fn run<A: Application>(app: AndroidApp) {
     }
 }
 
-fn compute_pixels_per_point(width: i32, height: i32) -> f32 {
-    // Диагональ экрана в пикселях, нормализация к 400pt базе
-    // На современных телефонах (1080p-1440p) даёт pp ≈ 2.5..3.5
-    let w = width.max(height) as f32;
-    let pp = (w / 450.0).max(1.5).min(4.0);
-    log::info!("compute_pixels_per_point: {}x{} → pp={}", width, height, pp);
-    pp
+/// Получить pixels_per_point из реальной плотности экрана (densityDpi).
+///
+/// Приоритет:
+/// 1. Реальная плотность из `AndroidApp::config().density()`
+/// 2. Эвристика на основе размера экрана (если density недоступен)
+fn get_pixels_per_point(app: &AndroidApp, width: i32, height: i32) -> f32 {
+    crate::insets::get_density(&app.config(), width, height)
 }
 
 unsafe fn gl_clear(gl: &glow::Context) {
