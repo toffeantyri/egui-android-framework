@@ -8,9 +8,9 @@ publish = true
 description = "Umbrella crate — re-exports all egui-android-* crates"
 
 [dependencies]
-egui-android-core = { path = "../core" }
-egui-android-ui = { path = "../ui" }
-egui-android-navigation = { path = "../navigation" }
-egui-android-runtime = { path = "../runtime" }
-egui-android-platform = { path = "../platform" }
-egui-android-platform-android = { path = "../platform-android" }
+egui-android-core = { version = "0.3.2-alpha.1", path = "../core" }
+egui-android-ui = { version = "0.3.2-alpha.1", path = "../ui" }
+egui-android-navigation = { version = "0.3.2-alpha.1", path = "../navigation" }
+egui-android-runtime = { version = "0.3.2-alpha.1", path = "../runtime" }
+egui-android-platform = { version = "0.3.2-alpha.1", path = "../platform" }
+egui-android-platform-android = { version = "0.3.2-alpha.1", path = "../platform-android" }

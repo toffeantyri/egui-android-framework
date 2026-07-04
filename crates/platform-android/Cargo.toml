@@ -17,11 +17,11 @@ android_logger = { workspace = true }
 ndk = { workspace = true }
 libc = { workspace = true }
 
-egui-android-platform = { path = "../platform" }
-egui-android-runtime = { path = "../runtime" }
+egui-android-platform = { version = "0.3.2-alpha.1", path = "../platform" }
+egui-android-runtime = { version = "0.3.2-alpha.1", path = "../runtime" }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 egui = { workspace = true }
 log = { workspace = true }
 
-egui-android-platform = { path = "../platform" }
+egui-android-platform = { version = "0.3.2-alpha.1", path = "../platform" }
