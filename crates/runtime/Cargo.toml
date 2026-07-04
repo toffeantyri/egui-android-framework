@@ -1,0 +1,13 @@
+[package]
+name = "egui-android-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime layer — Application, Dispatcher, StateStore, UiNotifier"
+
+[dependencies]
+egui = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }

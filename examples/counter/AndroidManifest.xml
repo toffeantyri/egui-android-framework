@@ -10,7 +10,8 @@
 
         <activity
             android:name="android.app.NativeActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/AppTheme">
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="egui_android_counter" />
