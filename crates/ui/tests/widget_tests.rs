@@ -17,7 +17,7 @@ use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
 fn with_ui(f: impl FnOnce(&mut egui::Ui)) {
     let f = RefCell::new(Some(f));
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let f = f.borrow_mut().take().unwrap();
             f(ui);

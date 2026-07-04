@@ -4,7 +4,7 @@ use std::cell::RefCell;
 fn with_ui(f: impl FnOnce(&mut egui::Ui)) {
     let f = RefCell::new(Some(f));
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let f = f.borrow_mut().take().unwrap();
             f(ui);
@@ -23,13 +23,13 @@ fn remember_initializes_value_on_first_call() {
 #[test]
 fn remember_preserves_value_between_frames() {
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let state = remember(ui, "test_key", || 0);
             state.set(100);
         });
     });
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let state = remember(ui, "test_key", || 0);
             assert_eq!(*state.get(), 100);
@@ -71,7 +71,7 @@ fn remember_set_overwrites_value() {
 fn remember_init_called_lazily() {
     let ctx = egui::Context::default();
     let mut call_count = 0;
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let state = remember(ui, "lazy_key", || {
                 call_count += 1;
@@ -81,7 +81,7 @@ fn remember_init_called_lazily() {
             assert_eq!(call_count, 1);
         });
     });
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let state = remember(ui, "lazy_key", || {
                 call_count += 1;
@@ -167,21 +167,16 @@ fn remember_set_get_same_frame() {
 
 #[test]
 fn remember_clone_shares_state() {
-    // Clone через Arc::clone разделяет один RwLock между всеми клонами.
-    // Изменения через любой клон видны во всех остальных.
     with_ui(|ui| {
         let original = remember(ui, "clone_share", || 0i32);
         let clone = original.clone();
 
-        // Изменение через клон видно в оригинале
         clone.set(42);
         assert_eq!(*original.get(), 42, "clone должен разделять состояние");
 
-        // Изменение через оригинал видно в клоне
         original.modify(|c| *c += 1);
         assert_eq!(*clone.get(), 43, "изменения в оригинале видны в клоне");
 
-        // Множественные клоны
         let clone2 = clone.clone();
         clone2.set(100);
         assert_eq!(*original.get(), 100, "все клоны разделяют одно состояние");
@@ -191,8 +186,6 @@ fn remember_clone_shares_state() {
 
 #[test]
 fn remember_returns_same_arc_between_calls() {
-    // Между вызовами remember() возвращается тот же Arc<RwLock<T>>,
-    // так как он хранится в IdTypeMap.
     with_ui(|ui| {
         let state1 = remember(ui, "same_arc", || 0i32);
         state1.set(42);
