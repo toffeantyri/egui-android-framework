@@ -88,7 +88,7 @@ impl Application for CounterApp {
 
         let (dispatcher, receiver) = Dispatcher::new();
 
-        let full_output = egui_ctx.run(raw_input, |ctx| {
+        let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.root.render(ui, &dispatcher);
             });

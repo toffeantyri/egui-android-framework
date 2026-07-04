@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 egui-android-framework = { path = "../../crates/framework" }
-egui = "0.31"
+egui = "0.35"
 log = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]

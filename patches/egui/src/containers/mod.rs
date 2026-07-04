@@ -1,31 +1,36 @@
-//! Containers are pieces of the UI which wraps other pieces of UI. Examples: [`Window`], [`ScrollArea`], [`Resize`], [`SidePanel`], etc.
+//! Containers are pieces of the UI which wraps other pieces of UI. Examples: [`Window`], [`ScrollArea`], [`Resize`], [`Panel`], etc.
 //!
 //! For instance, a [`Frame`] adds a frame and background to some contained UI.
 
 pub(crate) mod area;
+mod close_tag;
 pub mod collapsing_header;
 mod combo_box;
 pub mod frame;
+pub mod menu;
 pub mod modal;
 pub mod panel;
-pub mod popup;
+mod popup;
 pub(crate) mod resize;
 mod scene;
 pub mod scroll_area;
 mod sides;
+mod tooltip;
 pub(crate) mod window;
 
 pub use {
     area::{Area, AreaState},
+    close_tag::ClosableTag,
     collapsing_header::{CollapsingHeader, CollapsingResponse},
     combo_box::*,
     frame::Frame,
     modal::{Modal, ModalResponse},
-    panel::{CentralPanel, SidePanel, TopBottomPanel},
+    panel::*,
     popup::*,
     resize::Resize,
-    scene::Scene,
+    scene::{DragPanButtons, Scene},
     scroll_area::ScrollArea,
     sides::Sides,
-    window::Window,
+    tooltip::*,
+    window::{Window, WindowDrag},
 };

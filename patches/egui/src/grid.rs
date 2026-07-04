@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use emath::GuiRounding as _;
 
 use crate::{
-    vec2, Align2, Color32, Context, Id, InnerResponse, NumExt, Painter, Rect, Region, Style, Ui,
-    UiBuilder, Vec2,
+    Align2, AsIdSalt, Color32, Context, Id, IdSalt, InnerResponse, NumExt as _, Painter, Rect,
+    Region, Style, Ui, UiBuilder, Vec2, vec2,
 };
 
 #[cfg(debug_assertions)]
@@ -102,7 +104,7 @@ impl GridLayout {
 
         Self {
             ctx: ui.ctx().clone(),
-            style: ui.style().clone(),
+            style: Arc::clone(ui.style()),
             id,
             is_first_frame,
             prev_state,
@@ -184,7 +186,7 @@ impl GridLayout {
         Rect::from_min_size(cursor.min, size).round_ui()
     }
 
-    #[allow(clippy::unused_self)]
+    #[expect(clippy::unused_self)]
     pub(crate) fn align_size_within_rect(&self, size: Vec2, frame: Rect) -> Rect {
         // TODO(emilk): allow this alignment to be customized
         Align2::LEFT_CENTER
@@ -310,7 +312,7 @@ impl GridLayout {
 /// ```
 #[must_use = "You should call .show()"]
 pub struct Grid {
-    id_salt: Id,
+    id_salt: IdSalt,
     num_columns: Option<usize>,
     min_col_width: Option<f32>,
     min_row_height: Option<f32>,
@@ -322,9 +324,9 @@ pub struct Grid {
 
 impl Grid {
     /// Create a new [`Grid`] with a locally unique identifier.
-    pub fn new(id_salt: impl std::hash::Hash) -> Self {
+    pub fn new(id_salt: impl AsIdSalt) -> Self {
         Self {
-            id_salt: Id::new(id_salt),
+            id_salt: IdSalt::new(id_salt),
             num_columns: None,
             min_col_width: None,
             min_row_height: None,
@@ -449,14 +451,14 @@ impl Grid {
 
             if ui.is_visible() {
                 // Try to cover up the glitchy initial frame:
-                ui.ctx().request_discard("new Grid");
+                ui.request_discard("new Grid");
             }
 
             // Hide the ui this frame, and make things as narrow as possible:
             ui_builder = ui_builder.sizing_pass().invisible();
         }
 
-        ui.allocate_new_ui(ui_builder, |ui| {
+        ui.scope_builder(ui_builder, |ui| {
             ui.horizontal(|ui| {
                 let is_color = color_picker.is_some();
                 let grid = GridLayout {

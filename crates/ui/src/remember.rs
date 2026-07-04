@@ -127,7 +127,7 @@ impl<T: Clone> Clone for RememberState<T> {
 /// ```
 pub fn remember<T: Clone + Send + Sync + 'static>(
     ui: &Ui,
-    key: impl Hash,
+    key: impl Hash + std::fmt::Debug,
     init: impl FnOnce() -> T,
 ) -> RememberState<T> {
     let id = ui.id().with(key);

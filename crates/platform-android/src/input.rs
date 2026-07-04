@@ -50,9 +50,18 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
                 (MotionAction::Down, Some(p)) | (MotionAction::PointerDown, Some(p)) => {
                     let pos = egui::pos2(p.x() / pp, p.y() / pp);
 
-                    // Отправляем только PointerButton — delta обнуляется в патче egui
-                    // (begin_pass при pressed сбрасывает old_pos = Some(pos)).
                     state.pointer_pos = Some(pos);
+
+                    // Для активации DragScroll::OnTouch в egui 0.35 нужно отправить
+                    // хотя бы одно Event::Touch, чтобы has_touch_screen() вернула true.
+                    state.events.push(egui::Event::Touch {
+                        device_id: egui::TouchDeviceId(0),
+                        id: egui::TouchId(0),
+                        phase: egui::TouchPhase::Start,
+                        pos,
+                        force: None,
+                    });
+
                     state.events.push(egui::Event::PointerButton {
                         pos,
                         button: egui::PointerButton::Primary,
@@ -65,6 +74,13 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
                 | (MotionAction::PointerUp, _)
                 | (MotionAction::Cancel, _) => {
                     if let Some(pos) = state.pointer_pos.take() {
+                        state.events.push(egui::Event::Touch {
+                            device_id: egui::TouchDeviceId(0),
+                            id: egui::TouchId(0),
+                            phase: egui::TouchPhase::End,
+                            pos,
+                            force: None,
+                        });
                         state.events.push(egui::Event::PointerButton {
                             pos,
                             button: egui::PointerButton::Primary,
@@ -77,6 +93,13 @@ fn handle_input_event(event: &InputEvent<'_>, pp: f32, state: &mut InputState) -
                 (MotionAction::Move, Some(p)) => {
                     let pos = egui::pos2(p.x() / pp, p.y() / pp);
                     state.pointer_pos = Some(pos);
+                    state.events.push(egui::Event::Touch {
+                        device_id: egui::TouchDeviceId(0),
+                        id: egui::TouchId(0),
+                        phase: egui::TouchPhase::Move,
+                        pos,
+                        force: None,
+                    });
                     state.events.push(egui::Event::PointerMoved(pos));
                     InputStatus::Handled
                 }

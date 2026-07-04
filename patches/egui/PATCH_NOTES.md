@@ -1,4 +1,4 @@
-# Патч egui 0.31.1: Fix scroll jump on touch after fling
+# Патч egui 0.35.0: Fix scroll jump on touch after fling
 
 ## Проблема
 При повторном касании после fling-анимации ScrollArea мгновенно проскакивает
@@ -9,48 +9,26 @@
 `new_pos - latest_pos_from_previous_gesture`. Поскольку latest_pos остаётся
 от предыдущего UP, разница может составлять сотни пикселей.
 
-Дополнительно: остаточная `state.vel` от fling и `smooth_scroll_delta`
-применяются в первом кадре нового drag, усугубляя скачок.
+Дополнительно: остаточная `state.vel` от fling применяется в первом кадре
+нового drag, усугубляя скачок.
 
 ## Исправления
 
 ### 1. input_state/mod.rs — обнуление old_pos при Down
-В `PointerState::begin_pass()` при обработке `PointerButton { pressed: true }`:
+В `PointerState::begin_pass()` после цикла обработки событий, перед вычислением
+`self.delta`, добавлена проверка:
 ```rust
-if pressed {
-    old_pos = Some(pos); // устанавливаем old_pos = новой позиции
+if self.any_pressed() && !self.any_released() {
+    old_pos = self.latest_pos;
 }
 ```
 Гарантирует `pointer.delta() == Vec2::ZERO` на первом кадре нового drag.
+Переменная `old_pos` сделана мутабельной (`let mut old_pos`).
 
-**Изменение:**
-```diff
-+                    if pressed {
-+                        // Обнуляем old_pos, чтобы pointer.delta()
-+                        // на первом кадре нового drag была нулевой.
-+                        old_pos = Some(pos);
-                         self.pos_history.clear();
-                     }
-```
-
-### 2. scroll_area.rs — сброс vel и smooth_scroll_delta
-При `drag_started()` обнуляем остаточную скорость и плавный скролл:
+### 2. scroll_area.rs — сброс vel при drag_started
+При `drag_started()` обнуляем остаточную скорость:
 ```rust
-state.vel[d] = 0.0;
-ui.ctx().input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
-```
-
-**Изменение:**
-```diff
- if content_response_option
-     .as_ref()
-     .is_some_and(|response| response.drag_started())
- {
-+    state.vel[d] = 0.0;
-+    ui.ctx().input_mut(|input| {
-+        input.smooth_scroll_delta = Vec2::ZERO;
-+    });
- }
+state.vel = Vec2::ZERO;
 ```
 
 ### 3. platform-android батчинг (вне egui, в platform-android)
@@ -72,11 +50,3 @@ PR: не создавался
 
 ## Проверка
 - [x] `cargo check --workspace` — без ошибок
-- [x] `cargo test --workspace` — все тесты проходят
-- [x] Сценарий 1: Медленный скролл — плавный, без дёрганья
-- [x] Сценарий 2: Быстрый fling — инерция работает
-- [x] Сценарий 3: Касание ВО ВРЕМЯ fling — fling останавливается, нет скачка
-- [x] Сценарий 4: Повторное касание ПОСЛЕ fling — нет дёрганья
-- [x] Сценарий 5: Доскролл до краёв — контент достигает границ
-- [x] Сценарий 6: Тап по кнопке — кнопка нажимается
-- [x] Сценарий 7: Drag слайдера — работает без конфликтов

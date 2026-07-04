@@ -44,7 +44,6 @@ pub fn run<A: Application>(app: AndroidApp) {
 
     let mut input_state = InputState::new();
     let mut surface_needs_recreation = false;
-    let mut deferred_events: Vec<egui::Event> = Vec::new();
 
     // Создаём waker для Android event loop.
     let waker = app.create_waker();
@@ -126,7 +125,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                         Ok(()) => {
                             if let Some(ref mut painter) = egui_painter {
                                 unsafe {
-                                    gl_clear(painter.gl());
+                                    gl_clear(&*painter.gl());
                                 }
                             }
                             let pp = compute_pixels_per_point(nw.width(), nw.height());
@@ -155,7 +154,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                 match EglState::create(&nw) {
                     Ok(state) => {
                         let gl = unsafe {
-                            glow::Context::from_loader_function(|name| {
+                            egui_glow::painter::Context::from_loader_function(|name| {
                                 let cname = std::ffi::CStr::from_ptr(
                                     name.as_ptr() as *const std::os::raw::c_char
                                 );
@@ -166,7 +165,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                         match egui_glow::Painter::new(Arc::new(gl), "", None, true) {
                             Ok(painter) => {
                                 unsafe {
-                                    gl_clear(painter.gl());
+                                    gl_clear(&*painter.gl());
                                 }
                                 egui_ctx.set_fonts(egui::FontDefinitions::default());
                                 let pp = compute_pixels_per_point(nw.width(), nw.height());
@@ -227,82 +226,9 @@ pub fn run<A: Application>(app: AndroidApp) {
                     top_inset, bottom_inset
                 );
 
-                // ─── Умная упаковка событий в кадр ─────────────────────────
-                let mut new_events = std::mem::take(&mut input_state.events);
-
-                if !deferred_events.is_empty() {
-                    let mut prev = std::mem::take(&mut deferred_events);
-                    prev.append(&mut new_events);
-                    new_events = prev;
-                }
-
-                let has_down = new_events
-                    .iter()
-                    .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }));
-
-                let (events_for_frame, split_info) = if has_down {
-                    // Если в кадре есть Down — откладываем ВСЕ события, оставляя
-                    // только PointerButton { pressed: true } в текущем кадре.
-                    // Иначе pointer.delta() на первом кадре drag будет содержать
-                    // дельту между latest_pos (от UP) и позицией Move, пришедшего
-                    // в том же кадре что и Down, что вызывает мгновенный скачок.
-                    let mut events_for_frame: Vec<egui::Event> = Vec::new();
-                    let mut deferred_this_frame: Vec<egui::Event> = Vec::new();
-                    for e in new_events.drain(..) {
-                        if matches!(&e, egui::Event::PointerButton { pressed: true, .. }) {
-                            // Down идёт в кадр, но все события ДО него уже в deferred_events
-                            events_for_frame.push(e);
-                        } else {
-                            deferred_this_frame.push(e);
-                        }
-                    }
-                    // Добавляем отложенные этого кадра к глобальным deferred
-                    deferred_events.extend(deferred_this_frame);
-                    let deferred_count = deferred_events.len();
-                    (events_for_frame, Some(deferred_count))
-                } else {
-                    (new_events, None)
-                };
-
-                #[cfg(debug_assertions)]
-                {
-                    let down_c = events_for_frame
-                        .iter()
-                        .filter(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }))
-                        .count();
-                    let up_c = events_for_frame
-                        .iter()
-                        .filter(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. }))
-                        .count();
-                    let move_c = events_for_frame
-                        .iter()
-                        .filter(|e| matches!(e, egui::Event::PointerMoved(_)))
-                        .count();
-                    if down_c > 0 || up_c > 0 || move_c > 0 {
-                        log::warn!(
-                            "[BATCH] Кадр: Down={} Move={} Up={} | отложено={} | всего_в_кадре={} | deferred_events={}",
-                            down_c,
-                            move_c,
-                            up_c,
-                            split_info.unwrap_or(0),
-                            events_for_frame.len(),
-                            deferred_events.len(),
-                        );
-                        log::warn!(
-                            "[BATCH] Viewport: rect=(0,{:.0}),({:.0},{:.0}) pp={} | native=({},{}) | insets=top:{:.0}(px:{}) bot:{:.0}(px:{})",
-                            top_inset,
-                            w as f32 / pp,
-                            (h as f32 / pp) - top_inset - bottom_inset,
-                            pp,
-                            w,
-                            h,
-                            top_inset,
-                            (top_inset * pp) as i32,
-                            bottom_inset,
-                            (bottom_inset * pp) as i32
-                        );
-                    }
-                }
+                // Все события в кадре — батчинг не нужен, патч egui сам обнуляет
+                // pointer.delta() на первом кадре нового drag.
+                let events_for_frame = std::mem::take(&mut input_state.events);
 
                 let screen_rect = egui::Rect::from_min_size(
                     egui::Pos2::new(0.0, top_inset),
@@ -329,7 +255,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                 let full_output = app_instance.frame(&egui_ctx, raw_input);
 
                 unsafe {
-                    let gl = painter.gl();
+                    let gl = &*painter.gl();
                     gl.clear_color(0.2, 0.2, 0.2, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }

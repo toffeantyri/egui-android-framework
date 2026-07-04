@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use emath::GuiRounding as _;
 use epaint::{
-    text::{Fonts, Galley, LayoutJob},
     CircleShape, ClippedShape, CornerRadius, PathStroke, RectShape, Shape, Stroke, StrokeKind,
+    text::{FontsView, Galley, LayoutJob},
 };
 
 use crate::{
+    Color32, Context, FontId,
     emath::{Align2, Pos2, Rangef, Rect, Vec2},
     layers::{LayerId, PaintList, ShapeIdx},
-    Color32, Context, FontId,
 };
 
 /// Helper to paint shapes and text to a specific region on a specific layer.
@@ -82,11 +82,6 @@ impl Painter {
         self.layer_id = layer_id;
     }
 
-    /// If set, colors will be modified to look like this
-    pub fn set_fade_to_color(&mut self, fade_to_color: Option<Color32>) {
-        self.fade_to_color = fade_to_color;
-    }
-
     /// Set the opacity (alpha multiplier) of everything painted by this painter from this point forward.
     ///
     /// `opacity` must be between 0.0 and 1.0, where 0.0 means fully transparent (i.e., invisible)
@@ -140,12 +135,20 @@ impl Painter {
         self.pixels_per_point
     }
 
-    /// Read-only access to the shared [`Fonts`].
+    /// Read-only access to the shared [`FontsView`].
     ///
     /// See [`Context`] documentation for how locks work.
     #[inline]
-    pub fn fonts<R>(&self, reader: impl FnOnce(&Fonts) -> R) -> R {
+    pub fn fonts<R>(&self, reader: impl FnOnce(&FontsView<'_>) -> R) -> R {
         self.ctx.fonts(reader)
+    }
+
+    /// Read-write access to the shared [`FontsView`].
+    ///
+    /// See [`Context`] documentation for how locks work.
+    #[inline]
+    pub fn fonts_mut<R>(&self, reader: impl FnOnce(&mut FontsView<'_>) -> R) -> R {
+        self.ctx.fonts_mut(reader)
     }
 
     /// Where we paint
@@ -185,41 +188,6 @@ impl Painter {
     #[inline]
     pub fn round_to_pixel_center(&self, point: f32) -> f32 {
         point.round_to_pixel_center(self.pixels_per_point())
-    }
-
-    /// Useful for pixel-perfect rendering of lines that are one pixel wide (or any odd number of pixels).
-    #[deprecated = "Use `emath::GuiRounding` with `painter.pixels_per_point()` instead"]
-    #[inline]
-    pub fn round_pos_to_pixel_center(&self, pos: Pos2) -> Pos2 {
-        pos.round_to_pixel_center(self.pixels_per_point())
-    }
-
-    /// Useful for pixel-perfect rendering of filled shapes.
-    #[deprecated = "Use `emath::GuiRounding` with `painter.pixels_per_point()` instead"]
-    #[inline]
-    pub fn round_to_pixel(&self, point: f32) -> f32 {
-        point.round_to_pixels(self.pixels_per_point())
-    }
-
-    /// Useful for pixel-perfect rendering.
-    #[deprecated = "Use `emath::GuiRounding` with `painter.pixels_per_point()` instead"]
-    #[inline]
-    pub fn round_vec_to_pixels(&self, vec: Vec2) -> Vec2 {
-        vec.round_to_pixels(self.pixels_per_point())
-    }
-
-    /// Useful for pixel-perfect rendering.
-    #[deprecated = "Use `emath::GuiRounding` with `painter.pixels_per_point()` instead"]
-    #[inline]
-    pub fn round_pos_to_pixels(&self, pos: Pos2) -> Pos2 {
-        pos.round_to_pixels(self.pixels_per_point())
-    }
-
-    /// Useful for pixel-perfect rendering.
-    #[deprecated = "Use `emath::GuiRounding` with `painter.pixels_per_point()` instead"]
-    #[inline]
-    pub fn round_rect_to_pixels(&self, rect: Rect) -> Rect {
-        rect.round_to_pixels(self.pixels_per_point())
     }
 }
 
@@ -294,7 +262,7 @@ impl Painter {
 
 /// ## Debug painting
 impl Painter {
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn debug_rect(&self, rect: Rect, color: Color32, text: impl ToString) {
         self.rect(
             rect,
@@ -313,14 +281,14 @@ impl Painter {
     }
 
     pub fn error(&self, pos: Pos2, text: impl std::fmt::Display) -> Rect {
-        let color = self.ctx.style().visuals.error_fg_color;
+        let color = self.ctx.global_style().visuals.error_fg_color;
         self.debug_text(pos, Align2::LEFT_TOP, color, format!("🔥 {text}"))
     }
 
     /// Text with a background.
     ///
     /// See also [`Context::debug_text`].
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn debug_text(
         &self,
         pos: Pos2,
@@ -497,7 +465,7 @@ impl Painter {
     /// [`Self::layout`] or [`Self::layout_no_wrap`].
     ///
     /// Returns where the text ended up.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn text(
         &self,
         pos: Pos2,
@@ -524,7 +492,7 @@ impl Painter {
         color: crate::Color32,
         wrap_width: f32,
     ) -> Arc<Galley> {
-        self.fonts(|f| f.layout(text, font_id, color, wrap_width))
+        self.fonts_mut(|f| f.layout(text, font_id, color, wrap_width))
     }
 
     /// Will line break at `\n`.
@@ -538,7 +506,7 @@ impl Painter {
         font_id: FontId,
         color: crate::Color32,
     ) -> Arc<Galley> {
-        self.fonts(|f| f.layout(text, font_id, color, f32::INFINITY))
+        self.fonts_mut(|f| f.layout(text, font_id, color, f32::INFINITY))
     }
 
     /// Lay out this text layut job in a galley.
@@ -547,7 +515,7 @@ impl Painter {
     #[inline]
     #[must_use]
     pub fn layout_job(&self, layout_job: LayoutJob) -> Arc<Galley> {
-        self.fonts(|f| f.layout_job(layout_job))
+        self.fonts_mut(|f| f.layout_job(layout_job))
     }
 
     /// Paint text that has already been laid out in a [`Galley`].
@@ -576,16 +544,6 @@ impl Painter {
         galley: Arc<Galley>,
         text_color: Color32,
     ) {
-        if !galley.is_empty() {
-            self.add(Shape::galley_with_override_text_color(
-                pos, galley, text_color,
-            ));
-        }
-    }
-
-    #[deprecated = "Use `Painter::galley` or `Painter::galley_with_override_text_color` instead"]
-    #[inline]
-    pub fn galley_with_color(&self, pos: Pos2, galley: Arc<Galley>, text_color: Color32) {
         if !galley.is_empty() {
             self.add(Shape::galley_with_override_text_color(
                 pos, galley, text_color,

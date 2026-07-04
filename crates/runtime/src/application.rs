@@ -84,7 +84,7 @@ pub trait Application: Sized + 'static {
     /// Реализация по умолчанию — пустой egui-кадр (заглушка).
     /// Конкретное приложение **должно** переопределить этот метод.
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
-        egui_ctx.run(raw_input, |_ctx| {})
+        egui_ctx.run_ui(raw_input, |_ctx| {})
     }
 
     // ─── Методы жизненного цикла ─────────────────────────────────────────
