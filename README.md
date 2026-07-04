@@ -101,13 +101,13 @@ impl Component for CounterComponent {
 
 | Крейт | crates.io | Назначение |
 |---|---|---|
-| [egui-android-core] | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, ViewFn, LifecycleObserver |
-| [egui-android-ui] | [![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui) | Виджеты, модификаторы, remember, анимации, темы |
-| [egui-android-runtime] | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier |
-| [egui-android-navigation] | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack, управление жизненным циклом |
-| [egui-android-platform] | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Абстрактный Platform trait |
-| [egui-android-platform-android] | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл |
-| [egui-android-framework] | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
+| egui-android-core | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, ViewFn, LifecycleObserver |
+| egui-android-ui | [![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui) | Виджеты, модификаторы, remember, анимации, темы |
+| egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier |
+| egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack, управление жизненным циклом |
+| egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Абстрактный Platform trait |
+| egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл |
+| egui-android-framework | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
 
 ## Технологии
 
