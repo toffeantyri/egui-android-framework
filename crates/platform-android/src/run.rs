@@ -144,7 +144,7 @@ pub fn run<A: Application>(app: AndroidApp) {
                                 }
                             }
                             // При пересоздании surface обновляем pp на случай смены конфигурации
-                            let pp = get_pixels_per_point(&app, nw.width(), nw.height());
+                            let pp = crate::insets::get_pp(&app.config(), nw.width(), nw.height());
                             egui_ctx.set_pixels_per_point(pp);
                         }
                         Err(e) => {
@@ -184,7 +184,8 @@ pub fn run<A: Application>(app: AndroidApp) {
                                     gl_clear(&*painter.gl());
                                 }
                                 egui_ctx.set_fonts(egui::FontDefinitions::default());
-                                let pp = get_pixels_per_point(&app, nw.width(), nw.height());
+                                let pp =
+                                    crate::insets::get_pp(&app.config(), nw.width(), nw.height());
                                 egui_ctx.set_pixels_per_point(pp);
                                 egl_state = Some(state);
                                 egui_painter = Some(painter);
@@ -227,16 +228,17 @@ pub fn run<A: Application>(app: AndroidApp) {
                     continue;
                 }
 
-                let pp = egui_ctx.pixels_per_point();
                 let content_rect = app.content_rect();
-                let (left_inset, top_inset, right_inset, bottom_inset) =
-                    crate::insets::get_insets_pt(w as i32, h as i32, &content_rect, pp);
+                let insets =
+                    crate::insets::get_insets_pt(&app.config(), w as i32, h as i32, &content_rect);
+
+                let pp = egui_ctx.pixels_per_point();
 
                 #[cfg(debug_assertions)]
                 log::warn!(
                     "[BATCH] native_size=({},{}) pp={} | insets=left:{:.1} top:{:.1} right:{:.1} bottom:{:.1}",
                     w, h, pp,
-                    left_inset, top_inset, right_inset, bottom_inset
+                    insets.left, insets.top, insets.right, insets.bottom
                 );
 
                 // Все события в кадре — батчинг не нужен, патч egui сам обнуляет
@@ -244,10 +246,10 @@ pub fn run<A: Application>(app: AndroidApp) {
                 let events_for_frame = std::mem::take(&mut input_state.events);
 
                 let screen_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(left_inset, top_inset),
+                    egui::Pos2::new(insets.left, insets.top),
                     egui::vec2(
-                        (w as f32 / pp) - left_inset - right_inset,
-                        (h as f32 / pp) - top_inset - bottom_inset,
+                        (w as f32 / pp) - insets.left - insets.right,
+                        (h as f32 / pp) - insets.top - insets.bottom,
                     ),
                 );
                 // Время с предыдущего кадра — для стабильной децелерации fling.
@@ -296,15 +298,6 @@ pub fn run<A: Application>(app: AndroidApp) {
             }
         }
     }
-}
-
-/// Получить pixels_per_point из реальной плотности экрана (densityDpi).
-///
-/// Приоритет:
-/// 1. Реальная плотность из `AndroidApp::config().density()`
-/// 2. Эвристика на основе размера экрана (если density недоступен)
-fn get_pixels_per_point(app: &AndroidApp, width: i32, height: i32) -> f32 {
-    crate::insets::get_density(&app.config(), width, height)
 }
 
 unsafe fn gl_clear(gl: &glow::Context) {
