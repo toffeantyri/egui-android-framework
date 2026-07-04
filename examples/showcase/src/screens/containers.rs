@@ -78,7 +78,7 @@ impl ContainersScreen {
                 let items: Vec<i32> = (1..=5).collect();
                 LazyColumn::new(items, ui, dispatch, |i, ui, dispatch| {
                     // remember для каждого элемента списка — уникальный ключ
-                    let clicked = remember(ui, &format!("item_clicked_{}", i), || false);
+                    let clicked = remember(ui, format!("item_clicked_{}", i), || false);
 
                     Row::new(ui, dispatch, |ui, dispatch| {
                         Text::new(format!("Элемент {}", i))

@@ -30,8 +30,10 @@ impl Application for CounterApp {
     type RootComponent = CounterComponent;
 
     fn create() -> Self {
-        let mut config = AppConfig::default();
-        config.log_tag = "egui-counter2".into();
+        let config = AppConfig {
+            log_tag: "egui-counter2".into(),
+            ..Default::default()
+        };
 
         let store = StateStore::new(CounterState { count: 0 });
 

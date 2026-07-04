@@ -59,7 +59,7 @@ impl<M> Widget<M> for Text {
             // Никакого Label/Sense — текст не перехватывает скролл.
             let font_id = self
                 .font_size
-                .map(|s| egui::FontId::proportional(s))
+                .map(egui::FontId::proportional)
                 .unwrap_or_else(|| {
                     ui.style()
                         .text_styles
