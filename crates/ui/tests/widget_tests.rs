@@ -1242,3 +1242,100 @@ fn test_clickable_with_value_modifier_uses_content_size() {
         );
     });
 }
+
+#[test]
+fn test_clickable_in_row_does_not_overflow() {
+    // Clickable внутри Row — кликабельная область должна быть
+    // по размеру контента, а не растягиваться на всю строку.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Левый клик").clickable(()).render(ui, dispatch);
+            Text::new("Правый клик").clickable(()).render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_clickable_in_column_uses_content_height() {
+    // Два Clickable в Column — каждый занимает только высоту своего текста.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Text::new("Верхний").clickable(()).render(ui, dispatch);
+            Text::new("Нижний").clickable(()).render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_align_nested_row_in_column() {
+    // Вложенная Row в Column с Aligned — проверяем что не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Row::new(ui, dispatch, |ui, dispatch| {
+                Text::new("Левый")
+                    .align(egui::Align::Center)
+                    .render(ui, dispatch);
+                Text::new("Правый")
+                    .align(egui::Align::Center)
+                    .render(ui, dispatch);
+            });
+        });
+    });
+}
+
+#[test]
+fn test_align_in_stack() {
+    // Aligned внутри Stack — проверяем что не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Stack::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Центр")
+                .align(egui::Align::Center)
+                .render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_clickable_in_lazy_column() {
+    // Clickable внутри LazyColumn — не должен паниковать.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let items: Vec<i32> = (1..=3).collect();
+        LazyColumn::new(items, ui, &dispatch, |_i, ui, dispatch| {
+            Text::new("Клик").clickable(()).render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_modifier_chain_clickable_padded_background() {
+    // Комбинация: Padded + Clickable + Background через цепочку ModifierExt.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Текст")
+            .padding(8.0)
+            .clickable(())
+            .background(egui::Color32::RED)
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_modifier_value_clickable_padded_background() {
+    // Комбинация: padding + clickable + background через Modifier value type.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("Текст")
+            .modifier(
+                Modifier::new()
+                    .padding(8.0)
+                    .clickable(())
+                    .background(egui::Color32::RED),
+            )
+            .render(ui, &dispatch);
+    });
+}
