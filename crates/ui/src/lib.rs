@@ -21,4 +21,4 @@ pub use containers::{Column, LazyColumn, Row, Stack};
 pub use modifier::{legacy::ModifierExt, Modified, Modifier, ModifierApply};
 pub use remember::*;
 pub use theme::{ColorPalette, FontWeight, MaterialTheme, Shapes, TextStyle, Theme, Typography};
-pub use widgets::{Button, Icon, Spacer, Text, Widget};
+pub use widgets::{Button, ButtonColors, Icon, Spacer, Text, Widget};

@@ -1,4 +1,9 @@
 //! WidgetsScreen — демонстрация базовых виджетов (Text, Button, Spacer, Icon).
+//!
+//! Демонстрирует:
+//! - Text, Spacer — базовые виджеты для отображения
+//! - Button с визуальной обратной связью при нажатии (встроенная в фреймворк)
+//! - кастомные цвета кнопки через Button::colors()
 
 use egui_android_framework::{
     runtime::Dispatcher,
@@ -27,11 +32,22 @@ impl WidgetsScreen {
                 Spacer::new(8.0).render(ui, dispatch);
                 Text::new("Обычный текст").render(ui, dispatch);
                 Spacer::new(4.0).render(ui, dispatch);
-                Text::new("Кнопка:").render(ui, dispatch);
-                Button::new("Нажми меня")
-                    .on_click(RootMsg::Back)
+                Text::new("Кнопка с реакцией на нажатие:").render(ui, dispatch);
+
+                // Стандартный Button — цвет меняется при нажатии (встроено)
+                Button::new("Нажми меня").padding(8.0).render(ui, dispatch);
+
+                Spacer::new(8.0).render(ui, dispatch);
+
+                Text::new("Кнопка с кастомными цветами:").render(ui, dispatch);
+                Button::new("Зелёная")
+                    .colors(
+                        egui::Color32::from_rgb(0, 160, 80),  // обычный
+                        egui::Color32::from_rgb(0, 255, 130), // нажатый
+                    )
                     .padding(8.0)
                     .render(ui, dispatch);
+
                 Spacer::new(8.0).render(ui, dispatch);
                 Text::new("Spacer 16px:").render(ui, dispatch);
                 Spacer::new(16.0).render(ui, dispatch);

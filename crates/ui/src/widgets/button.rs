@@ -10,11 +10,53 @@
 //! Текст выравнивается по центру кнопки.
 //! Вся область кнопки реагирует на клик.
 //!
-//! Если нужно изменить ширину — используйте модификатор `.size(w, h)`.
-//! Если нужна wrap-content кнопка (по размеру текста) — используйте
-//! `Text::new("...").clickable(msg)` с модификаторами.
+//! # Визуальная обратная связь
+//!
+//! При нажатии (Down) кнопка меняет цвет фона на более яркий/тёмный.
+//! Это даёт пользователю тактильный отклик, аналогичный ripple в Jetpack Compose.
+//!
+//! Цвета по умолчанию:
+//! - Обычное состояние: `(0, 128, 255)` — синий
+//! - Нажатое состояние: `(255, 120, 0)` — оранжевый
+//!
+//! Можно переопределить через [`Button::colors`].
+//!
+//! # Пример
+//!
+//! ```ignore
+//! // Кнопка с MVI-сообщением (реакция на нажатие — встроенная)
+//! Button::new("Нажми меня")
+//!     .on_click(Msg::Clicked)
+//!     .render(ui, dispatch);
+//!
+//! // Кнопка с кастомными цветами
+//! Button::new("Кастом")
+//!     .on_click(Msg::Clicked)
+//!     .colors(
+//!         egui::Color32::from_rgb(0, 200, 100),  // обычный
+//!         egui::Color32::from_rgb(0, 255, 150),  // нажатый
+//!     )
+//!     .render(ui, dispatch);
+//! ```
 
 use egui_android_core::{widget::Widget, Dispatcher};
+
+/// Цвета кнопки для различных состояний.
+pub struct ButtonColors {
+    /// Цвет фона в обычном состоянии.
+    pub normal: egui::Color32,
+    /// Цвет фона при нажатии (Down).
+    pub pressed: egui::Color32,
+}
+
+impl Default for ButtonColors {
+    fn default() -> Self {
+        Self {
+            normal: egui::Color32::from_rgb(0, 128, 255),
+            pressed: egui::Color32::from_rgb(255, 120, 0),
+        }
+    }
+}
 
 /// Виджет кнопки.
 ///
@@ -28,11 +70,14 @@ use egui_android_core::{widget::Widget, Dispatcher};
 /// Кнопка занимает всю доступную ширину, имеет фиксированную высоту 48.0
 /// (задаётся через [`Button::height`]) и выравнивает текст по центру.
 /// Вся область кнопки реагирует на клик.
+///
+/// Встроенная визуальная обратная связь: при нажатии цвет фона меняется.
 pub struct Button<M> {
     text: String,
     on_click_msg: Option<M>,
     on_click_callback: Option<Box<dyn Fn(&egui::Ui, &Dispatcher<M>)>>,
     height: f32,
+    colors: ButtonColors,
 }
 
 impl<M: 'static> Button<M> {
@@ -42,6 +87,7 @@ impl<M: 'static> Button<M> {
             on_click_msg: None,
             on_click_callback: None,
             height: 48.0,
+            colors: ButtonColors::default(),
         }
     }
 
@@ -87,6 +133,24 @@ impl<M: 'static> Button<M> {
         self.height = height;
         self
     }
+
+    /// Установить кастомные цвета для обычного и нажатого состояния.
+    ///
+    /// # Пример
+    ///
+    /// ```ignore
+    /// Button::new("ОК")
+    ///     .on_click(Msg::Ok)
+    ///     .colors(
+    ///         egui::Color32::from_rgb(0, 180, 80),   // обычный — зелёный
+    ///         egui::Color32::from_rgb(0, 255, 120),  // нажатый — ярко-зелёный
+    ///     )
+    ///     .render(ui, dispatch);
+    /// ```
+    pub fn colors(mut self, normal: egui::Color32, pressed: egui::Color32) -> Self {
+        self.colors = ButtonColors { normal, pressed };
+        self
+    }
 }
 
 impl<M: Clone + 'static> Widget<M> for Button<M> {
@@ -96,9 +160,16 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
-            // Фон кнопки
             let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(0, 128, 255));
+
+            // Выбираем цвет в зависимости от состояния нажатия
+            let bg_color = if response.is_pointer_button_down_on() {
+                self.colors.pressed
+            } else {
+                self.colors.normal
+            };
+
+            painter.rect_filled(rect, 4.0, bg_color);
 
             // Текст по центру
             let galley = ui.painter().layout_no_wrap(
