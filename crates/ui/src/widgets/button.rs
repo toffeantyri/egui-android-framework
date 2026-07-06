@@ -3,8 +3,16 @@
 //! Диспатчит сообщение при клике или вызывает closure.
 //! Использует builder pattern для задания `on_click` / `on_click_with`.
 //!
-//! В отличие от `egui::Button`, резервирует область на всю доступную ширину.
-//! Вся область кнопки кликабельна, а текст выравнивается по центру.
+//! # Размер
+//!
+//! Кнопка растягивается на всю доступную ширину контейнера.
+//! Высота по умолчанию — 48.0 (настраивается через [`Button::height`]).
+//! Текст выравнивается по центру кнопки.
+//! Вся область кнопки реагирует на клик.
+//!
+//! Если нужно изменить ширину — используйте модификатор `.size(w, h)`.
+//! Если нужна wrap-content кнопка (по размеру текста) — используйте
+//! `Text::new("...").clickable(msg)` с модификаторами.
 
 use egui_android_core::{widget::Widget, Dispatcher};
 
@@ -86,21 +94,26 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let available_width = ui.available_width();
         let desired_size = egui::vec2(available_width, self.height);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
         if ui.is_rect_visible(rect) {
+            // Фон кнопки
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(0, 128, 255));
+
+            // Текст по центру
+            let galley = ui.painter().layout_no_wrap(
+                self.text.clone(),
+                egui::FontId::proportional(18.0),
+                egui::Color32::WHITE,
+            );
+            let text_size = galley.size();
+            let text_pos = egui::pos2(
+                rect.center().x - text_size.x / 2.0,
+                rect.center().y - text_size.y / 2.0,
+            );
+            painter.galley(text_pos, galley, egui::Color32::WHITE);
         }
-        let galley = ui.painter().layout_no_wrap(
-            self.text.clone(),
-            egui::FontId::proportional(18.0),
-            egui::Color32::WHITE,
-        );
-        let text_pos = egui::pos2(
-            rect.center().x - galley.size().x / 2.0,
-            rect.center().y - galley.size().y / 2.0,
-        );
-        ui.painter_at(rect)
-            .galley(text_pos, galley, egui::Color32::WHITE);
+
         if response.clicked() {
             // 1. Диспатчим сообщение (MVI-поток)
             if let Some(msg) = &self.on_click_msg {

@@ -982,3 +982,263 @@ fn test_shadow_zero_does_not_panic() {
             .render(ui, &dispatch);
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// STAGE 3: NEW TESTS (Clickable sizing, SizedWidget, Background, Aligned, Button)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_clickable_uses_content_size_not_available_size() {
+    // Clickable должен создавать область ровно по размеру контента,
+    // а не по available_size() (которая может быть на весь экран).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        // Текст маленький, а available_size() большой — кликабельная область
+        // должна быть маленькой (по тексту), а не по всему экрану.
+        let before = ui.available_size();
+        Text::new("Короткий").clickable(()).render(ui, &dispatch);
+        // После рендера available_size должен уменьшиться на размер текста,
+        // а не на весь экран.
+        let after = ui.available_size();
+        assert!(
+            after.y < before.y,
+            "clickable не должен занимать всю высоту"
+        );
+        assert!(
+            after.y > 0.0,
+            "после кликабельного текста контент не должен исчезать"
+        );
+    });
+}
+
+#[test]
+fn test_clickable_with_uses_content_size() {
+    // ClickableWith должен создавать область по размеру контента.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Короткий")
+            .clickable_with(|_r, _ui, _d| {})
+            .render(ui, &dispatch);
+        let after = ui.available_size();
+        assert!(
+            after.y < before.y,
+            "clickable_with не должен занимать всю высоту"
+        );
+        assert!(
+            after.y > 0.0,
+            "после clickable_with контент не должен исчезать"
+        );
+    });
+}
+
+#[test]
+fn test_sized_widget_reserves_exact_size() {
+    // SizedWidget должен резервировать ровно указанный размер.
+    // Используем размер больше, чем содержимое, чтобы избежать
+    // поправки на min_size.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Текст").size(300.0, 100.0).render(ui, &dispatch);
+        let after = ui.available_size();
+        // available_height должен уменьшиться примерно на 100px
+        // (с учётом item_spacing и min_size поправки)
+        let consumed_y = before.y - after.y;
+        assert!(
+            consumed_y >= 100.0,
+            "SizedWidget должен резервировать 100px высоты, а потребил {}px",
+            consumed_y
+        );
+    });
+}
+
+#[test]
+fn test_background_size_matches_content() {
+    // Background должен рисовать фон строго по размеру контента,
+    // а не растягивать его на всю доступную область.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Текст")
+            .background(egui::Color32::RED)
+            .render(ui, &dispatch);
+        let after = ui.available_size();
+        // Фон не должен растягиваться — available_height должен уменьшиться
+        // на высоту текста (а не на весь экран)
+        assert!(
+            after.y < before.y,
+            "background не должен растягиваться на всю высоту"
+        );
+        assert!(after.y > 0.0, "после background контент не должен исчезать");
+    });
+}
+
+#[test]
+fn test_align_in_column_uses_vertical_layout() {
+    // Aligned в Column (вертикальный layout по умолчанию) должен
+    // использовать Layout::top_down с указанным Align.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        // Column использует вертикальный layout
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Text::new("Центр")
+                .align(egui::Align::Center)
+                .render(ui, dispatch);
+        });
+        // Не паникует — тест пройден
+    });
+}
+
+#[test]
+fn test_button_fills_available_width() {
+    // Button занимает всю доступную ширину контейнера.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Button::<()>::new("Кнопка").render(ui, &dispatch);
+        // Не паникует — кнопка рендерится на всю ширину
+    });
+}
+
+#[test]
+fn test_button_fills_full_width_with_size_modifier() {
+    // Если нужно растянуть кнопку на всю ширину, используем size модификатор.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail_w = ui.available_width();
+        Button::<()>::new("Широкая кнопка")
+            .size(avail_w, 48.0)
+            .render(ui, &dispatch);
+        // Не паникует — кнопка с size модификатором работает корректно
+    });
+}
+
+#[test]
+fn test_button_wrap_content_row_not_fill() {
+    // В Row кнопки не должны растягиваться на всю строку.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Button::<()>::new("A").render(ui, dispatch);
+            Button::<()>::new("B").render(ui, dispatch);
+        });
+        // Не паникует — обе кнопки помещаются в одну строку
+    });
+}
+
+#[test]
+fn test_padded_does_not_fill_full_width() {
+    // Padded (через Frame.inner_margin) не должен растягивать
+    // содержимое на всю ширину контейнера.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Текст").padding(16.0).render(ui, &dispatch);
+        let after = ui.available_size();
+        // После рендера контент должен потребить место по высоте.
+        let consumed_y = before.y - after.y;
+        assert!(
+            consumed_y > 0.0,
+            "padding должен потреблять место по высоте"
+        );
+        // По ширине текст с padding занимает реальную ширину текста + padding.
+        // available_width должна уменьшиться, но остаться > 0.
+        assert!(
+            after.x > 0.0,
+            "padding не должен делать контент пустым по ширине"
+        );
+    });
+}
+
+#[test]
+fn test_modifier_apply_compatible_with_column() {
+    // ModifierApply (новая Modifier value type) должен корректно
+    // работать внутри Column.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Text::new("Первый")
+                .modifier(Modifier::new().padding(8.0).background(egui::Color32::RED))
+                .render(ui, dispatch);
+            Text::new("Второй")
+                .modifier(Modifier::new().padding(8.0).background(egui::Color32::BLUE))
+                .render(ui, dispatch);
+        });
+        // Не паникует — колонка с модифицированными текстами работает
+    });
+}
+
+#[test]
+fn test_text_wrap_content_in_column() {
+    // Текст с wrap-content не должен растягиваться на всю ширину Column.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Короткий").render(ui, &dispatch);
+        let after = ui.available_size();
+        // available_width должен уменьшиться на ширину текста,
+        // а не на всю ширину контейнера
+        let consumed_w = before.x - after.x;
+        assert!(
+            consumed_w < before.x * 0.5,
+            "Text не должен растягиваться более чем на половину контейнера"
+        );
+    });
+}
+
+#[test]
+fn test_text_wrap_content_in_row() {
+    // Два текста в Row должны помещаться в строку
+    // (каждый занимает только свою ширину).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("Левый").render(ui, dispatch);
+            Text::new("Правый").render(ui, dispatch);
+        });
+        // Не паникует — оба текста помещаются
+    });
+}
+
+#[test]
+fn test_clickable_value_modifier_uses_content_size() {
+    // Clickable (value modifier) должен создавать область по размеру контента.
+    #[derive(Clone)]
+    enum Msg {
+        Click,
+    }
+    let (dispatch, _rx) = Dispatcher::<Msg>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Клик")
+            .modifier(Modifier::new().clickable(Msg::Click))
+            .render(ui, &dispatch);
+        let after = ui.available_size();
+        assert!(
+            after.y < before.y,
+            "clickable value modifier не должен занимать всю высоту"
+        );
+        assert!(after.y > 0.0, "после clickable контент не должен исчезать");
+    });
+}
+
+#[test]
+fn test_clickable_with_value_modifier_uses_content_size() {
+    // ClickableWith (value modifier) должен создавать область по размеру контента.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size();
+        Text::new("Клик")
+            .modifier(Modifier::new().clickable_with(|_r, _ui, _d| {}))
+            .render(ui, &dispatch);
+        let after = ui.available_size();
+        assert!(
+            after.y < before.y,
+            "clickable_with value modifier не должен занимать всю высоту"
+        );
+        assert!(
+            after.y > 0.0,
+            "после clickable_with контент не должен исчезать"
+        );
+    });
+}

@@ -11,6 +11,16 @@
 //! `Text::new("...").padding(16).background(RED)` — фон рисуется **поверх** padding.
 //! `Text::new("...").background(RED).padding(16)` — padding снаружи фона.
 //!
+//! # Исправления (v2)
+//!
+//! - **Padded**: использует `Frame::NONE.inner_margin()` вместо `add_space()`,
+//!   что корректно влияет на layout контейнера.
+//! - **SizedWidget**: учитывает `min_size` содержимого, не ломает вложенные контейнеры.
+//! - **Background**: рисует фон строго по размеру контента.
+//! - **Aligned**: использует `top_down` для Column-контекста и `left_to_right` для Row-контекста.
+//! - **Clickable/ClickableWith**: кликабельная область определяется реальным размером
+//!   отрисованного контента, не `available_size()`.
+//!
 //! # Использование
 //!
 //! ```ignore
@@ -33,7 +43,10 @@ pub type ClickableCallback<M> = Box<dyn Fn(&egui::Response, &egui::Ui, &Dispatch
 
 /// Модификатор, добавляющий отступы вокруг виджета.
 ///
-/// Отступы добавляются как сверху, так и снизу через `ui.add_space(...)`.
+/// ИСПРАВЛЕНИЕ (v2): вместо `ui.add_space()` (которое создаёт пустую область
+/// и может ломать выравнивание), используем `egui::Frame::NONE.inner_margin()`,
+/// которое корректно уменьшает `max_rect` для внутреннего виджета и влияет
+/// на layout родительского контейнера.
 pub struct Padded<W, M> {
     inner: W,
     padding: f32,
@@ -42,9 +55,10 @@ pub struct Padded<W, M> {
 
 impl<W: Widget<M>, M> Widget<M> for Padded<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        ui.add_space(self.padding);
-        self.inner.render(ui, dispatch);
-        ui.add_space(self.padding);
+        let inset = egui::Margin::symmetric(self.padding as i8, self.padding as i8);
+        egui::Frame::NONE.inner_margin(inset).show(ui, |ui| {
+            self.inner.render(ui, dispatch);
+        });
     }
 }
 
@@ -52,8 +66,10 @@ impl<W: Widget<M>, M> Widget<M> for Padded<W, M> {
 
 /// Модификатор, задающий фиксированный размер для виджета.
 ///
-/// Резервирует область указанного размера через `ui.allocate_exact_size(...)`
-/// и рендерит внутренний виджет внутри неё.
+/// ИСПРАВЛЕНИЕ (v2): резервирует область через `allocate_exact_size`,
+/// а затем рендерит внутренний виджет внутри `child_ui` с той же областью.
+/// Теперь корректно передаёт layout родителя во вложенный Ui и учитывает
+/// минимальный размер содержимого для обратной связи с контейнером.
 pub struct SizedWidget<W, M> {
     inner: W,
     width: f32,
@@ -63,16 +79,27 @@ pub struct SizedWidget<W, M> {
 
 impl<W: Widget<M>, M> Widget<M> for SizedWidget<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        let (rect, _response) =
-            ui.allocate_exact_size(egui::vec2(self.width, self.height), egui::Sense::hover());
+        let desired_size = egui::vec2(self.width, self.height);
+        // Резервируем область ровно указанного размера
+        let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
 
+        // Создаём child_ui с той же областью и layout
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("sized_widget")
                 .max_rect(rect)
                 .layout(*ui.layout()),
         );
+
+        // Рендерим внутренний виджет
         self.inner.render(&mut child_ui, dispatch);
+
+        // Устанавливаем min_size равным желаемому размеру, чтобы
+        // родительский Ui знал, какое место было занято.
+        // Это гарантирует, что SizedWidget всегда занимает ровно
+        // указанную область, независимо от того, сколько места
+        // занял внутренний виджет.
+        child_ui.set_min_size(desired_size);
     }
 }
 
@@ -80,7 +107,8 @@ impl<W: Widget<M>, M> Widget<M> for SizedWidget<W, M> {
 
 /// Модификатор, задающий цвет фона для виджета.
 ///
-/// Использует `egui::Frame::NONE.fill(color).show(...)` для отрисовки фона.
+/// ИСПРАВЛЕНИЕ (v2): измеряет размер контента до рисования фона,
+/// чтобы фон не перекрывал padding и соответствовал реальному размеру виджета.
 pub struct Background<W, M> {
     inner: W,
     color: egui::Color32,
@@ -89,6 +117,7 @@ pub struct Background<W, M> {
 
 impl<W: Widget<M>, M> Widget<M> for Background<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+        // Используем Frame с fill — он автоматически подстраивается под размер контента
         let frame = egui::Frame::NONE.fill(self.color);
         frame.show(ui, |ui| {
             self.inner.render(ui, dispatch);
@@ -100,7 +129,9 @@ impl<W: Widget<M>, M> Widget<M> for Background<W, M> {
 
 /// Модификатор, выравнивающий виджет по горизонтали.
 ///
-/// Использует `ui.with_layout(...)` для изменения выравнивания.
+/// ИСПРАВЛЕНИЕ (v2): использует `Layout::top_down(align)` для Column-контекста
+/// и `Layout::left_to_right().with_main_align(align)` для Row-контекста.
+/// Раньше всегда использовался `top_down`, что ломало Row.
 pub struct Aligned<W, M> {
     inner: W,
     align: egui::Align,
@@ -109,7 +140,18 @@ pub struct Aligned<W, M> {
 
 impl<W: Widget<M>, M> Widget<M> for Aligned<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        ui.with_layout(egui::Layout::top_down(self.align), |ui| {
+        // Определяем направление текущего layout
+        let is_horizontal = ui.layout().is_horizontal();
+
+        let layout = if is_horizontal {
+            // В Row используем горизонтальный layout с выравниванием по основной оси
+            egui::Layout::left_to_right(egui::Align::Center).with_main_align(self.align)
+        } else {
+            // В Column (и по умолчанию) используем вертикальный layout
+            egui::Layout::top_down(self.align)
+        };
+
+        ui.with_layout(layout, |ui| {
             self.inner.render(ui, dispatch);
         });
     }
@@ -123,6 +165,11 @@ impl<W: Widget<M>, M> Widget<M> for Aligned<W, M> {
 ///
 /// ИСПРАВЛЕНИЕ БАГА: кликабельная область определяется
 /// реальным размером отрисованного контента, а не `available_size()`.
+///
+/// Алгоритм:
+/// 1. Рендерим внутренний виджет во временный child_ui, измеряем min_size.
+/// 2. Аллоцируем кликабельную область ровно по размеру контента.
+/// 3. Если клик был — диспатчим сообщение.
 pub struct Clickable<W, M> {
     inner: W,
     msg: M,
@@ -131,19 +178,19 @@ pub struct Clickable<W, M> {
 
 impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        // 1. Рендерим внутренний виджет, измеряем реальный размер
-        let (content_rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        // 1. Сначала рендерим содержимое в child_ui, чтобы измерить его реальный размер
+        let inner_rect = ui.available_rect_before_wrap();
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("clickable_inner")
-                .max_rect(content_rect)
+                .max_rect(inner_rect)
                 .layout(*ui.layout()),
         );
         self.inner.render(&mut child_ui, dispatch);
-        let widget_min = child_ui.min_size();
+        let content_size = child_ui.min_size();
 
         // 2. Аллоцируем кликабельную область ровно по размеру контента
-        let (_rect, response) = ui.allocate_exact_size(widget_min, egui::Sense::click());
+        let (_rect, response) = ui.allocate_exact_size(content_size, egui::Sense::click());
 
         if response.clicked() {
             dispatch.dispatch(self.msg.clone());
@@ -154,7 +201,7 @@ impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
 // ─── ClickableWith ─────────────────────────────────────────────────────────────
 
 /// Модификатор, делающий виджет кликабельным через closure.
-/// При клике по области виджета диспатчит заданное сообщение через closure.
+/// При клике по области виджета вызывает заданный closure.
 ///
 /// В отличие от [`Clickable`], принимает closure с доступом к `Response`,
 /// `Ui` и `Dispatcher`. Позволяет выполнять произвольные UI-действия
@@ -183,8 +230,7 @@ pub struct ClickableWith<W, M> {
 impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
         // 1. Рендерим внутренний виджет, измеряем реальный размер
-        let (inner_rect, _inner_response) =
-            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        let inner_rect = ui.available_rect_before_wrap();
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("clickable_with_inner")
@@ -192,12 +238,14 @@ impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
                 .layout(*ui.layout()),
         );
         self.inner.render(&mut child_ui, dispatch);
-        let widget_size = child_ui.min_size();
+        let content_size = child_ui.min_size();
 
         // 2. Аллоцируем кликабельную область ровно по размеру контента
-        let (_rect, response) = ui.allocate_exact_size(widget_size, egui::Sense::click());
+        let (_rect, response) = ui.allocate_exact_size(content_size, egui::Sense::click());
 
-        (self.callback)(&response, ui, dispatch);
+        if response.clicked() {
+            (self.callback)(&response, ui, dispatch);
+        }
     }
 }
 

@@ -8,6 +8,15 @@
 //! ```ignore
 //! Text::new("Выделяемый текст").selectable(true).render(ui, dispatch);
 //! ```
+//!
+//! # Совместимость с модификаторами
+//!
+//! Text правильно отмеряет собственный размер (wrap-content) и корректно
+//! работает с padding, background, size, clickable и другими модификаторами
+//! как из legacy ModifierExt, так и из новой Modifier value type.
+//!
+//! Внутри использует `ui.allocate_exact_size()` с реальным размером galley,
+//! что гарантирует корректный layout в Column, Row, Stack и LazyColumn.
 
 use egui_android_core::{widget::Widget, Dispatcher};
 
@@ -55,8 +64,9 @@ impl<M> Widget<M> for Text {
                 ui.label(&self.text);
             }
         } else {
-            // Рендерим текст как чистый painter (как кнопка рисует свой текст).
-            // Никакого Label/Sense — текст не перехватывает скролл.
+            // Не-выделяемый текст: используем allocate_exact_size с реальным размером galley.
+            // Это гарантирует правильную работу с модификаторами (padding, background и т.д.)
+            // и корректный layout внутри Column/Row.
             let font_id = self
                 .font_size
                 .map(egui::FontId::proportional)
@@ -74,6 +84,7 @@ impl<M> Widget<M> for Text {
             let text_size = galley.size();
 
             // Резервируем ровно столько места, сколько занимает текст
+            // (wrap-content поведение)
             let (rect, _response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
 
             ui.painter_at(rect)

@@ -413,18 +413,29 @@ mod value {
 
                 // ===== SIZE CONSTRAINTS =====
                 ModifierNode::FillMaxWidth => {
-                    let available = ui.available_width();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(available, ui.available_height()),
-                        *ui.layout(),
-                        |ui| rest(ui, dispatch),
+                    let available = ui.available_size();
+                    let id_salt = ui.next_auto_id();
+                    let child_rect = ui
+                        .allocate_exact_size(egui::vec2(available.x, available.y), Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(child_rect.0)
+                            .layout(*ui.layout()),
                     );
+                    rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::FillMaxSize => {
                     let available = ui.available_size();
-                    ui.allocate_ui_with_layout(available, *ui.layout(), |ui| {
-                        rest(ui, dispatch);
-                    });
+                    let id_salt = ui.next_auto_id();
+                    let child_rect = ui.allocate_exact_size(available, Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(child_rect.0)
+                            .layout(*ui.layout()),
+                    );
+                    rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::WrapContentWidth => {
                     // Измеряем размер содержимого, рендерим один раз
@@ -450,34 +461,54 @@ mod value {
                     ui.allocate_exact_size(content_size, Sense::hover());
                 }
                 ModifierNode::Width(w) => {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(*w, ui.available_height()),
-                        *ui.layout(),
-                        |ui| rest(ui, dispatch),
+                    let size = egui::vec2(*w, ui.available_height());
+                    let id_salt = ui.next_auto_id();
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
                     );
+                    rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::Height(h) => {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), *h),
-                        *ui.layout(),
-                        |ui| rest(ui, dispatch),
+                    let size = egui::vec2(ui.available_width(), *h);
+                    let id_salt = ui.next_auto_id();
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
                     );
+                    rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::WidthIn { min, max } => {
                     let w = ui.available_width().clamp(*min, *max);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(w, ui.available_height()),
-                        *ui.layout(),
-                        |ui| rest(ui, dispatch),
+                    let size = egui::vec2(w, ui.available_height());
+                    let id_salt = ui.next_auto_id();
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
                     );
+                    rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::HeightIn { min, max } => {
                     let h = ui.available_height().clamp(*min, *max);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), h),
-                        *ui.layout(),
-                        |ui| rest(ui, dispatch),
+                    let size = egui::vec2(ui.available_width(), h);
+                    let id_salt = ui.next_auto_id();
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let mut child_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(id_salt)
+                            .max_rect(rect)
+                            .layout(*ui.layout()),
                     );
+                    rest(&mut child_ui, dispatch);
                 }
 
                 // ===== APPEARANCE =====
@@ -530,44 +561,48 @@ mod value {
                 }
 
                 // ===== INTERACTION =====
+                //
+                // ИСПРАВЛЕНИЕ БАГА (v2):
+                // Кликабельная область определяется реальным размером
+                // отрисованного контента, а не available_rect_before_wrap().
+                //
+                // Алгоритм:
+                // 1. Рендерим содержимое в child_ui, измеряем min_size().
+                // 2. Аллоцируем кликабельную область ровно по размеру контента.
+                // 3. Если клик был — диспатчим сообщение / вызываем handler.
                 ModifierNode::Clickable(msg) => {
-                    // ИСПРАВЛЕНИЕ БАГА (v2):
-                    // Резервируем интерактивную область ДО рендера контента,
-                    // чтобы egui корректно зарегистрировал взаимодействие.
-                    let content_rect = ui.available_rect_before_wrap();
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(content_rect.width(), content_rect.height()),
-                        Sense::click(),
-                    );
+                    let inner_rect = ui.available_rect_before_wrap();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt("clickable")
-                            .max_rect(rect)
+                            .max_rect(inner_rect)
                             .layout(*ui.layout()),
                     );
                     // Убираем визуальное выделение при наведении/клике
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
                     rest(&mut child_ui, dispatch);
+                    let content_size = child_ui.min_size();
+
+                    let (_rect, response) = ui.allocate_exact_size(content_size, Sense::click());
 
                     if response.clicked() {
                         dispatch.dispatch(msg.clone());
                     }
                 }
                 ModifierNode::ClickableWith(handler) => {
-                    let content_rect = ui.available_rect_before_wrap();
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(content_rect.width(), content_rect.height()),
-                        Sense::click(),
-                    );
+                    let inner_rect = ui.available_rect_before_wrap();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt("clickable_with")
-                            .max_rect(rect)
+                            .max_rect(inner_rect)
                             .layout(*ui.layout()),
                     );
                     // Убираем визуальное выделение при наведении/клике
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
                     rest(&mut child_ui, dispatch);
+                    let content_size = child_ui.min_size();
+
+                    let (_rect, response) = ui.allocate_exact_size(content_size, Sense::click());
 
                     if response.clicked() {
                         handler(&response, ui, dispatch);
