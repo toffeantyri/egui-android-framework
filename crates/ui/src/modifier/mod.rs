@@ -455,15 +455,13 @@ mod value {
                             ))
                             .layout(*ui.layout()),
                     );
+                    // Устанавливаем min_width = available.x, чтобы заставить
+                    // дочерние виджеты растянуться на всю ширину (match_parent).
+                    child_ui.set_min_width(available.x);
                     child_ui.set_max_width(available.x);
                     rest(&mut child_ui, dispatch);
-                    // Измеряем реальный размер контента
                     let content_height = child_ui.min_size().y.max(1.0);
                     // Аллоцируем в родителе (available.x, content_height).
-                    // Ширина — available.x (во всю ширину),
-                    // высота — реальная высота контента.
-                    // alloc после rest — контент уже нарисован в child_ui,
-                    // alloc в родителе резервирует место для внешнего layout.
                     ui.allocate_exact_size(egui::vec2(available.x, content_height), Sense::hover());
                 }
                 ModifierNode::FillMaxSize => {
@@ -476,6 +474,9 @@ mod value {
                             .max_rect(child_rect.0)
                             .layout(*ui.layout()),
                     );
+                    // Устанавливаем и min_width и min_height = available,
+                    // чтобы дочерние виджеты растянулись по обеим осям.
+                    child_ui.set_min_size(available);
                     rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::WrapContentWidth => {
@@ -523,6 +524,7 @@ mod value {
                             .max_rect(rect)
                             .layout(*ui.layout()),
                     );
+                    child_ui.set_min_height(*h);
                     rest(&mut child_ui, dispatch);
                 }
                 ModifierNode::WidthIn { min, max } => {

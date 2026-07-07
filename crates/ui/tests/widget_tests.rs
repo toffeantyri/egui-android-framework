@@ -1444,3 +1444,119 @@ fn test_fill_max_width_in_column() {
         );
     });
 }
+
+#[test]
+fn test_fill_max_width_with_text() {
+    // Text + fill_max_width — текст должен alloc'ить место по высоте
+    // (ширина в Column не проверяется через available.x).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("Короткий текст")
+            .modifier(Modifier::new().fill_max_width())
+            .render(ui, &dispatch);
+
+        // available.y должен уменьшиться (текст alloc'ил место по высоте)
+        let after_y = ui.available_size().y;
+        assert!(
+            after_y < before_y,
+            "Text + fill_max_width не потребил место: {} -> {}",
+            before_y,
+            after_y
+        );
+    });
+}
+
+#[test]
+fn test_button_wrap_content_without_fill_max_width() {
+    // Button без fill_max_width должен оставаться wrap-content (регрессия).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Button::<()>::new("Коротко").render(ui, &dispatch);
+
+        // available.y уменьшился (кнопка есть), но не на весь экран
+        let after_y = ui.available_size().y;
+        assert!(
+            after_y < before_y,
+            "Button без fill_maxWidth не потребил место"
+        );
+        assert!(
+            after_y > before_y * 0.9,
+            "Button без fill_maxWidth занял почти всю высоту: было {}, стало {}",
+            before_y,
+            after_y
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_width_chain_with_padding_background() {
+    // fill_max_width + padding + background — комбинация модификаторов
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Button::<()>::new("Кнопка")
+            .modifier(Modifier::new().fill_max_width().padding(8.0))
+            .render(ui, &dispatch);
+
+        // available.y уменьшился (кнопка alloc'ила место)
+        let after_y = ui.available_size().y;
+        assert!(
+            after_y < before_y,
+            "fill_max_width + padding не потребил место"
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_width_in_nested_column() {
+    // fill_max_width в два уровня вложенности — не должно паниковать
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Text::new("Внешняя колонка")
+                .padding(4.0)
+                .render(ui, dispatch);
+            Column::new().show(ui, dispatch, |ui, dispatch| {
+                Button::<()>::new("Вложенная кнопка")
+                    .modifier(Modifier::new().fill_max_width())
+                    .render(ui, dispatch);
+            });
+        });
+    });
+}
+
+#[test]
+fn test_fill_max_width_respects_narrow_container() {
+    // fill_max_width внутри контейнера половинной ширины.
+    // В egui Column (CentralPanel) alloc'ит всю ширину каждому ребёнку,
+    // поэтому fill_max_width всегда alloc'ит полную ширину Column.
+    // Этот тест проверяет что два fill_max_width виджета не накладываются.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Button::<()>::new("Кнопка 1")
+            .modifier(Modifier::new().fill_max_width())
+            .render(ui, &dispatch);
+        let after_first = ui.available_size().y;
+
+        Button::<()>::new("Кнопка 2")
+            .modifier(Modifier::new().fill_max_width())
+            .render(ui, &dispatch);
+        let after_second = ui.available_size().y;
+
+        // Обе кнопки потребили место — не наложились
+        assert!(after_first < before_y, "первая кнопка не потребила место");
+        assert!(
+            after_second < after_first,
+            "вторая кнопка наложилась на первую: {} -> {}",
+            after_first,
+            after_second
+        );
+    });
+}

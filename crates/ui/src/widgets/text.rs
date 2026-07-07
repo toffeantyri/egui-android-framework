@@ -80,8 +80,11 @@ impl<M> Widget<M> for Text {
                 });
 
             if !self.text.is_empty() {
-                // Определяем максимальную ширину для переноса текста
-                let max_width = ui.available_width().max(1.0);
+                // Определяем максимальную ширину для переноса текста.
+                // Если родитель требует min_width (через fill_max_width модификатор),
+                // alloc'им с учётом min_width.
+                let avail_w = ui.available_width();
+                let max_width = avail_w.max(1.0);
 
                 let galley = ui.painter().layout_job(egui::text::LayoutJob {
                     text: self.text.clone(),
@@ -105,9 +108,15 @@ impl<M> Widget<M> for Text {
                 });
                 let text_size = galley.size();
 
-                // Резервируем ровно столько места, сколько занимает текст
-                // (wrap-content поведение)
-                let (rect, _response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+                // Если available_width больше wrap-content — alloc'им всю ширину
+                // (поддержка fill_max_width).
+                let final_width = if avail_w > text_size.x {
+                    avail_w
+                } else {
+                    text_size.x
+                };
+                let final_size = egui::vec2(final_width, text_size.y);
+                let (rect, _response) = ui.allocate_exact_size(final_size, egui::Sense::hover());
 
                 ui.painter_at(rect)
                     .galley(rect.left_top(), galley, ui.visuals().text_color());

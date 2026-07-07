@@ -48,6 +48,7 @@ impl Spacer {
 
 impl<M> Widget<M> for Spacer {
     fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<M>) {
+        // Spacer — только явные размеры, fill_max_width на него не влияет.
         let size = match (self.width, self.height) {
             (Some(w), Some(h)) => egui::vec2(w, h),
             (Some(w), None) => egui::vec2(w, 0.0),
