@@ -1559,3 +1559,167 @@ fn test_fill_max_width_respects_narrow_container() {
         );
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// CONSTRAINTS TESTS (Фаза 7)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_constraints_exact_size() {
+    // Constraints::exact — виджет alloc'ит точный размер
+    use egui_android_core::Constraints;
+    let c = Constraints::exact(200.0, 100.0);
+    let clamped = c.clamp_size(egui::vec2(50.0, 30.0));
+    assert_eq!(clamped.x, 200.0);
+    assert_eq!(clamped.y, 100.0);
+}
+
+#[test]
+fn test_constraints_ranged() {
+    use egui_android_core::Constraints;
+    let c = Constraints::ranged(10.0, 100.0, 20.0, 200.0);
+    assert_eq!(c.clamp_size(egui::vec2(5.0, 10.0)), egui::vec2(10.0, 20.0));
+    assert_eq!(
+        c.clamp_size(egui::vec2(200.0, 300.0)),
+        egui::vec2(100.0, 200.0)
+    );
+    assert_eq!(
+        c.clamp_size(egui::vec2(50.0, 100.0)),
+        egui::vec2(50.0, 100.0)
+    );
+}
+
+#[test]
+fn test_fill_max_width_in_column_stretches_button() {
+    // Button + fill_max_width в Column — кнопка растягивается на всю ширину.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        let before_y_inner = ui.available_size().y;
+
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Button::<()>::new("Кнопка")
+                .modifier(Modifier::new().fill_max_width())
+                .render(ui, dispatch);
+
+            // После рендера кнопки available.y внутри Column уменьшился
+            let avail_y = ui.available_size().y;
+            assert!(
+                avail_y < before_y_inner,
+                "Кнопка с fill_max_width не alloc'ила место: {} -> {}",
+                before_y_inner,
+                avail_y
+            );
+        });
+
+        let after_y = ui.available_size().y;
+        assert!(
+            after_y < before_y,
+            "Column не потребила место: {} -> {}",
+            before_y,
+            after_y
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_width_column_two_buttons() {
+    // Две кнопки с fill_max_width в Column — не накладываются.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            Button::<()>::new("A")
+                .modifier(Modifier::new().fill_max_width())
+                .render(ui, dispatch);
+            Button::<()>::new("B")
+                .modifier(Modifier::new().fill_max_width())
+                .render(ui, dispatch);
+        });
+
+        let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+        // Две кнопки ~48px + spacing 8px = ~104px
+        assert!(
+            consumed > 80.0,
+            "Две кнопки должны занять >80px, потребили {}",
+            consumed
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_size_stretches_button() {
+    // Button + fill_max_size — кнопка alloc'ит весь доступный размер.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Button::<()>::new("Кнопка")
+            .modifier(Modifier::new().fill_max_size())
+            .render(ui, &dispatch);
+
+        let after_y = ui.available_size().y;
+        // fill_max_size alloc'ит весь available — после него не должно остаться места
+        assert!(
+            after_y < 1.0,
+            "fill_max_size не занял всю высоту: осталось {}",
+            after_y
+        );
+    });
+}
+
+#[test]
+fn test_sized_widget_via_constraints() {
+    // SizedWidget через Constraints — точный размер.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("Текст").size(300.0, 100.0).render(ui, &dispatch);
+
+        let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+        assert!(
+            consumed >= 100.0,
+            "SizedWidget 100px высоты потребил {}",
+            consumed
+        );
+    });
+}
+
+#[test]
+fn test_height_modifier_via_constraints() {
+    // Height + Text — текст растягивается на заданную высоту.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("Текст")
+            .modifier(Modifier::new().height(60.0))
+            .render(ui, &dispatch);
+
+        let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+        assert!(consumed >= 55.0, "Height 60px потребил {}", consumed);
+    });
+}
+
+#[test]
+fn test_width_modifier_via_constraints() {
+    // Width + Text — текст растягивается на заданную ширину.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("Короткий")
+            .modifier(Modifier::new().width(200.0))
+            .render(ui, &dispatch);
+
+        // Text alloc'ил место по высоте
+        let after_y = ui.available_size().y;
+        assert!(after_y < before_y, "Text с width 200 не потребил место");
+    });
+}

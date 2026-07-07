@@ -34,7 +34,7 @@
 
 use std::marker::PhantomData;
 
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, Constraints, Dispatcher, UiWrapper};
 
 /// Тип closure для `ClickableWith` — получает `Response`, `Ui` и `Dispatcher`.
 pub type ClickableCallback<M> = Box<dyn Fn(&egui::Response, &UiWrapper, &Dispatcher<M>)>;
@@ -81,17 +81,20 @@ pub struct SizedWidget<W, M> {
 impl<W: Widget<M>, M> Widget<M> for SizedWidget<W, M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let desired_size = egui::vec2(self.width, self.height);
-        // Резервируем область ровно указанного размера
+        // Резервируем область ровно указанного размера через constraints.
+        // Это гарантирует что внутренний виджет alloc'ит в рамках точного размера.
         let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
 
-        // Создаём child_ui с той же областью и layout
+        // Создаём child_ui с constraints = exact size
         let layout = *ui.layout();
-        let mut child_ui = UiWrapper::new_child(
+        let child_constraints = Constraints::exact(self.width, self.height);
+        let mut child_ui = UiWrapper::new_child_with_constraints(
             &mut *ui,
             egui::UiBuilder::new()
                 .id_salt("sized_widget")
                 .max_rect(rect)
                 .layout(layout),
+            child_constraints,
         );
 
         // Рендерим внутренний виджет
@@ -99,16 +102,6 @@ impl<W: Widget<M>, M> Widget<M> for SizedWidget<W, M> {
 
         // Устанавливаем min_size равным желаемому размеру, чтобы
         // родительский Ui знал, какое место было занято.
-        // Это гарантирует, что SizedWidget всегда занимает ровно
-        // указанную область, независимо от того, сколько места
-        // занял внутренний виджет.
-        child_ui.set_min_size(desired_size);
-
-        // Устанавливаем min_size равным желаемому размеру, чтобы
-        // родительский Ui знал, какое место было занято.
-        // Это гарантирует, что SizedWidget всегда занимает ровно
-        // указанную область, независимо от того, сколько места
-        // занял внутренний виджет.
         child_ui.set_min_size(desired_size);
     }
 }
