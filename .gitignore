@@ -5,3 +5,4 @@
 /examples/counter_example/target
 /examples/showcase/target
 repomix-output.xml
+crates/ui/repomix-output.xml

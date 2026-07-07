@@ -22,7 +22,7 @@ pub struct LazyColumn {
 
 impl Default for LazyColumn {
     fn default() -> Self {
-        Self { item_spacing: 4.0 }
+        Self { item_spacing: 8.0 }
     }
 }
 
@@ -50,7 +50,7 @@ impl LazyColumn {
         Self::default().render(items, ui, dispatch, item_builder);
     }
 
-    /// Установить расстояние между элементами (по умолчанию 4.0).
+    /// Установить расстояние между элементами (по умолчанию 8.0).
     pub fn item_spacing(mut self, spacing: f32) -> Self {
         self.item_spacing = spacing;
         self

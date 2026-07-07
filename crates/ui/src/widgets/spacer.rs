@@ -48,19 +48,12 @@ impl Spacer {
 
 impl<M> Widget<M> for Spacer {
     fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<M>) {
-        match (self.width, self.height) {
-            (Some(w), Some(h)) => {
-                ui.allocate_exact_size(egui::vec2(w, h), Sense::hover());
-            }
-            (Some(w), None) => {
-                ui.add_space(w);
-            }
-            (None, Some(h)) => {
-                ui.add_space(h);
-            }
-            (None, None) => {
-                // Пустой spacer — ничего не делаем
-            }
-        }
+        let size = match (self.width, self.height) {
+            (Some(w), Some(h)) => egui::vec2(w, h),
+            (Some(w), None) => egui::vec2(w, 0.0),
+            (None, Some(h)) => egui::vec2(0.0, h),
+            (None, None) => return,
+        };
+        ui.allocate_exact_size(size, Sense::hover());
     }
 }

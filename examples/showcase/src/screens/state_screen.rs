@@ -7,7 +7,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::ModifierExt,
+        modifier::{Modifier, ModifierApply, ModifierExt},
         remember,
         widgets::{Button, Spacer, Text, Widget},
     },
@@ -123,7 +123,7 @@ impl StateScreen {
                             log::info!("Счётчик сброшен при навигации назад");
                         }
                     })
-                    .padding(8.0)
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
                 Spacer::new(4.0).render(ui, dispatch);

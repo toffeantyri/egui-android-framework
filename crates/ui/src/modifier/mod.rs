@@ -58,9 +58,11 @@ use egui_android_core::{widget::Widget, Dispatcher};
 
 pub use legacy::*;
 
+pub use crate::animation::SlideDirection;
 pub use value::Modifier;
 
 mod value {
+    use crate::animation::SlideDirection;
     use egui::{Color32, CornerRadius, Response, Sense, Ui};
     use egui_android_core::Dispatcher;
 
@@ -83,6 +85,9 @@ mod value {
 
     /// Внутреннее представление одного модификатора.
     pub(crate) enum ModifierNode<M> {
+        // Animation
+        Fade(f32),
+        Slide(SlideDirection, f32),
         // Padding
         PaddingAll(f32),
         PaddingHV {
@@ -181,6 +186,12 @@ mod value {
                 ModifierNode::Shadow(v) => f.debug_tuple("Shadow").field(v).finish(),
                 ModifierNode::Clickable(m) => f.debug_tuple("Clickable").field(m).finish(),
                 ModifierNode::ClickableWith(_) => f.debug_tuple("ClickableWith").finish(),
+                ModifierNode::Fade(opacity) => f.debug_tuple("Fade").field(opacity).finish(),
+                ModifierNode::Slide(direction, offset) => f
+                    .debug_tuple("Slide")
+                    .field(direction)
+                    .field(offset)
+                    .finish(),
             }
         }
     }
@@ -312,6 +323,24 @@ mod value {
             self
         }
 
+        // ─── Animation ──────────────────────────────────────────────────────
+
+        /// Применить прозрачность (Fade модификатор).
+        ///
+        /// `opacity` от 0.0 (полностью прозрачный) до 1.0 (непрозрачный).
+        pub fn fade(mut self, opacity: f32) -> Self {
+            self.nodes.push(ModifierNode::Fade(opacity.clamp(0.0, 1.0)));
+            self
+        }
+
+        /// Сместить контент (Slide модификатор).
+        ///
+        /// `direction` — направление смещения, `offset` — величина смещения в пикселях.
+        pub fn slide(mut self, direction: SlideDirection, offset: f32) -> Self {
+            self.nodes.push(ModifierNode::Slide(direction, offset));
+            self
+        }
+
         // ─── Interaction ────────────────────────────────────────────────────
 
         /// Сделать кликабельным — при клике диспатчит указанное сообщение.
@@ -414,16 +443,28 @@ mod value {
                 // ===== SIZE CONSTRAINTS =====
                 ModifierNode::FillMaxWidth => {
                     let available = ui.available_size();
+                    // Создаём child_ui на всю доступную ширину (без alloc в родителе).
                     let id_salt = ui.next_auto_id();
-                    let child_rect = ui
-                        .allocate_exact_size(egui::vec2(available.x, available.y), Sense::hover());
+                    let inner_rect = ui.available_rect_before_wrap();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
-                            .max_rect(child_rect.0)
+                            .max_rect(egui::Rect::from_min_size(
+                                inner_rect.min,
+                                egui::vec2(available.x, f32::INFINITY),
+                            ))
                             .layout(*ui.layout()),
                     );
+                    child_ui.set_max_width(available.x);
                     rest(&mut child_ui, dispatch);
+                    // Измеряем реальный размер контента
+                    let content_height = child_ui.min_size().y.max(1.0);
+                    // Аллоцируем в родителе (available.x, content_height).
+                    // Ширина — available.x (во всю ширину),
+                    // высота — реальная высота контента.
+                    // alloc после rest — контент уже нарисован в child_ui,
+                    // alloc в родителе резервирует место для внешнего layout.
+                    ui.allocate_exact_size(egui::vec2(available.x, content_height), Sense::hover());
                 }
                 ModifierNode::FillMaxSize => {
                     let available = ui.available_size();
@@ -562,14 +603,10 @@ mod value {
 
                 // ===== INTERACTION =====
                 //
-                // ИСПРАВЛЕНИЕ БАГА (v2):
-                // Кликабельная область определяется реальным размером
-                // отрисованного контента, а не available_rect_before_wrap().
-                //
-                // Алгоритм:
-                // 1. Рендерим содержимое в child_ui, измеряем min_size().
-                // 2. Аллоцируем кликабельную область ровно по размеру контента.
-                // 3. Если клик был — диспатчим сообщение / вызываем handler.
+                // Алгоритм: рендерим контент один раз в child_ui,
+                // затем alloc'им clickable-область поверх по размеру контента.
+                // Это не двойной рендер — контент уже отрисован в child_ui,
+                // а allocate_exact_size добавляет только Sense::click().
                 ModifierNode::Clickable(msg) => {
                     let inner_rect = ui.available_rect_before_wrap();
                     let mut child_ui = ui.new_child(
@@ -578,11 +615,11 @@ mod value {
                             .max_rect(inner_rect)
                             .layout(*ui.layout()),
                     );
-                    // Убираем визуальное выделение при наведении/клике
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
                     rest(&mut child_ui, dispatch);
                     let content_size = child_ui.min_size();
 
+                    // Аллоцируем clickable-область поверх контента
                     let (_rect, response) = ui.allocate_exact_size(content_size, Sense::click());
 
                     if response.clicked() {
@@ -597,7 +634,6 @@ mod value {
                             .max_rect(inner_rect)
                             .layout(*ui.layout()),
                     );
-                    // Убираем визуальное выделение при наведении/клике
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
                     rest(&mut child_ui, dispatch);
                     let content_size = child_ui.min_size();
@@ -607,6 +643,32 @@ mod value {
                     if response.clicked() {
                         handler(&response, ui, dispatch);
                     }
+                }
+
+                // ===== ANIMATION =====
+                ModifierNode::Fade(opacity) => {
+                    ui.scope(|ui| {
+                        ui.multiply_opacity(*opacity);
+                        rest(ui, dispatch);
+                    });
+                }
+                ModifierNode::Slide(direction, offset) => {
+                    let offset_vec = match direction {
+                        SlideDirection::Left => egui::vec2(-*offset, 0.0),
+                        SlideDirection::Right => egui::vec2(*offset, 0.0),
+                        SlideDirection::Up => egui::vec2(0.0, -*offset),
+                        SlideDirection::Down => egui::vec2(0.0, *offset),
+                    };
+                    ui.scope(|ui| {
+                        let max_rect = ui.max_rect().translate(offset_vec);
+                        let mut child_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .id_salt("slide")
+                                .max_rect(max_rect)
+                                .layout(*ui.layout()),
+                        );
+                        rest(&mut child_ui, dispatch);
+                    });
                 }
             }
         }

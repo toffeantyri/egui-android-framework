@@ -96,7 +96,9 @@ impl Column {
         };
 
         if self.scrollable {
-            egui::ScrollArea::vertical().show(ui, render_inner);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, render_inner);
         } else {
             ui.vertical(render_inner);
         }

@@ -1,12 +1,15 @@
-//! Виджет [`Button`] — кликабельная кнопка.
+//! Виджет [`Button`] — кликабельная кнопка с wrap-content по умолчанию.
 //!
 //! Диспатчит сообщение при клике или вызывает closure.
 //! Использует builder pattern для задания `on_click` / `on_click_with`.
 //!
 //! # Размер
 //!
-//! Кнопка растягивается на всю доступную ширину контейнера.
-//! Высота по умолчанию — 48.0 (настраивается через [`Button::height`]).
+//! По умолчанию кнопка занимает размер, достаточный для текста (wrap-content).
+//! Full-width (на всю ширину контейнера) — только через модификатор:
+//! `.modifier(Modifier::new().fill_max_width())` или через `.padding()` + `.background()`.
+//! Высота по умолчанию вычисляется по тексту + внутренний padding.
+//! Можно переопределить через [`Button::height`].
 //! Текст выравнивается по центру кнопки.
 //! Вся область кнопки реагирует на клик.
 //!
@@ -24,9 +27,15 @@
 //! # Пример
 //!
 //! ```ignore
-//! // Кнопка с MVI-сообщением (реакция на нажатие — встроенная)
+//! // Кнопка с MVI-сообщением (wrap-content по умолчанию)
 //! Button::new("Нажми меня")
 //!     .on_click(Msg::Clicked)
+//!     .render(ui, dispatch);
+//!
+//! // Кнопка на всю ширину через модификатор
+//! Button::new("Full-width")
+//!     .on_click(Msg::Clicked)
+//!     .modifier(Modifier::new().fill_max_width())
 //!     .render(ui, dispatch);
 //!
 //! // Кнопка с кастомными цветами
@@ -67,8 +76,9 @@ impl Default for ButtonColors {
 /// Оба обработчика могут быть заданы одновременно — сначала диспатчится
 /// сообщение, затем вызывается closure.
 ///
-/// Кнопка занимает всю доступную ширину, имеет фиксированную высоту 48.0
-/// (задаётся через [`Button::height`]) и выравнивает текст по центру.
+/// По умолчанию кнопка занимает размер текста + внутренний padding (wrap-content).
+/// Full-width — только через модификатор (`.fill_max_width()` или `.size(...)`).
+/// Выравнивает текст по центру.
 /// Вся область кнопки реагирует на клик.
 ///
 /// Встроенная визуальная обратная связь: при нажатии цвет фона меняется.
@@ -155,8 +165,24 @@ impl<M: 'static> Button<M> {
 
 impl<M: Clone + 'static> Widget<M> for Button<M> {
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
-        let available_width = ui.available_width();
-        let desired_size = egui::vec2(available_width, self.height);
+        // Внутренний padding кнопки: 12px по горизонтали, 8px по вертикали
+        const HPAD: f32 = 12.0;
+        const VPAD: f32 = 8.0;
+
+        let font_id = egui::FontId::proportional(18.0);
+        let text_color = egui::Color32::WHITE;
+
+        // Измеряем текст
+        let galley = ui
+            .painter()
+            .layout_no_wrap(self.text.clone(), font_id, text_color);
+        let text_size = galley.size();
+
+        // Размер кнопки: текст + padding, высоту можно переопределить через self.height
+        let btn_height = self.height.max(text_size.y + VPAD * 2.0);
+        let btn_width = text_size.x + HPAD * 2.0;
+        let desired_size = egui::vec2(btn_width, btn_height);
+
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
@@ -169,20 +195,15 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 self.colors.normal
             };
 
+            // Фон кнопки со скруглением
             painter.rect_filled(rect, 4.0, bg_color);
 
-            // Текст по центру
-            let galley = ui.painter().layout_no_wrap(
-                self.text.clone(),
-                egui::FontId::proportional(18.0),
-                egui::Color32::WHITE,
-            );
-            let text_size = galley.size();
+            // Текст по центру кнопки
             let text_pos = egui::pos2(
                 rect.center().x - text_size.x / 2.0,
                 rect.center().y - text_size.y / 2.0,
             );
-            painter.galley(text_pos, galley, egui::Color32::WHITE);
+            painter.galley(text_pos, galley, text_color);
         }
 
         if response.clicked() {

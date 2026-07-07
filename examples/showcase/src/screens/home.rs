@@ -4,7 +4,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::ModifierExt,
+        modifier::{Modifier, ModifierApply, ModifierExt},
         widgets::{Button, Spacer, Text, Widget},
     },
 };
@@ -40,7 +40,7 @@ impl HomeScreen {
                 for route in routes {
                     Button::new(route.title())
                         .on_click(RootMsg::Navigate(route))
-                        .padding(8.0)
+                        .modifier(Modifier::new().fill_max_width().padding(8.0))
                         .render(ui, dispatch);
                 }
             });

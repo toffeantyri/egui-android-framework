@@ -1,4 +1,4 @@
-//! Виджет [`Text`] — отображает строку текста.
+//! Виджет [`Text`] — отображает строку текста с переносом.
 //!
 //! Не диспатчит сообщения. Используется как замена `ui.label(...)`.
 //!
@@ -17,6 +17,7 @@
 //!
 //! Внутри использует `ui.allocate_exact_size()` с реальным размером galley,
 //! что гарантирует корректный layout в Column, Row, Stack и LazyColumn.
+//! Текст переносится по строкам, если не помещается в доступную ширину.
 
 use egui_android_core::{widget::Widget, Dispatcher};
 
@@ -78,17 +79,42 @@ impl<M> Widget<M> for Text {
                         .unwrap_or_else(|| egui::FontId::proportional(16.0))
                 });
 
-            let galley =
-                ui.painter()
-                    .layout_no_wrap(self.text.clone(), font_id, ui.visuals().text_color());
-            let text_size = galley.size();
+            if !self.text.is_empty() {
+                // Определяем максимальную ширину для переноса текста
+                let max_width = ui.available_width().max(1.0);
 
-            // Резервируем ровно столько места, сколько занимает текст
-            // (wrap-content поведение)
-            let (rect, _response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+                let galley = ui.painter().layout_job(egui::text::LayoutJob {
+                    text: self.text.clone(),
+                    sections: vec![egui::text::LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: egui::text::ByteIndex(0)
+                            ..egui::text::ByteIndex(self.text.len()),
+                        format: egui::text::TextFormat {
+                            font_id: font_id,
+                            color: ui.visuals().text_color(),
+                            ..Default::default()
+                        },
+                    }],
+                    wrap: egui::text::TextWrapping {
+                        max_width,
+                        max_rows: usize::MAX,
+                        break_anywhere: true,
+                        overflow_character: Some('\u{FFFD}'),
+                    },
+                    ..Default::default()
+                });
+                let text_size = galley.size();
 
-            ui.painter_at(rect)
-                .galley(rect.left_top(), galley, ui.visuals().text_color());
+                // Резервируем ровно столько места, сколько занимает текст
+                // (wrap-content поведение)
+                let (rect, _response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+
+                ui.painter_at(rect)
+                    .galley(rect.left_top(), galley, ui.visuals().text_color());
+            } else {
+                // Пустой текст — alloc'им нулевой размер
+                ui.allocate_exact_size(egui::vec2(0.0, 0.0), egui::Sense::hover());
+            }
         }
     }
 }

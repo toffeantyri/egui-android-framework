@@ -4,7 +4,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::{Column, LazyColumn, Row, Stack},
-        modifier::ModifierExt,
+        modifier::{Modifier, ModifierApply, ModifierExt},
         remember,
         widgets::{Button, Spacer, Text, Widget},
     },
@@ -106,7 +106,7 @@ impl ContainersScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .padding(8.0)
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });
     }

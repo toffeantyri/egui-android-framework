@@ -1339,3 +1339,108 @@ fn test_modifier_value_clickable_padded_background() {
             .render(ui, &dispatch);
     });
 }
+
+#[test]
+fn test_fill_max_width_in_scrollable_column() {
+    // FillMaxWidth в Scrollable Column — симулирует HomeScreen.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+        let before_x = ui.available_size().x;
+
+        Column::new()
+            .scrollable()
+            .show(ui, &dispatch, |ui, dispatch| {
+                Text::new("Showcase").padding(8.0).render(ui, dispatch);
+                Spacer::new(16.0).render(ui, dispatch);
+                Text::new("Выберите демо:").render(ui, dispatch);
+
+                Button::<()>::new("Виджеты")
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+                Button::<()>::new("Модификаторы")
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+                Button::<()>::new("Контейнеры")
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+            });
+
+        let after_y = ui.available_size().y;
+        assert!(
+            after_y < before_y,
+            "scrollable Column не потребила место: {} -> {}",
+            before_y,
+            after_y
+        );
+        // Проверяем что было потреблено как минимум 3 * 48px (3 кнопки * высота)
+        let consumed_y = before_y - after_y;
+        assert!(
+            consumed_y > 100.0,
+            "scrollable Column потребила слишком мало: {}px (ожидалось > 100px)",
+            consumed_y
+        );
+
+        let after_x = ui.available_size().x;
+        assert!(
+            (after_x - before_x).abs() < 1.0,
+            "scrollable Column изменила ширину: {} -> {}",
+            before_x,
+            after_x
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_width_in_column() {
+    // FillMaxWidth в Column — проверяет что:
+    // 1. Кнопки не накладываются друг на друга (высота alloc'ируется по контенту)
+    // 2. Дети не занимают всю высоту Column
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        // Высота доступного пространства
+        let available_height = ui.available_size().y;
+        assert!(
+            available_height > 100.0,
+            "тест должен иметь достаточную высоту"
+        );
+
+        // Рендерим две кнопки с fill_max_width в Column
+        Button::<()>::new("Кнопка 1")
+            .modifier(Modifier::new().fill_max_width().padding(8.0))
+            .render(ui, &dispatch);
+        let after_first_y = ui.available_size().y;
+
+        // После первой кнопки available.y уменьшился
+        assert!(
+            after_first_y < available_height,
+            "первая кнопка не потребила место по высоте: available.y {} -> {}",
+            available_height,
+            after_first_y
+        );
+        // Высота уменьшилась не на весь экран (кнопка не заняла всю высоту)
+        assert!(
+            after_first_y > available_height * 0.5,
+            "первая кнопка заняла всю высоту: осталось {}",
+            after_first_y
+        );
+
+        // Вторая кнопка
+        Button::<()>::new("Кнопка 2")
+            .modifier(Modifier::new().fill_max_width().padding(8.0))
+            .render(ui, &dispatch);
+        let after_second_y = ui.available_size().y;
+
+        // После второй кнопки available.y уменьшился ещё
+        assert!(
+            after_second_y < after_first_y,
+            "вторая кнопка не потребила место — наложилась на первую: {} -> {}",
+            after_first_y,
+            after_second_y
+        );
+        assert!(
+            after_second_y >= 0.0,
+            "после двух кнопок высота не должна быть отрицательной"
+        );
+    });
+}
