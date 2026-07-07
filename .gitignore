@@ -6,3 +6,4 @@
 /examples/showcase/target
 repomix-output.xml
 crates/ui/repomix-output.xml
+crates/ui/repomix-output.txt
