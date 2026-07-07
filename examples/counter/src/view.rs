@@ -6,6 +6,7 @@
 //! Использует Compose-like API из крейтов egui-android-framework:
 //! Column, Button, Text, Spacer, AnimatedVisibility, AnimationExt, ModifierExt.
 
+use egui_android_framework::core::UiWrapper;
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     animation::{AnimatedVisibility, AnimationExt},
@@ -18,7 +19,7 @@ use egui_android_framework::ui::{
 use crate::msg::Msg;
 
 /// View-функция счётчика: читает состояние, рисует UI.
-pub fn counter_view(state: &u32, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
+pub fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
     // Весь UI строится через наш фреймворк, без нативного egui
     Column::new()
         .scrollable()

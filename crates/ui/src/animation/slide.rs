@@ -1,4 +1,4 @@
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 use std::marker::PhantomData;
 
 #[derive(Clone, Copy, Debug)]
@@ -28,20 +28,21 @@ impl<W, M> Slide<W, M> {
 }
 
 impl<W: Widget<M>, M> Widget<M> for Slide<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let offset_vec = match self.direction {
             SlideDirection::Left => egui::vec2(-self.offset, 0.0),
             SlideDirection::Right => egui::vec2(self.offset, 0.0),
             SlideDirection::Up => egui::vec2(0.0, -self.offset),
             SlideDirection::Down => egui::vec2(0.0, self.offset),
         };
-        ui.scope(|ui| {
-            let max_rect = ui.max_rect().translate(offset_vec);
-            let mut child_ui = ui.new_child(
+        ui.scope(|scope_ui| {
+            let max_rect = scope_ui.max_rect().translate(offset_vec);
+            let mut child_ui = UiWrapper::new_child(
+                scope_ui,
                 egui::UiBuilder::new()
                     .id_salt("slide")
                     .max_rect(max_rect)
-                    .layout(*ui.layout()),
+                    .layout(*scope_ui.layout()),
             );
             self.inner.render(&mut child_ui, dispatch);
         });

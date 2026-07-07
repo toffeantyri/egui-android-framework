@@ -11,7 +11,7 @@
 //! });
 //! ```
 
-use egui_android_core::Dispatcher;
+use egui_android_core::{Dispatcher, UiWrapper};
 
 /// Контейнер с горизонтальным расположением дочерних виджетов.
 ///
@@ -35,9 +35,9 @@ impl Row {
     /// * `ui` — текущий Ui
     /// * `dispatch` — диспетчер сообщений
     /// * `content` — замыкание, в котором рендерятся дочерние виджеты
-    pub fn new<M: 'static, F>(ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    pub fn new<M: 'static, F>(ui: &mut UiWrapper, dispatch: &Dispatcher<M>, content: F)
     where
-        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+        F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
         Self::default().render(ui, dispatch, content);
     }
@@ -49,13 +49,13 @@ impl Row {
     }
 
     /// Рендер с заданным spacing.
-    fn render<M: 'static, F>(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    fn render<M: 'static, F>(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>, content: F)
     where
-        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+        F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(self.spacing, self.spacing);
-            content(ui, dispatch);
+            content(&mut UiWrapper::new_unconstrained(ui), dispatch);
         });
     }
 }

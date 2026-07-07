@@ -1,7 +1,9 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
 
 use egui_android_framework::{
-    core::Component, core::LifecycleObserver, navigation::ChildStack, runtime::Dispatcher,
+    core::{Component, LifecycleObserver, UiWrapper},
+    navigation::ChildStack,
+    runtime::Dispatcher,
     runtime::StateStore,
 };
 
@@ -51,7 +53,8 @@ impl Component for RootComponent {
 
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
         if let Some(active) = self.stack.active() {
-            active.render(ui, dispatch);
+            let mut wrapper = UiWrapper::new_unconstrained(ui);
+            active.render(&mut wrapper, dispatch);
         }
     }
 

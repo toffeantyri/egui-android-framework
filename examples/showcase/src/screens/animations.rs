@@ -8,6 +8,7 @@ use egui_android_framework::{
         modifier::{Modifier, ModifierApply, ModifierExt},
         remember,
         widgets::{Button, Spacer, Text, Widget},
+        UiWrapper,
     },
 };
 
@@ -21,7 +22,7 @@ impl AnimationsScreen {
         Self
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         let show_box = remember(ui, "anim_show", || false);
         let slide_open = remember(ui, "anim_slide", || false);
 

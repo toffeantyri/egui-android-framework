@@ -3,7 +3,7 @@
 //! Использует `egui::Image<'static>` для рендеринга.
 //! Не диспатчит сообщения.
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Виджет-иконка.
 pub struct Icon {
@@ -17,7 +17,7 @@ impl Icon {
 }
 
 impl<M> Widget<M> for Icon {
-    fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         ui.add(self.icon.clone());
     }
 }

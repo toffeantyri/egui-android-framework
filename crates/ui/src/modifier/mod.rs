@@ -54,7 +54,7 @@
 
 pub mod legacy;
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 pub use legacy::*;
 
@@ -63,6 +63,7 @@ pub use value::Modifier;
 
 mod value {
     use crate::animation::SlideDirection;
+    use crate::UiWrapper;
     use egui::{Color32, CornerRadius, Response, Sense, Ui};
     use egui_android_core::Dispatcher;
 
@@ -379,26 +380,26 @@ mod value {
         /// первый добавленный — самый внешний.
         pub fn apply(
             &self,
-            ui: &mut Ui,
+            ui: &mut UiWrapper,
             dispatch: &Dispatcher<M>,
-            content: impl FnOnce(&mut Ui, &Dispatcher<M>),
+            content: impl FnOnce(&mut UiWrapper, &Dispatcher<M>),
         ) {
             self.apply_recursive(ui, dispatch, 0, content);
         }
 
         fn apply_recursive(
             &self,
-            ui: &mut Ui,
+            ui: &mut UiWrapper,
             dispatch: &Dispatcher<M>,
             index: usize,
-            content: impl FnOnce(&mut Ui, &Dispatcher<M>),
+            content: impl FnOnce(&mut UiWrapper, &Dispatcher<M>),
         ) {
             if index >= self.nodes.len() {
                 content(ui, dispatch);
                 return;
             }
 
-            let rest = |ui: &mut Ui, dispatch: &Dispatcher<M>| {
+            let rest = |ui: &mut UiWrapper, dispatch: &Dispatcher<M>| {
                 self.apply_recursive(ui, dispatch, index + 1, content);
             };
 
@@ -406,18 +407,20 @@ mod value {
                 // ===== PADDING =====
                 ModifierNode::PaddingAll(all) => {
                     let inset = egui::Margin::symmetric(*all as i8, *all as i8);
-                    egui::Frame::NONE
-                        .inner_margin(inset)
-                        .show(ui, |ui| rest(ui, dispatch));
+                    egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
+                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        rest(&mut w, dispatch);
+                    });
                 }
                 ModifierNode::PaddingHV {
                     horizontal,
                     vertical,
                 } => {
                     let inset = egui::Margin::symmetric(*horizontal as i8, *vertical as i8);
-                    egui::Frame::NONE
-                        .inner_margin(inset)
-                        .show(ui, |ui| rest(ui, dispatch));
+                    egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
+                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        rest(&mut w, dispatch);
+                    });
                 }
                 ModifierNode::PaddingEdges {
                     left,
@@ -435,9 +438,10 @@ mod value {
                         top,
                         bottom,
                     };
-                    egui::Frame::NONE
-                        .inner_margin(inset)
-                        .show(ui, |ui| rest(ui, dispatch));
+                    egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
+                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        rest(&mut w, dispatch);
+                    });
                 }
 
                 // ===== SIZE CONSTRAINTS =====
@@ -446,6 +450,7 @@ mod value {
                     // Создаём child_ui на всю доступную ширину (без alloc в родителе).
                     let id_salt = ui.next_auto_id();
                     let inner_rect = ui.available_rect_before_wrap();
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
@@ -453,13 +458,13 @@ mod value {
                                 inner_rect.min,
                                 egui::vec2(available.x, f32::INFINITY),
                             ))
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
                     // Устанавливаем min_width = available.x, чтобы заставить
                     // дочерние виджеты растянуться на всю ширину (match_parent).
                     child_ui.set_min_width(available.x);
                     child_ui.set_max_width(available.x);
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                     let content_height = child_ui.min_size().y.max(1.0);
                     // Аллоцируем в родителе (available.x, content_height).
                     ui.allocate_exact_size(egui::vec2(available.x, content_height), Sense::hover());
@@ -468,22 +473,24 @@ mod value {
                     let available = ui.available_size();
                     let id_salt = ui.next_auto_id();
                     let child_rect = ui.allocate_exact_size(available, Sense::hover());
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
                             .max_rect(child_rect.0)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
                     // Устанавливаем и min_width и min_height = available,
                     // чтобы дочерние виджеты растянулись по обеим осям.
                     child_ui.set_min_size(available);
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                 }
                 ModifierNode::WrapContentWidth => {
                     // Измеряем размер содержимого, рендерим один раз
-                    let response = ui.scope(|ui| {
-                        rest(ui, dispatch);
-                        ui.min_rect().size()
+                    let response = ui.scope(|scope_ui| {
+                        let mut w = UiWrapper::new_unconstrained(scope_ui);
+                        rest(&mut w, dispatch);
+                        w.min_rect().size()
                     });
                     let content_size = response.inner;
                     // Аллоцируем ровно эту ширину
@@ -494,9 +501,10 @@ mod value {
                 }
                 ModifierNode::WrapContentSize => {
                     // Измеряем размер содержимого, рендерим один раз
-                    let response = ui.scope(|ui| {
-                        rest(ui, dispatch);
-                        ui.min_rect().size()
+                    let response = ui.scope(|scope_ui| {
+                        let mut w = UiWrapper::new_unconstrained(scope_ui);
+                        rest(&mut w, dispatch);
+                        w.min_rect().size()
                     });
                     let content_size = response.inner;
                     // Аллоцируем ровно этот размер
@@ -506,74 +514,86 @@ mod value {
                     let size = egui::vec2(*w, ui.available_height());
                     let id_salt = ui.next_auto_id();
                     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
                             .max_rect(rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                 }
                 ModifierNode::Height(h) => {
                     let size = egui::vec2(ui.available_width(), *h);
                     let id_salt = ui.next_auto_id();
                     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
                             .max_rect(rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
                     child_ui.set_min_height(*h);
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                 }
                 ModifierNode::WidthIn { min, max } => {
                     let w = ui.available_width().clamp(*min, *max);
                     let size = egui::vec2(w, ui.available_height());
                     let id_salt = ui.next_auto_id();
                     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
                             .max_rect(rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                 }
                 ModifierNode::HeightIn { min, max } => {
                     let h = ui.available_height().clamp(*min, *max);
                     let size = egui::vec2(ui.available_width(), h);
                     let id_salt = ui.next_auto_id();
                     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
                             .max_rect(rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                 }
 
                 // ===== APPEARANCE =====
                 ModifierNode::Background(color) => {
-                    egui::Frame::NONE
-                        .fill(*color)
-                        .show(ui, |ui| rest(ui, dispatch));
+                    egui::Frame::NONE.fill(*color).show(ui, |show_ui| {
+                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        rest(&mut w, dispatch);
+                    });
                 }
                 ModifierNode::Border { width, color } => {
                     egui::Frame::NONE
                         .stroke(egui::Stroke::new(*width, *color))
-                        .show(ui, |ui| rest(ui, dispatch));
+                        .show(ui, |show_ui| {
+                            let mut w = UiWrapper::new_unconstrained(show_ui);
+                            rest(&mut w, dispatch);
+                        });
                 }
                 ModifierNode::CornerRadius(radius) => {
                     egui::Frame::NONE
                         .corner_radius(egui::CornerRadius::same(*radius as u8))
-                        .show(ui, |ui| rest(ui, dispatch));
+                        .show(ui, |show_ui| {
+                            let mut w = UiWrapper::new_unconstrained(show_ui);
+                            rest(&mut w, dispatch);
+                        });
                 }
                 ModifierNode::Alpha(alpha) => {
-                    ui.scope(|ui| {
-                        ui.multiply_opacity(*alpha);
-                        rest(ui, dispatch);
+                    ui.scope(|scope_ui| {
+                        scope_ui.multiply_opacity(*alpha);
+                        let mut w = UiWrapper::new_unconstrained(scope_ui);
+                        rest(&mut w, dispatch);
                     });
                 }
                 ModifierNode::Clip(rounding) => {
@@ -581,8 +601,9 @@ mod value {
                     let frame = egui::Frame::NONE
                         .corner_radius(*rounding)
                         .inner_margin(egui::Margin::ZERO);
-                    frame.show(ui, |ui| {
-                        rest(ui, dispatch);
+                    frame.show(ui, |show_ui| {
+                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        rest(&mut w, dispatch);
                     });
                 }
                 ModifierNode::Shadow(elevation) => {
@@ -595,8 +616,9 @@ mod value {
                             .stroke(egui::Stroke::new(1.0, shadow_color))
                             .corner_radius(egui::CornerRadius::same(shadow_radius))
                             .inner_margin(egui::Margin::same(*elevation as i8));
-                        frame.show(ui, |ui| {
-                            rest(ui, dispatch);
+                        frame.show(ui, |show_ui| {
+                            let mut w = UiWrapper::new_unconstrained(show_ui);
+                            rest(&mut w, dispatch);
                         });
                     } else {
                         rest(ui, dispatch);
@@ -611,14 +633,15 @@ mod value {
                 // а allocate_exact_size добавляет только Sense::click().
                 ModifierNode::Clickable(msg) => {
                     let inner_rect = ui.available_rect_before_wrap();
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt("clickable")
                             .max_rect(inner_rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                     let content_size = child_ui.min_size();
 
                     // Аллоцируем clickable-область поверх контента
@@ -630,14 +653,15 @@ mod value {
                 }
                 ModifierNode::ClickableWith(handler) => {
                     let inner_rect = ui.available_rect_before_wrap();
+                    let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt("clickable_with")
                             .max_rect(inner_rect)
-                            .layout(*ui.layout()),
+                            .layout(layout),
                     );
                     child_ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
-                    rest(&mut child_ui, dispatch);
+                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                     let content_size = child_ui.min_size();
 
                     let (_rect, response) = ui.allocate_exact_size(content_size, Sense::click());
@@ -649,9 +673,10 @@ mod value {
 
                 // ===== ANIMATION =====
                 ModifierNode::Fade(opacity) => {
-                    ui.scope(|ui| {
-                        ui.multiply_opacity(*opacity);
-                        rest(ui, dispatch);
+                    ui.scope(|scope_ui| {
+                        scope_ui.multiply_opacity(*opacity);
+                        let mut w = UiWrapper::new_unconstrained(scope_ui);
+                        rest(&mut w, dispatch);
                     });
                 }
                 ModifierNode::Slide(direction, offset) => {
@@ -661,15 +686,15 @@ mod value {
                         SlideDirection::Up => egui::vec2(0.0, -*offset),
                         SlideDirection::Down => egui::vec2(0.0, *offset),
                     };
-                    ui.scope(|ui| {
-                        let max_rect = ui.max_rect().translate(offset_vec);
-                        let mut child_ui = ui.new_child(
+                    ui.scope(|scope_ui| {
+                        let max_rect = scope_ui.max_rect().translate(offset_vec);
+                        let mut child_ui = scope_ui.new_child(
                             egui::UiBuilder::new()
                                 .id_salt("slide")
                                 .max_rect(max_rect)
-                                .layout(*ui.layout()),
+                                .layout(*scope_ui.layout()),
                         );
-                        rest(&mut child_ui, dispatch);
+                        rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
                     });
                 }
             }
@@ -686,7 +711,7 @@ pub struct Modified<W, M> {
 }
 
 impl<W: Widget<M>, M: 'static + Clone> Widget<M> for Modified<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         self.modifier.apply(ui, dispatch, |ui, dispatch| {
             self.inner.render(ui, dispatch);
         });

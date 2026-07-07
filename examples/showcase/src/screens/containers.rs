@@ -7,6 +7,7 @@ use egui_android_framework::{
         modifier::{Modifier, ModifierApply, ModifierExt},
         remember,
         widgets::{Button, Spacer, Text, Widget},
+        UiWrapper,
     },
 };
 
@@ -20,7 +21,7 @@ impl ContainersScreen {
         Self
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {

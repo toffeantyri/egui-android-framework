@@ -34,10 +34,10 @@
 
 use std::marker::PhantomData;
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Тип closure для `ClickableWith` — получает `Response`, `Ui` и `Dispatcher`.
-pub type ClickableCallback<M> = Box<dyn Fn(&egui::Response, &egui::Ui, &Dispatcher<M>)>;
+pub type ClickableCallback<M> = Box<dyn Fn(&egui::Response, &UiWrapper, &Dispatcher<M>)>;
 
 // ─── Padded ────────────────────────────────────────────────────────────────────
 
@@ -54,10 +54,11 @@ pub struct Padded<W, M> {
 }
 
 impl<W: Widget<M>, M> Widget<M> for Padded<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let inset = egui::Margin::symmetric(self.padding as i8, self.padding as i8);
-        egui::Frame::NONE.inner_margin(inset).show(ui, |ui| {
-            self.inner.render(ui, dispatch);
+        egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
+            let mut w = UiWrapper::new_unconstrained(show_ui);
+            self.inner.render(&mut w, dispatch);
         });
     }
 }
@@ -78,21 +79,30 @@ pub struct SizedWidget<W, M> {
 }
 
 impl<W: Widget<M>, M> Widget<M> for SizedWidget<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let desired_size = egui::vec2(self.width, self.height);
         // Резервируем область ровно указанного размера
         let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
 
         // Создаём child_ui с той же областью и layout
-        let mut child_ui = ui.new_child(
+        let layout = *ui.layout();
+        let mut child_ui = UiWrapper::new_child(
+            &mut *ui,
             egui::UiBuilder::new()
                 .id_salt("sized_widget")
                 .max_rect(rect)
-                .layout(*ui.layout()),
+                .layout(layout),
         );
 
         // Рендерим внутренний виджет
         self.inner.render(&mut child_ui, dispatch);
+
+        // Устанавливаем min_size равным желаемому размеру, чтобы
+        // родительский Ui знал, какое место было занято.
+        // Это гарантирует, что SizedWidget всегда занимает ровно
+        // указанную область, независимо от того, сколько места
+        // занял внутренний виджет.
+        child_ui.set_min_size(desired_size);
 
         // Устанавливаем min_size равным желаемому размеру, чтобы
         // родительский Ui знал, какое место было занято.
@@ -116,11 +126,12 @@ pub struct Background<W, M> {
 }
 
 impl<W: Widget<M>, M> Widget<M> for Background<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // Используем Frame с fill — он автоматически подстраивается под размер контента
         let frame = egui::Frame::NONE.fill(self.color);
-        frame.show(ui, |ui| {
-            self.inner.render(ui, dispatch);
+        frame.show(ui, |show_ui| {
+            let mut w = UiWrapper::new_unconstrained(show_ui);
+            self.inner.render(&mut w, dispatch);
         });
     }
 }
@@ -139,7 +150,7 @@ pub struct Aligned<W, M> {
 }
 
 impl<W: Widget<M>, M> Widget<M> for Aligned<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // Определяем направление текущего layout
         let is_horizontal = ui.layout().is_horizontal();
 
@@ -151,8 +162,9 @@ impl<W: Widget<M>, M> Widget<M> for Aligned<W, M> {
             egui::Layout::top_down(self.align)
         };
 
-        ui.with_layout(layout, |ui| {
-            self.inner.render(ui, dispatch);
+        ui.with_layout(layout, |layout_ui| {
+            let mut w = UiWrapper::new_unconstrained(layout_ui);
+            self.inner.render(&mut w, dispatch);
         });
     }
 }
@@ -177,14 +189,16 @@ pub struct Clickable<W, M> {
 }
 
 impl<W: Widget<M>, M: Clone> Widget<M> for Clickable<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // 1. Сначала рендерим содержимое в child_ui, чтобы измерить его реальный размер
         let inner_rect = ui.available_rect_before_wrap();
-        let mut child_ui = ui.new_child(
+        let layout = *ui.layout();
+        let mut child_ui = UiWrapper::new_child(
+            &mut *ui,
             egui::UiBuilder::new()
                 .id_salt("clickable_inner")
                 .max_rect(inner_rect)
-                .layout(*ui.layout()),
+                .layout(layout),
         );
         self.inner.render(&mut child_ui, dispatch);
         let content_size = child_ui.min_size();
@@ -228,14 +242,16 @@ pub struct ClickableWith<W, M> {
 }
 
 impl<W: Widget<M>, M: 'static> Widget<M> for ClickableWith<W, M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // 1. Рендерим внутренний виджет, измеряем реальный размер
         let inner_rect = ui.available_rect_before_wrap();
-        let mut child_ui = ui.new_child(
+        let layout = *ui.layout();
+        let mut child_ui = UiWrapper::new_child(
+            &mut *ui,
             egui::UiBuilder::new()
                 .id_salt("clickable_with_inner")
                 .max_rect(inner_rect)
-                .layout(*ui.layout()),
+                .layout(layout),
         );
         self.inner.render(&mut child_ui, dispatch);
         let content_size = child_ui.min_size();
@@ -277,11 +293,11 @@ pub trait ModifierExt<M>: Widget<M> + Sized {
 
     /// Сделать виджет кликабельным через closure.
     ///
-    /// Closure получает `&Response`, `&Ui` и `&Dispatcher<M>`.
+    /// Closure получает `&Response`, `&UiWrapper` и `&Dispatcher<M>`.
     /// Используется для локальных UI-действий, например изменения `remember`.
     fn clickable_with<F>(self, callback: F) -> ClickableWith<Self, M>
     where
-        F: Fn(&egui::Response, &egui::Ui, &Dispatcher<M>) + 'static,
+        F: Fn(&egui::Response, &UiWrapper, &Dispatcher<M>) + 'static,
         M: 'static;
 }
 
@@ -332,7 +348,7 @@ impl<T: Widget<M>, M> ModifierExt<M> for T {
 
     fn clickable_with<F>(self, callback: F) -> ClickableWith<Self, M>
     where
-        F: Fn(&egui::Response, &egui::Ui, &Dispatcher<M>) + 'static,
+        F: Fn(&egui::Response, &UiWrapper, &Dispatcher<M>) + 'static,
         M: 'static,
     {
         ClickableWith {

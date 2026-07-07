@@ -48,7 +48,7 @@
 //!     .render(ui, dispatch);
 //! ```
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Цвета кнопки для различных состояний.
 pub struct ButtonColors {
@@ -85,7 +85,7 @@ impl Default for ButtonColors {
 pub struct Button<M> {
     text: String,
     on_click_msg: Option<M>,
-    on_click_callback: Option<Box<dyn Fn(&egui::Ui, &Dispatcher<M>)>>,
+    on_click_callback: Option<Box<dyn Fn(&UiWrapper, &Dispatcher<M>)>>,
     height: f32,
     colors: ButtonColors,
 }
@@ -115,7 +115,7 @@ impl<M: 'static> Button<M> {
     /// Используется для локальных UI-действий (например, изменение `remember`),
     /// которые не требуют MVI-потока.
     ///
-    /// Closure получает `&egui::Ui` и `&Dispatcher<M>` — может читать `remember`,
+    /// Closure получает `&UiWrapper` и `&Dispatcher<M>` — может читать `remember`,
     /// модифицировать локальное состояние и/или диспатчить сообщения.
     ///
     /// # Пример
@@ -133,7 +133,7 @@ impl<M: 'static> Button<M> {
     /// ```
     pub fn on_click_with<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&egui::Ui, &Dispatcher<M>) + 'static,
+        F: Fn(&UiWrapper, &Dispatcher<M>) + 'static,
     {
         self.on_click_callback = Some(Box::new(callback));
         self
@@ -164,7 +164,7 @@ impl<M: 'static> Button<M> {
 }
 
 impl<M: Clone + 'static> Widget<M> for Button<M> {
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // Внутренний padding кнопки: 12px по горизонтали, 8px по вертикали
         const HPAD: f32 = 12.0;
         const VPAD: f32 = 8.0;

@@ -19,7 +19,7 @@
 //! что гарантирует корректный layout в Column, Row, Stack и LazyColumn.
 //! Текст переносится по строкам, если не помещается в доступную ширину.
 
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Виджет текста.
 pub struct Text {
@@ -56,7 +56,7 @@ impl Text {
 }
 
 impl<M> Widget<M> for Text {
-    fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         if self.selectable {
             // Стандартное egui — можно выделить
             if let Some(size) = self.font_size {

@@ -4,7 +4,7 @@
 //! Не диспатчит сообщения.
 
 use egui::Sense;
-use egui_android_core::{widget::Widget, Dispatcher};
+use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Виджет-отступ.
 pub struct Spacer {
@@ -47,7 +47,7 @@ impl Spacer {
 }
 
 impl<M> Widget<M> for Spacer {
-    fn render(&self, ui: &mut egui::Ui, _dispatch: &Dispatcher<M>) {
+    fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         // Spacer — только явные размеры, fill_max_width на него не влияет.
         let size = match (self.width, self.height) {
             (Some(w), Some(h)) => egui::vec2(w, h),

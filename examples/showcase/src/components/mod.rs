@@ -3,7 +3,7 @@
 //! Каждый экран — это структура, которая реализует простой render-метод,
 //! получая `Dispatcher<RootMsg>` для навигации и управления.
 
-use egui_android_framework::core::{Component, LifecycleObserver};
+use egui_android_framework::core::{Component, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 
 use crate::navigation::Route;
@@ -54,7 +54,7 @@ impl ScreenComponent {
     }
 
     /// Выполнить рендер экрана.
-    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         match self {
             Self::Home(s) => s.render(ui, dispatch),
             Self::Widgets(s) => s.render(ui, dispatch),

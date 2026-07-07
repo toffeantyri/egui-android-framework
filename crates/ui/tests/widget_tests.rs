@@ -2,8 +2,7 @@
 
 use std::cell::RefCell;
 
-use egui_android_core::widget::Widget as WidgetTrait;
-use egui_android_core::Dispatcher;
+use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
 use egui_android_ui::animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
@@ -14,13 +13,13 @@ use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
 
 // ─── Helper: with_ui ────────────────────────────────────────────────────────────
 
-fn with_ui(f: impl FnOnce(&mut egui::Ui)) {
+fn with_ui(f: impl FnOnce(&mut UiWrapper)) {
     let f = RefCell::new(Some(f));
     let ctx = egui::Context::default();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let f = f.borrow_mut().take().unwrap();
-            f(ui);
+            f(&mut UiWrapper::new_unconstrained(ui));
         });
     });
 }

@@ -21,7 +21,7 @@
 //!     });
 //! ```
 
-use egui_android_core::Dispatcher;
+use egui_android_core::{Dispatcher, UiWrapper};
 
 /// Контейнер с вертикальным расположением дочерних виджетов.
 ///
@@ -58,9 +58,9 @@ impl Column {
         since = "0.4.0",
         note = "используйте Column::new().show(ui, dispatch, content) или Column::new().scrollable().show(...)"
     )]
-    pub fn with_content<M: 'static, F>(ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    pub fn with_content<M: 'static, F>(ui: &mut UiWrapper, dispatch: &Dispatcher<M>, content: F)
     where
-        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+        F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
         Self::default().show(ui, dispatch, content);
     }
@@ -86,21 +86,23 @@ impl Column {
     /// * `ui` — текущий Ui
     /// * `dispatch` — диспетчер сообщений
     /// * `content` — замыкание, в котором рендерятся дочерние виджеты
-    pub fn show<M: 'static, F>(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<M>, content: F)
+    pub fn show<M: 'static, F>(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>, content: F)
     where
-        F: FnOnce(&mut egui::Ui, &Dispatcher<M>),
+        F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
         let render_inner = |ui: &mut egui::Ui| {
             ui.spacing_mut().item_spacing = egui::vec2(self.spacing, self.spacing);
-            content(ui, dispatch);
+            content(&mut UiWrapper::new_unconstrained(ui), dispatch);
         };
 
         if self.scrollable {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, render_inner);
+                .show(ui, |scroll_ui| {
+                    render_inner(&mut UiWrapper::new_unconstrained(scroll_ui))
+                });
         } else {
-            ui.vertical(render_inner);
+            ui.vertical(|v_ui| render_inner(&mut UiWrapper::new_unconstrained(v_ui)));
         }
     }
 }

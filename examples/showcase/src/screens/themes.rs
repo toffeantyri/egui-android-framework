@@ -7,6 +7,7 @@ use egui_android_framework::{
         modifier::{Modifier, ModifierApply, ModifierExt},
         theme::{MaterialTheme, Theme},
         widgets::{Button, Spacer, Text, Widget},
+        UiWrapper,
     },
 };
 
@@ -24,7 +25,7 @@ impl ThemesScreen {
         }
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         // Применяем тему из фреймворка
         if self.is_dark_mode {
             MaterialTheme::dark().apply(ui.ctx());

@@ -6,6 +6,7 @@ use egui_android_framework::{
         containers::Column,
         modifier::{Modifier, ModifierApply, ModifierExt},
         widgets::{Button, Spacer, Text, Widget},
+        UiWrapper,
     },
 };
 
@@ -20,7 +21,7 @@ impl HomeScreen {
         Self
     }
 
-    pub fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<RootMsg>) {
+    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         let routes = vec![
             Route::Widgets,
             Route::Modifiers,

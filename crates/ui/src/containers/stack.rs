@@ -19,7 +19,7 @@
 //! });
 //! ```
 
-use egui_android_core::Dispatcher;
+use egui_android_core::{Dispatcher, UiWrapper};
 
 /// Контейнер для наложения виджетов друг на друга (аналог `Box` в Compose).
 ///
@@ -39,20 +39,21 @@ impl Stack {
     /// * `dispatch` — диспетчер сообщений
     /// * `content` — замыкание, в котором рендерятся дочерние виджеты
     pub fn new<M: 'static>(
-        ui: &mut egui::Ui,
+        ui: &mut UiWrapper,
         dispatch: &Dispatcher<M>,
-        content: impl FnOnce(&mut egui::Ui, &Dispatcher<M>),
+        content: impl FnOnce(&mut UiWrapper, &Dispatcher<M>),
     ) {
         // Алгоритм: создаём child_ui с max_rect = available_rect_before_wrap,
         // рендерим детей, измеряем min_size, alloc'им в родителе.
         let inner_rect = ui.available_rect_before_wrap();
+        let layout = *ui.layout();
         let mut child_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("stack")
                 .max_rect(inner_rect)
-                .layout(*ui.layout()),
+                .layout(layout),
         );
-        content(&mut child_ui, dispatch);
+        content(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
         let content_size = child_ui.min_size();
 
         // Аллоцируем в родителе ровно по размеру контента (wrap-content)

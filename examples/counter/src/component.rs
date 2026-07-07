@@ -3,7 +3,7 @@
 //! Читает состояние из `StateStore` реактивно.
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver},
+    core::{Component, LifecycleObserver, UiWrapper},
     runtime::{Dispatcher, StateStore},
 };
 
@@ -41,7 +41,8 @@ impl Component for CounterComponent {
     type Message = Msg;
 
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
-        counter_view(&self.count, ui, dispatch)
+        let mut wrapper = UiWrapper::new_unconstrained(ui);
+        counter_view(&self.count, &mut wrapper, dispatch)
     }
 
     fn handle(&mut self, msg: Self::Message) {
