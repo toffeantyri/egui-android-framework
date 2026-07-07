@@ -3,7 +3,6 @@
 //! Добавляет отступ по ширине, высоте или в обеих осях.
 //! Не диспатчит сообщения.
 
-use egui::Sense;
 use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
 
 /// Виджет-отступ.
@@ -48,13 +47,14 @@ impl Spacer {
 
 impl<M> Widget<M> for Spacer {
     fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
-        // Spacer — только явные размеры, fill_max_width на него не влияет.
+        // Spacer — только явные размеры.
+        // allocate_space учитывает constraints (fill_max_width может растянуть).
         let size = match (self.width, self.height) {
             (Some(w), Some(h)) => egui::vec2(w, h),
             (Some(w), None) => egui::vec2(w, 0.0),
             (None, Some(h)) => egui::vec2(0.0, h),
             (None, None) => return,
         };
-        ui.allocate_exact_size(size, Sense::hover());
+        ui.allocate_space(size);
     }
 }

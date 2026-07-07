@@ -105,22 +105,16 @@ impl<M> Widget<M> for Text {
                 });
                 let text_size = galley.size();
 
-                // Если available_width больше wrap-content — alloc'им всю ширину
-                // (поддержка fill_max_width через set_min_width родителя).
-                let avail_w = ui.available_width();
-                let final_width = if avail_w > text_size.x {
-                    avail_w
-                } else {
-                    text_size.x
-                };
-                let final_size = egui::vec2(final_width, text_size.y);
-                let (rect, _response) = ui.allocate_exact_size(final_size, egui::Sense::hover());
+                // alloc'им wrap-content размер через allocate_space (с учётом constraints).
+                // Если constraints.min_width > text_size.x (от FillMaxWidth),
+                // allocate_space clamp'нет до min_width.
+                let (rect, _response) = ui.allocate_space(text_size);
 
                 ui.painter_at(rect)
                     .galley(rect.left_top(), galley, ui.visuals().text_color());
             } else {
                 // Пустой текст — alloc'им нулевой размер
-                ui.allocate_exact_size(egui::vec2(0.0, 0.0), egui::Sense::hover());
+                ui.allocate_space(egui::vec2(0.0, 0.0));
             }
         }
     }

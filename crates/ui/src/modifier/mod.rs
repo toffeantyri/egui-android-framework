@@ -65,6 +65,7 @@ mod value {
     use crate::animation::SlideDirection;
     use crate::UiWrapper;
     use egui::{Color32, CornerRadius, Response, Sense, Ui};
+    use egui_android_core::Constraints;
     use egui_android_core::Dispatcher;
 
     /// Единый тип модификатора — value type с цепочкой методов.
@@ -460,11 +461,20 @@ mod value {
                             ))
                             .layout(layout),
                     );
-                    // Устанавливаем min_width = available.x, чтобы заставить
-                    // дочерние виджеты растянуться на всю ширину (match_parent).
-                    child_ui.set_min_width(available.x);
-                    child_ui.set_max_width(available.x);
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    // Устанавливаем constraints.min_width = available.x, чтобы
+                    // дочерние виджеты растянулись на всю ширину (match_parent).
+                    // Виджеты используют ui.allocate_space_with_sense() который
+                    // clamp'ит desired_size к constraints.min_width.
+                    let child_constraints = Constraints::ranged(
+                        available.x, // min_width = available.x
+                        available.x, // max_width = available.x
+                        0.0,
+                        f32::INFINITY,
+                    );
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
                     let content_height = child_ui.min_size().y.max(1.0);
                     // Аллоцируем в родителе (available.x, content_height).
                     ui.allocate_exact_size(egui::vec2(available.x, content_height), Sense::hover());
@@ -480,10 +490,12 @@ mod value {
                             .max_rect(child_rect.0)
                             .layout(layout),
                     );
-                    // Устанавливаем и min_width и min_height = available,
-                    // чтобы дочерние виджеты растянулись по обеим осям.
-                    child_ui.set_min_size(available);
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    // Устанавливаем constraints = available по обеим осям.
+                    let child_constraints = Constraints::exact(available.x, available.y);
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
                 }
                 ModifierNode::WrapContentWidth => {
                     // Измеряем размер содержимого, рендерим один раз
@@ -521,7 +533,11 @@ mod value {
                             .max_rect(rect)
                             .layout(layout),
                     );
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    let child_constraints = Constraints::ranged(*w, *w, 0.0, f32::INFINITY);
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
                 }
                 ModifierNode::Height(h) => {
                     let size = egui::vec2(ui.available_width(), *h);
@@ -534,8 +550,11 @@ mod value {
                             .max_rect(rect)
                             .layout(layout),
                     );
-                    child_ui.set_min_height(*h);
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    let child_constraints = Constraints::ranged(0.0, f32::INFINITY, *h, *h);
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
                 }
                 ModifierNode::WidthIn { min, max } => {
                     let w = ui.available_width().clamp(*min, *max);

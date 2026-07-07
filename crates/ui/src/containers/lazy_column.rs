@@ -13,7 +13,7 @@
 //! });
 //! ```
 
-use egui_android_core::{Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, Dispatcher, UiWrapper};
 
 /// Скроллируемый вертикальный список с ленивым рендерингом элементов.
 pub struct LazyColumn {
@@ -66,12 +66,17 @@ impl LazyColumn {
     ) where
         F: FnMut(&T, &mut UiWrapper, &Dispatcher<M>),
     {
+        // LazyColumn — вертикальный список. Ширина = доступная ширина (для fill_max_width),
+        // высота — без ограничений (скролл).
+        let available = ui.available_size();
+        let child_constraints = Constraints::ranged(0.0, available.x.max(0.0), 0.0, f32::INFINITY);
+
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, self.item_spacing);
             let mut builder = item_builder;
             for (index, item) in items.iter().enumerate() {
                 ui.push_id(index, |ui| {
-                    builder(item, &mut UiWrapper::new_unconstrained(ui), dispatch);
+                    builder(item, &mut UiWrapper::new(ui, child_constraints), dispatch);
                 });
             }
         });

@@ -19,7 +19,7 @@
 //! });
 //! ```
 
-use egui_android_core::{Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, Dispatcher, UiWrapper};
 
 /// Контейнер для наложения виджетов друг на друга (аналог `Box` в Compose).
 ///
@@ -53,7 +53,18 @@ impl Stack {
                 .max_rect(inner_rect)
                 .layout(layout),
         );
-        content(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+        // Stack — наложение. Дети могут быть любого размера (wrap-content),
+        // но fill_max_width должен работать в пределах доступной ширины.
+        let child_constraints = Constraints::ranged(
+            0.0,
+            inner_rect.width().max(0.0),
+            0.0,
+            inner_rect.height().max(0.0),
+        );
+        content(
+            &mut UiWrapper::new(&mut child_ui, child_constraints),
+            dispatch,
+        );
         let content_size = child_ui.min_size();
 
         // Аллоцируем в родителе ровно по размеру контента (wrap-content)

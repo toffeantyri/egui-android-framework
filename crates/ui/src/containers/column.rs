@@ -21,7 +21,7 @@
 //!     });
 //! ```
 
-use egui_android_core::{Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, Dispatcher, UiWrapper};
 
 /// Контейнер с вертикальным расположением дочерних виджетов.
 ///
@@ -90,19 +90,25 @@ impl Column {
     where
         F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
+        // Передаём дочерним виджетам constraints: ширина = доступная ширина,
+        // высота — без ограничений (0..INF). Это позволяет fill_max_width
+        // работать корректно: виджет видит max_width = available.x.
+        let available = ui.available_size();
+        let child_constraints = Constraints::ranged(0.0, available.x.max(0.0), 0.0, f32::INFINITY);
+
         let render_inner = |ui: &mut egui::Ui| {
             ui.spacing_mut().item_spacing = egui::vec2(self.spacing, self.spacing);
-            content(&mut UiWrapper::new_unconstrained(ui), dispatch);
+            content(&mut UiWrapper::new(ui, child_constraints), dispatch);
         };
 
         if self.scrollable {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |scroll_ui| {
-                    render_inner(&mut UiWrapper::new_unconstrained(scroll_ui))
+                    render_inner(&mut UiWrapper::new(scroll_ui, child_constraints))
                 });
         } else {
-            ui.vertical(|v_ui| render_inner(&mut UiWrapper::new_unconstrained(v_ui)));
+            ui.vertical(|v_ui| render_inner(&mut UiWrapper::new(v_ui, child_constraints)));
         }
     }
 }

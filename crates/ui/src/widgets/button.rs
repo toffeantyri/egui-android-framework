@@ -178,20 +178,14 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             .layout_no_wrap(self.text.clone(), font_id, text_color);
         let text_size = galley.size();
 
-        // Размер кнопки: текст + padding, высоту можно переопределить через self.height.
-        // Если available_width() больше wrap-content — alloc'им во всю ширину
-        // (поддержка fill_max_width через set_min_width родителя).
+        // Размер кнопки: wrap-content (текст + padding).
+        // Если constraints.min_width > btn_width (от FillMaxWidth),
+        // allocate_space_with_sense clamp'нет до min_width.
         let btn_height = self.height.max(text_size.y + VPAD * 2.0);
         let btn_width = text_size.x + HPAD * 2.0;
-        let avail_w = ui.available_width();
-        let desired_width = if avail_w > btn_width {
-            avail_w
-        } else {
-            btn_width
-        };
-        let desired_size = egui::vec2(desired_width, btn_height);
+        let desired_size = egui::vec2(btn_width, btn_height);
 
-        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+        let (rect, response) = ui.allocate_space_with_sense(desired_size, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter_at(rect);

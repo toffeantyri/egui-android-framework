@@ -11,7 +11,7 @@
 //! });
 //! ```
 
-use egui_android_core::{Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, Dispatcher, UiWrapper};
 
 /// Контейнер с горизонтальным расположением дочерних виджетов.
 ///
@@ -53,9 +53,14 @@ impl Row {
     where
         F: FnOnce(&mut UiWrapper, &Dispatcher<M>),
     {
+        // Row — горизонтальный контейнер. Ширина детей — wrap-content (0..INF),
+        // высота — доступная высота Row (чтобы fill_max_height мог растянуть).
+        let available = ui.available_size();
+        let child_constraints = Constraints::ranged(0.0, f32::INFINITY, 0.0, available.y.max(0.0));
+
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(self.spacing, self.spacing);
-            content(&mut UiWrapper::new_unconstrained(ui), dispatch);
+            content(&mut UiWrapper::new(ui, child_constraints), dispatch);
         });
     }
 }
