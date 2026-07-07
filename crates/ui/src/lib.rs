@@ -4,10 +4,8 @@
 //! - `widgets` — готовые компоненты (Button, Text, Spacer, Icon)
 //! - `containers` — контейнеры компоновки (Column, Row, Stack, LazyColumn)
 //! - `animation` — анимационные обёртки (Fade, Slide, AnimatedVisibility)
-//! - `modifier` — новая Modifier value type + старая ModifierExt (совместимость)
-//! - `remember` — UI-only состояние (hover, focus, scroll)
-//! - `constraints` — Compose-like Constraints (min/max width/height)
-//! - `ui_wrapper` — обёртка над egui::Ui с поддержкой Constraints
+//! - `modifier` — Modifier value type (fill_max_width, padding, background, clickable, ...)
+//! - `remember` — UI-only состояние (hover, focus, scroll)
 
 pub mod animation;
 pub mod containers;
@@ -20,7 +18,7 @@ pub use animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
 pub use containers::{Column, LazyColumn, Row, Stack};
-pub use modifier::{legacy::ModifierExt, Modified, Modifier, ModifierApply};
+pub use modifier::{Modified, Modifier, ModifierDsl};
 pub use remember::*;
 pub use theme::{ColorPalette, FontWeight, MaterialTheme, Shapes, TextStyle, Theme, Typography};
 pub use widgets::{Button, ButtonColors, Icon, Spacer, Text, Widget};

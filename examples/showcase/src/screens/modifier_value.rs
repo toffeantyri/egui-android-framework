@@ -10,7 +10,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::{legacy::ModifierExt, Modifier, ModifierApply},
+        modifier::{Modifier, ModifierDsl},
         remember,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
@@ -233,8 +233,11 @@ impl ModifierValueScreen {
                 Text::new("16) clickable_with(closure) — клик → closure").render(ui, dispatch);
                 let counter = remember(ui, "mv_counter", || 0i32);
                 Text::new(format!("Счётчик кликов: {}", counter.get()))
-                    .padding(8.0)
-                    .background(Color32::from_gray(50))
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(Color32::from_gray(50)),
+                    )
                     .render(ui, dispatch);
 
                 Text::new("+1 (локально, через clickable_with)")

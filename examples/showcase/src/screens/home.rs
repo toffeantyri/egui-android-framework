@@ -4,7 +4,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::{Modifier, ModifierApply, ModifierExt},
+        modifier::{Modifier, ModifierDsl},
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -35,7 +35,9 @@ impl HomeScreen {
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
-                Text::new("Showcase").padding(8.0).render(ui, dispatch);
+                Text::new("Showcase")
+                    .modifier(Modifier::new().padding(8.0))
+                    .render(ui, dispatch);
                 Spacer::new(16.0).render(ui, dispatch);
                 Text::new("Выберите демо:").render(ui, dispatch);
                 for route in routes {

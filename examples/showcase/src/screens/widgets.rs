@@ -9,7 +9,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::{Modifier, ModifierApply, ModifierExt},
+        modifier::{Modifier, ModifierDsl},
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -29,29 +29,35 @@ impl WidgetsScreen {
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
-                Text::new("Виджеты").padding(8.0).render(ui, dispatch);
+                Text::new("Виджеты")
+                                .modifier(Modifier::new().padding(8.0))
+                                .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
                 Text::new("Обычный текст").render(ui, dispatch);
                 Spacer::new(4.0).render(ui, dispatch);
                 Text::new("Кнопка с реакцией на нажатие:").render(ui, dispatch);
 
                 // Стандартный Button — цвет меняется при нажатии (встроено)
-                Button::new("Нажми меня").padding(8.0).render(ui, dispatch);
+                Button::new("Нажми меня")
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
                 Text::new("Кнопка с кастомными цветами:").render(ui, dispatch);
                 Button::new("Зелёная")
-                    .colors(
-                        egui::Color32::from_rgb(0, 160, 80),  // обычный
-                        egui::Color32::from_rgb(0, 255, 130), // нажатый
-                    )
-                    .padding(8.0)
-                    .render(ui, dispatch);
+                                    .colors(
+                                        egui::Color32::from_rgb(0, 160, 80),  // обычный
+                                        egui::Color32::from_rgb(0, 255, 130), // нажатый
+                                    )
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
                 Text::new("Spacer 16px:").render(ui, dispatch);
-                Spacer::new(16.0).render(ui, dispatch);
+                Spacer::new(16.0)
+                    .modifier(Modifier::new().border(1.0_f32, egui::Color32::from_rgb(0, 255, 130)))
+                    .render(ui, dispatch);
                 Text::new("Текст после Spacer").render(ui, dispatch);
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")

@@ -110,8 +110,10 @@ impl<M> Widget<M> for Text {
                 // allocate_space clamp'нет до min_width.
                 let (rect, _response) = ui.allocate_space(text_size);
 
+                // Центрируем текст внутри rect по вертикали.
+                let text_pos = egui::pos2(rect.left(), rect.center().y - text_size.y / 2.0);
                 ui.painter_at(rect)
-                    .galley(rect.left_top(), galley, ui.visuals().text_color());
+                    .galley(text_pos, galley, ui.visuals().text_color());
             } else {
                 // Пустой текст — alloc'им нулевой размер
                 ui.allocate_space(egui::vec2(0.0, 0.0));

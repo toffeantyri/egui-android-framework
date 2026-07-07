@@ -4,7 +4,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::{Modifier, ModifierApply, ModifierExt},
+        modifier::{Modifier, ModifierDsl},
         theme::{MaterialTheme, Theme},
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
@@ -38,44 +38,64 @@ impl ThemesScreen {
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
-                Text::new("Темы").padding(8.0).render(ui, dispatch);
+                Text::new("Темы")
+                                .modifier(Modifier::new().padding(8.0))
+                                .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Текущая тема
                 Text::new("Текущая тема:").render(ui, dispatch);
                 Text::new(if self.is_dark_mode {
-                    "Тёмная"
-                } else {
-                    "Светлая"
-                })
-                .padding(8.0)
-                .background(theme.colors.primary)
-                .render(ui, dispatch);
+                                    "Тёмная"
+                                } else {
+                                    "Светлая"
+                                })
+                                .modifier(
+                                    Modifier::new()
+                                        .padding(8.0)
+                                        .background(theme.colors.primary),
+                                )
+                                .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Палитра цветов
                 Text::new("Палитра цветов:").render(ui, dispatch);
                 Text::new("Primary")
-                    .padding(8.0)
-                    .background(theme.colors.primary)
-                    .render(ui, dispatch);
-                Text::new("Secondary")
-                    .padding(8.0)
-                    .background(theme.colors.secondary)
-                    .render(ui, dispatch);
-                Text::new("Background")
-                    .padding(8.0)
-                    .background(theme.colors.background)
-                    .render(ui, dispatch);
-                Text::new("Surface")
-                    .padding(8.0)
-                    .background(theme.colors.surface)
-                    .render(ui, dispatch);
-                Text::new("Error")
-                    .padding(8.0)
-                    .background(theme.colors.error)
-                    .render(ui, dispatch);
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(8.0)
+                                            .background(theme.colors.primary),
+                                    )
+                                    .render(ui, dispatch);
+                                Text::new("Secondary")
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(8.0)
+                                            .background(theme.colors.secondary),
+                                    )
+                                    .render(ui, dispatch);
+                                Text::new("Background")
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(8.0)
+                                            .background(theme.colors.background),
+                                    )
+                                    .render(ui, dispatch);
+                                Text::new("Surface")
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(8.0)
+                                            .background(theme.colors.surface),
+                                    )
+                                    .render(ui, dispatch);
+                                Text::new("Error")
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(8.0)
+                                            .background(theme.colors.error),
+                                    )
+                                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 

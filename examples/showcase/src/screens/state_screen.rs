@@ -7,7 +7,7 @@ use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
         containers::Column,
-        modifier::{Modifier, ModifierApply, ModifierExt},
+        modifier::{Modifier, ModifierDsl},
         remember,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
@@ -29,8 +29,8 @@ impl StateScreen {
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
                 Text::new("Локальное состояние (remember)")
-                    .padding(8.0)
-                    .render(ui, dispatch);
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // ──────────────────────────────────────
@@ -41,40 +41,43 @@ impl StateScreen {
                 let count = remember(ui, "ss_count", || 0i32);
 
                 Text::new(format!("Значение: {}", count.get()))
-                    .padding(12.0)
-                    .background(egui::Color32::from_gray(60))
-                    .render(ui, dispatch);
+                                    .modifier(
+                                        Modifier::new()
+                                            .padding(12.0)
+                                            .background(egui::Color32::from_gray(60)),
+                                    )
+                                    .render(ui, dispatch);
 
                 // Кнопки для изменения remember напрямую через on_click_with
                 Button::new("+1")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.modify(|c| *c += 1);
-                        }
-                    })
-                    .padding(8.0)
-                    .render(ui, dispatch);
+                                    .on_click_with({
+                                        let count = count.clone();
+                                        move |_ui, _dispatch| {
+                                            count.modify(|c| *c += 1);
+                                        }
+                                    })
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
 
-                Button::new("-1")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.modify(|c| *c -= 1);
-                        }
-                    })
-                    .padding(8.0)
-                    .render(ui, dispatch);
+                                Button::new("-1")
+                                    .on_click_with({
+                                        let count = count.clone();
+                                        move |_ui, _dispatch| {
+                                            count.modify(|c| *c -= 1);
+                                        }
+                                    })
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
 
-                Button::new("Сброс")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.set(0);
-                        }
-                    })
-                    .padding(8.0)
-                    .render(ui, dispatch);
+                                Button::new("Сброс")
+                                    .on_click_with({
+                                        let count = count.clone();
+                                        move |_ui, _dispatch| {
+                                            count.set(0);
+                                        }
+                                    })
+                                    .modifier(Modifier::new().padding(8.0))
+                                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
@@ -86,30 +89,33 @@ impl StateScreen {
                 let expanded = remember(ui, "ss_expanded", || false);
 
                 Text::new(format!(
-                    "Состояние: {}",
-                    if *expanded.get() {
-                        "развёрнуто"
-                    } else {
-                        "свёрнуто"
-                    }
-                ))
-                .padding(8.0)
-                .background(egui::Color32::from_gray(50))
-                .render(ui, dispatch);
+                                    "Состояние: {}",
+                                    if *expanded.get() {
+                                        "развёрнуто"
+                                    } else {
+                                        "свёрнуто"
+                                    }
+                                ))
+                                .modifier(
+                                    Modifier::new()
+                                        .padding(8.0)
+                                        .background(egui::Color32::from_gray(50)),
+                                )
+                                .render(ui, dispatch);
 
                 Button::new(if *expanded.get() {
-                    "Свернуть ▲"
-                } else {
-                    "Развернуть ▼"
-                })
-                .on_click_with({
-                    let expanded = expanded.clone();
-                    move |_ui, _dispatch| {
-                        expanded.modify(|v| *v = !*v);
-                    }
-                })
-                .padding(8.0)
-                .render(ui, dispatch);
+                                    "Свернуть ▲"
+                                } else {
+                                    "Развернуть ▼"
+                                })
+                                .on_click_with({
+                                    let expanded = expanded.clone();
+                                    move |_ui, _dispatch| {
+                                        expanded.modify(|v| *v = !*v);
+                                    }
+                                })
+                                .modifier(Modifier::new().padding(8.0))
+                                .render(ui, dispatch);
 
                 // Комбинированный пример: on_click(msg) + on_click_with(closure)
                 // on_click диспатчит RootMsg::Back для навигации
@@ -129,8 +135,8 @@ impl StateScreen {
 
                 Spacer::new(4.0).render(ui, dispatch);
                 Text::new("Кнопка выше использует и on_click, и on_click_with вместе")
-                    .padding(4.0)
-                    .render(ui, dispatch);
+                                    .modifier(Modifier::new().padding(4.0))
+                                    .render(ui, dispatch);
             });
     }
 }

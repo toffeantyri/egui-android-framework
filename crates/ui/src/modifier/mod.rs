@@ -52,11 +52,7 @@
 //!     .render(ui, dispatch);
 //! ```
 
-pub mod legacy;
-
 use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
-
-pub use legacy::*;
 
 pub use crate::animation::SlideDirection;
 pub use value::Modifier;
@@ -408,8 +404,15 @@ mod value {
                 // ===== PADDING =====
                 ModifierNode::PaddingAll(all) => {
                     let inset = egui::Margin::symmetric(*all as i8, *all as i8);
+                    // Уменьшаем constraints на размер padding, чтобы fill_max_width
+                    // внутри padding работал с шириной = available.x - 16, а не available.x.
+                    let mut cx = *ui.constraints();
+                    cx.max_width = (cx.max_width - *all * 2.0).max(0.0);
+                    cx.min_width = cx.min_width.max(0.0).min(cx.max_width);
+                    cx.max_height = (cx.max_height - *all * 2.0).max(0.0);
+                    cx.min_height = cx.min_height.max(0.0).min(cx.max_height);
                     egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
-                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                        let mut w = UiWrapper::new(show_ui, cx);
                         rest(&mut w, dispatch);
                     });
                 }
@@ -418,9 +421,13 @@ mod value {
                     vertical,
                 } => {
                     let inset = egui::Margin::symmetric(*horizontal as i8, *vertical as i8);
+                    let mut cx = *ui.constraints();
+                    cx.max_width = (cx.max_width - *horizontal * 2.0).max(0.0);
+                    cx.min_width = cx.min_width.max(0.0).min(cx.max_width);
+                    cx.max_height = (cx.max_height - *vertical * 2.0).max(0.0);
+                    cx.min_height = cx.min_height.max(0.0).min(cx.max_height);
                     egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
-                        let mut w = UiWrapper::new_unconstrained(show_ui);
-                        rest(&mut w, dispatch);
+                        rest(&mut UiWrapper::new(show_ui, cx), dispatch);
                     });
                 }
                 ModifierNode::PaddingEdges {
@@ -439,9 +446,15 @@ mod value {
                         top,
                         bottom,
                     };
+                    let mut cx = *ui.constraints();
+                    let h_total = left as f32 + right as f32;
+                    let v_total = top as f32 + bottom as f32;
+                    cx.max_width = (cx.max_width - h_total).max(0.0);
+                    cx.min_width = cx.min_width.max(0.0).min(cx.max_width);
+                    cx.max_height = (cx.max_height - v_total).max(0.0);
+                    cx.min_height = cx.min_height.max(0.0).min(cx.max_height);
                     egui::Frame::NONE.inner_margin(inset).show(ui, |show_ui| {
-                        let mut w = UiWrapper::new_unconstrained(show_ui);
-                        rest(&mut w, dispatch);
+                        rest(&mut UiWrapper::new(show_ui, cx), dispatch);
                     });
                 }
 
@@ -737,17 +750,17 @@ impl<W: Widget<M>, M: 'static + Clone> Widget<M> for Modified<W, M> {
     }
 }
 
-/// Extension trait для использования новой Modifier системы.
+/// Extension trait для применения [`Modifier`] к любому виджету.
 ///
-/// Добавляет метод `.modifier()` ко всем типам, реализующим `Widget<M>`.
-pub trait ModifierApply<M>: Widget<M> + Sized {
+/// Заменяет старый `ModifierApply`.
+pub trait ModifierDsl<M>: Widget<M> + Sized {
     /// Применить [`Modifier`] к виджету.
     fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone;
 }
 
-impl<T: Widget<M>, M> ModifierApply<M> for T {
+impl<T: Widget<M>, M> ModifierDsl<M> for T {
     fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone,

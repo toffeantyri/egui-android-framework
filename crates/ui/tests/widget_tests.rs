@@ -7,7 +7,7 @@ use egui_android_ui::animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
 use egui_android_ui::containers::{Column, LazyColumn, Row, Stack};
-use egui_android_ui::modifier::{Modifier, ModifierApply, ModifierExt};
+use egui_android_ui::modifier::{Modifier, ModifierDsl};
 use egui_android_ui::theme::{MaterialTheme, Shapes, Theme};
 use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
 
@@ -64,7 +64,7 @@ fn test_button_on_click_no_panic() {
 fn test_button_with_custom_height() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        let btn = Button::new("Tall").height(64.0);
+        let btn = Button::new("Tall").modifier(Modifier::new().height(64.0));
         btn.render(ui, &dispatch);
     });
 }
@@ -150,9 +150,9 @@ fn test_clickable_with_modifier_renders() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("Click me")
-            .clickable_with(|_response, _ui, _dispatch| {
+            .modifier(Modifier::new().clickable_with(|_response, _ui, _dispatch| {
                 // closure не паникует
-            })
+            }))
             .render(ui, &dispatch);
     });
 }
@@ -499,7 +499,9 @@ fn test_containers_mixed() {
 fn test_padding_modifier() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Text::new("Padded").padding(16.0).render(ui, &dispatch);
+        Text::new("Padded")
+            .modifier(Modifier::new().padding(16.0))
+            .render(ui, &dispatch);
     });
 }
 
@@ -507,7 +509,9 @@ fn test_padding_modifier() {
 fn test_size_modifier() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Text::new("Sized").size(100.0, 50.0).render(ui, &dispatch);
+        Text::new("Sized")
+            .modifier(Modifier::new().width(100.0).height(50.0))
+            .render(ui, &dispatch);
     });
 }
 
@@ -516,7 +520,7 @@ fn test_background_modifier() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("Filled")
-            .background(egui::Color32::RED)
+            .modifier(Modifier::new().background(egui::Color32::RED))
             .render(ui, &dispatch);
     });
 }
@@ -525,9 +529,7 @@ fn test_background_modifier() {
 fn test_align_modifier() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Text::new("Centered")
-            .align(egui::Align::Center)
-            .render(ui, &dispatch);
+        Text::new("Centered").render(ui, &dispatch);
     });
 }
 
@@ -536,7 +538,7 @@ fn test_clickable_modifier() {
     let (dispatch, _rx) = Dispatcher::<&str>::new();
     with_ui(|ui| {
         Text::new("Clickable")
-            .clickable("clicked")
+            .modifier(Modifier::new().clickable("clicked"))
             .render(ui, &dispatch);
     });
 }
@@ -546,8 +548,11 @@ fn test_modifier_chain() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("Chained")
-            .padding(8.0)
-            .background(egui::Color32::from_gray(40))
+            .modifier(
+                Modifier::new()
+                    .padding(8.0)
+                    .background(egui::Color32::from_gray(40)),
+            )
             .render(ui, &dispatch);
     });
 }
@@ -557,10 +562,13 @@ fn test_modifier_chain_all() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("All")
-            .padding(4.0)
-            .size(200.0, 100.0)
-            .background(egui::Color32::BLUE)
-            .align(egui::Align::Center)
+            .modifier(
+                Modifier::new()
+                    .padding(4.0)
+                    .width(200.0)
+                    .height(100.0)
+                    .background(egui::Color32::BLUE),
+            )
             .render(ui, &dispatch);
     });
 }
@@ -574,7 +582,7 @@ fn test_clickable_modifier_with_message() {
     let (dispatch, rx) = Dispatcher::<Msg>::new();
     with_ui(|ui| {
         Text::new("Click me")
-            .clickable(Msg::Clicked)
+            .modifier(Modifier::new().clickable(Msg::Clicked))
             .render(ui, &dispatch);
     });
     // В тестовой среде клик не произойдёт, но проверяем отсутствие паники
@@ -587,8 +595,12 @@ fn test_spacer_with_modifiers() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Spacer::new(8.0)
-            .size(50.0, 50.0)
-            .background(egui::Color32::GREEN)
+            .modifier(
+                Modifier::new()
+                    .width(50.0)
+                    .height(50.0)
+                    .background(egui::Color32::GREEN),
+            )
             .render(ui, &dispatch);
     });
 }
@@ -596,18 +608,21 @@ fn test_spacer_with_modifiers() {
 #[test]
 fn test_modifier_returns_widget() {
     fn requires_widget<M: 'static>(_w: impl WidgetTrait<M>) {}
-    requires_widget::<()>(Text::new("test").padding(4.0));
-    requires_widget::<()>(Text::new("test").size(10.0, 10.0));
-    requires_widget::<()>(Text::new("test").background(egui::Color32::RED));
-    requires_widget::<()>(Text::new("test").align(egui::Align::Center));
-    requires_widget::<&str>(Text::new("test").clickable("msg"));
+    requires_widget::<()>(Text::new("test").modifier(Modifier::new().padding(4.0)));
+    requires_widget::<()>(Text::new("test").modifier(Modifier::new().width(10.0).height(10.0)));
+    requires_widget::<()>(
+        Text::new("test").modifier(Modifier::new().background(egui::Color32::RED)),
+    );
+    requires_widget::<&str>(Text::new("test").modifier(Modifier::new().clickable("msg")));
 }
 
 #[test]
 fn test_padding_not_negative() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Text::new("Test").padding(-10.0).render(ui, &dispatch);
+        Text::new("Test")
+            .modifier(Modifier::new().padding(-10.0))
+            .render(ui, &dispatch);
     });
 }
 
@@ -615,7 +630,9 @@ fn test_padding_not_negative() {
 fn test_size_zero() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Text::new("Zero").size(0.0, 0.0).render(ui, &dispatch);
+        Text::new("Zero")
+            .modifier(Modifier::new().width(0.0).height(0.0))
+            .render(ui, &dispatch);
     });
 }
 
@@ -770,7 +787,7 @@ fn test_animation_chain_with_modifier() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("Anim")
-            .padding(8.0)
+            .modifier(Modifier::new().padding(8.0))
             .fade(0.8)
             .render(ui, &dispatch);
     });
@@ -995,7 +1012,9 @@ fn test_clickable_uses_content_size_not_available_size() {
         // Текст маленький, а available_size() большой — кликабельная область
         // должна быть маленькой (по тексту), а не по всему экрану.
         let before = ui.available_size();
-        Text::new("Короткий").clickable(()).render(ui, &dispatch);
+        Text::new("Короткий")
+            .modifier(Modifier::new().clickable(()))
+            .render(ui, &dispatch);
         // После рендера available_size должен уменьшиться на размер текста,
         // а не на весь экран.
         let after = ui.available_size();
@@ -1017,7 +1036,7 @@ fn test_clickable_with_uses_content_size() {
     with_ui(|ui| {
         let before = ui.available_size();
         Text::new("Короткий")
-            .clickable_with(|_r, _ui, _d| {})
+            .modifier(Modifier::new().clickable_with(|_r, _ui, _d| {}))
             .render(ui, &dispatch);
         let after = ui.available_size();
         assert!(
@@ -1039,7 +1058,9 @@ fn test_sized_widget_reserves_exact_size() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let before = ui.available_size();
-        Text::new("Текст").size(300.0, 100.0).render(ui, &dispatch);
+        Text::new("Текст")
+            .modifier(Modifier::new().width(300.0).height(100.0))
+            .render(ui, &dispatch);
         let after = ui.available_size();
         // available_height должен уменьшиться примерно на 100px
         // (с учётом item_spacing и min_size поправки)
@@ -1060,7 +1081,7 @@ fn test_background_size_matches_content() {
     with_ui(|ui| {
         let before = ui.available_size();
         Text::new("Текст")
-            .background(egui::Color32::RED)
+            .modifier(Modifier::new().background(egui::Color32::RED))
             .render(ui, &dispatch);
         let after = ui.available_size();
         // Фон не должен растягиваться — available_height должен уменьшиться
@@ -1081,9 +1102,7 @@ fn test_align_in_column_uses_vertical_layout() {
     with_ui(|ui| {
         // Column использует вертикальный layout
         Column::new().show(ui, &dispatch, |ui, dispatch| {
-            Text::new("Центр")
-                .align(egui::Align::Center)
-                .render(ui, dispatch);
+            Text::new("Центр").render(ui, dispatch);
         });
         // Не паникует — тест пройден
     });
@@ -1106,7 +1125,7 @@ fn test_button_fills_full_width_with_size_modifier() {
     with_ui(|ui| {
         let avail_w = ui.available_width();
         Button::<()>::new("Широкая кнопка")
-            .size(avail_w, 48.0)
+            .modifier(Modifier::new().width(avail_w).height(48.0))
             .render(ui, &dispatch);
         // Не паникует — кнопка с size модификатором работает корректно
     });
@@ -1132,7 +1151,9 @@ fn test_padded_does_not_fill_full_width() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let before = ui.available_size();
-        Text::new("Текст").padding(16.0).render(ui, &dispatch);
+        Text::new("Текст")
+            .modifier(Modifier::new().padding(16.0))
+            .render(ui, &dispatch);
         let after = ui.available_size();
         // После рендера контент должен потребить место по высоте.
         let consumed_y = before.y - after.y;
@@ -1249,8 +1270,12 @@ fn test_clickable_in_row_does_not_overflow() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Row::new(ui, &dispatch, |ui, dispatch| {
-            Text::new("Левый клик").clickable(()).render(ui, dispatch);
-            Text::new("Правый клик").clickable(()).render(ui, dispatch);
+            Text::new("Левый клик")
+                .modifier(Modifier::new().clickable(()))
+                .render(ui, dispatch);
+            Text::new("Правый клик")
+                .modifier(Modifier::new().clickable(()))
+                .render(ui, dispatch);
         });
     });
 }
@@ -1261,8 +1286,12 @@ fn test_clickable_in_column_uses_content_height() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Column::new().show(ui, &dispatch, |ui, dispatch| {
-            Text::new("Верхний").clickable(()).render(ui, dispatch);
-            Text::new("Нижний").clickable(()).render(ui, dispatch);
+            Text::new("Верхний")
+                .modifier(Modifier::new().clickable(()))
+                .render(ui, dispatch);
+            Text::new("Нижний")
+                .modifier(Modifier::new().clickable(()))
+                .render(ui, dispatch);
         });
     });
 }
@@ -1274,12 +1303,8 @@ fn test_align_nested_row_in_column() {
     with_ui(|ui| {
         Column::new().show(ui, &dispatch, |ui, dispatch| {
             Row::new(ui, dispatch, |ui, dispatch| {
-                Text::new("Левый")
-                    .align(egui::Align::Center)
-                    .render(ui, dispatch);
-                Text::new("Правый")
-                    .align(egui::Align::Center)
-                    .render(ui, dispatch);
+                Text::new("Левый").render(ui, dispatch);
+                Text::new("Правый").render(ui, dispatch);
             });
         });
     });
@@ -1291,9 +1316,7 @@ fn test_align_in_stack() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Stack::new(ui, &dispatch, |ui, dispatch| {
-            Text::new("Центр")
-                .align(egui::Align::Center)
-                .render(ui, dispatch);
+            Text::new("Центр").render(ui, dispatch);
         });
     });
 }
@@ -1305,20 +1328,25 @@ fn test_clickable_in_lazy_column() {
     with_ui(|ui| {
         let items: Vec<i32> = (1..=3).collect();
         LazyColumn::new(items, ui, &dispatch, |_i, ui, dispatch| {
-            Text::new("Клик").clickable(()).render(ui, dispatch);
+            Text::new("Клик")
+                .modifier(Modifier::new().clickable(()))
+                .render(ui, dispatch);
         });
     });
 }
 
 #[test]
 fn test_modifier_chain_clickable_padded_background() {
-    // Комбинация: Padded + Clickable + Background через цепочку ModifierExt.
+    // Комбинация: Padded + Clickable + Background через value Modifier.
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         Text::new("Текст")
-            .padding(8.0)
-            .clickable(())
-            .background(egui::Color32::RED)
+            .modifier(
+                Modifier::new()
+                    .padding(8.0)
+                    .clickable(())
+                    .background(egui::Color32::RED),
+            )
             .render(ui, &dispatch);
     });
 }
@@ -1350,7 +1378,9 @@ fn test_fill_max_width_in_scrollable_column() {
         Column::new()
             .scrollable()
             .show(ui, &dispatch, |ui, dispatch| {
-                Text::new("Showcase").padding(8.0).render(ui, dispatch);
+                Text::new("Showcase")
+                    .modifier(Modifier::new().padding(8.0))
+                    .render(ui, dispatch);
                 Spacer::new(16.0).render(ui, dispatch);
                 Text::new("Выберите демо:").render(ui, dispatch);
 
@@ -1518,7 +1548,7 @@ fn test_fill_max_width_in_nested_column() {
     with_ui(|ui| {
         Column::new().show(ui, &dispatch, |ui, dispatch| {
             Text::new("Внешняя колонка")
-                .padding(4.0)
+                .modifier(Modifier::new().padding(4.0))
                 .render(ui, dispatch);
             Column::new().show(ui, dispatch, |ui, dispatch| {
                 Button::<()>::new("Вложенная кнопка")
@@ -1678,7 +1708,9 @@ fn test_sized_widget_via_constraints() {
     with_ui(|ui| {
         let before_y = ui.available_size().y;
 
-        Text::new("Текст").size(300.0, 100.0).render(ui, &dispatch);
+        Text::new("Текст")
+            .modifier(Modifier::new().width(300.0).height(100.0))
+            .render(ui, &dispatch);
 
         let after_y = ui.available_size().y;
         let consumed = before_y - after_y;
