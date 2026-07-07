@@ -179,16 +179,12 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let text_size = galley.size();
 
         // Размер кнопки: текст + padding, высоту можно переопределить через self.height.
-        // Если родитель установил min_width (через fill_max_width модификатор),
-        // alloc'им максимальное из желаемого размера и min_rect родителя.
+        // Если available_width() больше wrap-content — alloc'им во всю ширину
+        // (поддержка fill_max_width через set_min_width родителя).
         let btn_height = self.height.max(text_size.y + VPAD * 2.0);
         let btn_width = text_size.x + HPAD * 2.0;
-        // Учитываем min_rect.width() — если заполнитель (fill_max_width)
-        // установил min_width на child_ui, available_width() вернёт всю ширину.
         let avail_w = ui.available_width();
         let desired_width = if avail_w > btn_width {
-            // available_width больше wrap-content — родитель хочет чтобы
-            // виджет растянулся. alloc'им available_width.
             avail_w
         } else {
             btn_width
