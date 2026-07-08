@@ -19,6 +19,12 @@ pub enum Route {
     Animations,
     /// Новая Modifier value type.
     ModifierValue,
+    /// Вложенная навигация (экран 1 со вложенными A, B, C).
+    Nested,
+    /// Вложенные экраны в Nested.
+    NestedA,
+    NestedB,
+    NestedC,
 }
 
 impl Route {
@@ -33,6 +39,10 @@ impl Route {
             Route::State => "Локальное состояние",
             Route::Animations => "Анимации",
             Route::ModifierValue => "Modifier Value",
+            Route::Nested => "Вложенная навигация",
+            Route::NestedA => "Nested A",
+            Route::NestedB => "Nested B",
+            Route::NestedC => "Nested C",
         }
     }
 
@@ -47,6 +57,10 @@ impl Route {
             Route::State => "remember, RememberState",
             Route::Animations => "AnimatedVisibility, Fade, Slide",
             Route::ModifierValue => "Новая Modifier value type system",
+            Route::Nested => "Демо вложенной навигации с BackPressed",
+            Route::NestedA => "Первый вложенный экран",
+            Route::NestedB => "Второй вложенный экран",
+            Route::NestedC => "Третий вложенный экран",
         }
     }
 }

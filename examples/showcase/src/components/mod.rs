@@ -4,14 +4,15 @@
 //! получая `Dispatcher<RootMsg>` для навигации и управления.
 
 use egui_android_framework::core::{Component, LifecycleObserver, UiWrapper};
+use egui_android_framework::navigation::BackHandling;
 use egui_android_framework::runtime::Dispatcher;
 
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::{
     animations::AnimationsScreen, containers::ContainersScreen, home::HomeScreen,
-    modifier_value::ModifierValueScreen, modifiers::ModifiersScreen, state_screen::StateScreen,
-    themes::ThemesScreen, widgets::WidgetsScreen,
+    modifier_value::ModifierValueScreen, modifiers::ModifiersScreen, nested::NestedScreen,
+    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
 };
 
 /// Единый enum для всех экранов.
@@ -24,6 +25,7 @@ pub enum ScreenComponent {
     StateRef(StateScreen),
     Animations(AnimationsScreen),
     ModifierValue(ModifierValueScreen),
+    Nested(NestedScreen),
 }
 
 impl ScreenComponent {
@@ -43,6 +45,9 @@ impl ScreenComponent {
             Route::State => Self::StateRef(StateScreen::new()),
             Route::Animations => Self::Animations(AnimationsScreen::new()),
             Route::ModifierValue => Self::ModifierValue(ModifierValueScreen::new()),
+            Route::Nested => Self::Nested(NestedScreen::new()),
+            // NestedA/B/C создаются через push_sub, а не напрямую
+            Route::NestedA | Route::NestedB | Route::NestedC => Self::Nested(NestedScreen::new()),
         }
     }
 
@@ -64,6 +69,23 @@ impl ScreenComponent {
             Self::StateRef(s) => s.render(ui, dispatch),
             Self::Animations(s) => s.render(ui, dispatch),
             Self::ModifierValue(s) => s.render(ui, dispatch),
+            Self::Nested(s) => s.render(ui, dispatch),
+        }
+    }
+
+    /// Получить мутабельную ссылку на NestedScreen, если это он.
+    pub fn as_nested_mut(&mut self) -> Option<&mut NestedScreen> {
+        match self {
+            Self::Nested(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Обработать BackPressed для вложенной навигации.
+    pub fn on_back(&mut self) -> BackHandling {
+        match self {
+            Self::Nested(s) => s.on_back(),
+            _ => BackHandling::NotHandled,
         }
     }
 }

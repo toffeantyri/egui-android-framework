@@ -114,8 +114,9 @@ pub fn run<A: Application>(app: AndroidApp) {
         }
 
         if input_state.back_pressed {
-            log::info!("Back нажата — выход");
-            destroy_requested = true;
+            log::info!("Back нажата — отправляем в Application");
+            input_state.back_pressed = false;
+            app_instance.on_back_pressed();
         }
 
         if destroy_requested {

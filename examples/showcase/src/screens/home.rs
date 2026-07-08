@@ -30,6 +30,7 @@ impl HomeScreen {
             Route::State,
             Route::Animations,
             Route::ModifierValue,
+            Route::Nested,
         ];
 
         Column::new()
