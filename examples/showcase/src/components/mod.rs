@@ -82,9 +82,19 @@ impl ScreenComponent {
     }
 
     /// Обработать BackPressed для вложенной навигации.
-    pub fn on_back(&mut self) -> BackHandling {
+    ///
+    /// Отличие от старой версии: теперь ChildStack не содержит каналов.
+    /// BackDispatcher решает, кто обрабатывает Back.
+    /// NestedScreen::handle_back() вызывается из BackDispatcher напрямую.
+    pub fn handle_back(&mut self) -> BackHandling {
         match self {
-            Self::Nested(s) => s.on_back(),
+            Self::Nested(s) => {
+                if s.handle_back() {
+                    BackHandling::Handled
+                } else {
+                    BackHandling::NotHandled
+                }
+            }
             _ => BackHandling::NotHandled,
         }
     }

@@ -56,9 +56,8 @@ pub fn run<A: Application>(app: AndroidApp) {
     let mut notifier: Option<UiNotifier> = None;
     let mut notifier_initialized = false;
 
+    let mut destroy_requested = false;
     loop {
-        // --- Слив системных событий ---
-        let mut destroy_requested = false;
         app.poll_events(Some(Duration::from_millis(16)), |event| match event {
             PollEvent::Wake | PollEvent::Timeout => {
                 // Wake от data layer или таймаут — идём в рендеринг
@@ -272,6 +271,11 @@ pub fn run<A: Application>(app: AndroidApp) {
                 };
 
                 let full_output = app_instance.frame(&egui_ctx, raw_input);
+
+                // Проверяем, не запросил ли Application завершение
+                if app_instance.request_destroy() {
+                    destroy_requested = true;
+                }
 
                 unsafe {
                     let gl = &*painter.gl();

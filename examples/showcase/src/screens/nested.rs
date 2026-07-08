@@ -1,14 +1,14 @@
 //! NestedScreen — экран с вложенной навигацией (ChildStack внутри).
 //!
-//! Демонстрирует обработку BackPressed через ChildStack::register_back_handler.
+//! Демонстрирует обработку BackPressed через BackDispatcher.
 //! Вложенный ChildStack управляет дочерними экранами NestedA/B/C.
-//! При BackPressed: если есть активный вложенный экран — pop внутри,
-//! иначе Back уходит в RootComponent (pop на уровень Home).
-
-use std::sync::mpsc;
+//! При BackPressed: BackDispatcher вызывает зарегистрированные callback'и.
+//! NestedScreen регистрирует callback для обработки Back:
+//! - если есть вложенный экран → pop внутри
+//! - если нет → NotHandled (Root делает pop)
 
 use egui_android_framework::{
-    navigation::{BackHandling, ChildStack},
+    navigation::ChildStack,
     runtime::Dispatcher,
     ui::{
         containers::Column,
@@ -26,40 +26,23 @@ use crate::screens::nested_sub::NestedSubScreen;
 pub struct NestedScreen {
     /// Вложенный стек: Route — ключ, NestedSubScreen — компонент.
     stack: ChildStack<Route, NestedSubScreen>,
-    /// Receiver для BackPressed от ChildStack.
-    #[allow(dead_code)]
-    back_rx: mpsc::Receiver<()>,
 }
 
 impl NestedScreen {
     pub fn new() -> Self {
-        let (back_tx, back_rx) = mpsc::channel();
-        let mut stack = ChildStack::new();
-        // Регистрируем обработчик Back в нашем стеке
-        stack.register_back_handler(back_tx);
-        Self { stack, back_rx }
+        let stack = ChildStack::new();
+        Self { stack }
     }
 
-    /// Обработать BackPressed — вызывается из RootComponent.
-    ///
-    /// ChildStack сам решает: если есть вложенный компонент с handler —
-    /// отправляет ему, если нет — делает pop внутри своего стека.
-    /// В любом случае возвращаем Handled — RootComponent не должен делать pop,
-    /// потому что нас может быть несколько в стеке RootComponent.
-    /// Если мы сами опустели — следующий BackRootComponent передаст снова,
-    /// и тогда on_back() вернёт NotHandled.
-    pub fn on_back(&mut self) -> BackHandling {
-        // ChildStack уровня 2 сам разруливает:
-        // - если есть handler у вложенного → Handled
-        // - если нет → pop внутри (стек уменьшается)
-        // - если пуст → NotHandled
-        let handling = self.stack.on_back();
-        if handling == BackHandling::Handled {
-            return BackHandling::Handled;
+    /// Вызывается из RootComponent для обработки Back.
+    /// Если есть вложенный экран — ChildStack делает pop.
+    /// Если стек пуст — возвращает false (Root делает pop).
+    pub fn handle_back(&mut self) -> bool {
+        if self.stack.is_empty() {
+            return false;
         }
-        // Вложенный стек пуст или не обработал — ChildStack не сделал pop.
-        //               значит надо pop на уровень Root (Home).
-        BackHandling::NotHandled
+        self.stack.on_back();
+        true
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
@@ -103,9 +86,9 @@ impl NestedScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                                        .modifier(Modifier::new().fill_max_width().padding(8.0))
-                                        .render(ui, dispatch);
-                                });
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+            });
     }
 }
 
@@ -114,5 +97,10 @@ impl NestedScreen {
     pub fn push_sub(&mut self, route: Route) {
         let sub = NestedSubScreen::from_route(&route);
         self.stack.push(route, sub);
+    }
+
+    /// Проверить, пуст ли вложенный стек.
+    pub fn is_sub_stack_empty(&self) -> bool {
+        self.stack.is_empty()
     }
 }

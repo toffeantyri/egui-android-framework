@@ -7,7 +7,6 @@
 //! (on_create, on_destroy).
 
 use egui_android_core::Component;
-use std::sync::mpsc;
 
 /// Результат обработки BackPressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,11 +30,6 @@ where
     Comp: Component,
 {
     items: Vec<ChildItem<C, Comp>>,
-    /// Стек обработчиков Back для каждого элемента.
-    /// Синхронизирован с items: back_handlers[i] соответствует items[i].
-    /// При push — добавляется None (компонент может установить позже).
-    /// При pop — последний удаляется.
-    back_handlers: Vec<Vec<mpsc::Sender<()>>>,
 }
 
 /// Элемент стека: конфигурация + компонент.
@@ -51,10 +45,7 @@ where
 {
     /// Создать пустой стек.
     pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            back_handlers: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 
     /// Добавить компонент на вершину стека.
@@ -70,19 +61,15 @@ where
             config,
             component: comp,
         });
-        // Каждый новый элемент начинает без обработчика Back.
-        self.back_handlers.push(Vec::new());
     }
 
     /// Убрать верхний элемент стека.
     ///
     /// Вызывает lifecycle на удаляемом компоненте.
-    /// Восстанавливает обработчики Back предыдущего элемента.
     ///
     /// Возвращает `None`, если стек пуст.
     pub fn pop(&mut self) -> Option<(C, Comp)> {
         let removed = self.items.pop()?;
-        self.back_handlers.pop();
         let mut comp = removed.component;
         comp.on_pause();
         comp.on_stop();
@@ -156,57 +143,19 @@ where
         Some(&mut self.items[idx].component)
     }
 
-    /// Зарегистрировать обработчик Back для активного компонента.
-    ///
-    /// Вызывается компонентом через ComponentContext.set_back_handler().
-    /// При нажатии Back стек отправит `()` во все зарегистрированные tx.
-    pub fn register_back_handler(&mut self, tx: mpsc::Sender<()>) {
-        let idx = self.items.len().checked_sub(1);
-        if let Some(idx) = idx {
-            if idx < self.back_handlers.len() {
-                self.back_handlers[idx].push(tx);
-            }
-        }
-    }
-
-    /// Снять все обработчики Back для активного компонента.
-    pub fn unregister_back_handlers(&mut self) {
-        let idx = self.items.len().checked_sub(1);
-        if let Some(idx) = idx {
-            if idx < self.back_handlers.len() {
-                self.back_handlers[idx].clear();
-            }
-        }
-    }
-
     /// Обработать BackPressed.
     ///
     /// Логика как в Decompose:
     /// 1. Стек пуст → `NotHandled` (вызывающий решает).
-    /// 2. Активный компонент зарегистрировал обработчики (`back_handlers`)
-    ///    → отправляет `()` всем, возвращает `Handled`. Компонент сам решает,
-    ///    делать `pop()` или нет.
-    /// 3. Обработчиков нет → стек делает `pop()` сам, возвращает `Handled`.
-    ///    Это стандартное поведение: Back закрывает текущий экран,
-    ///    если он не перехватил.
+    /// 2. Есть элемент → делаем `pop()`, возвращаем `Handled`.
+    ///    Если компонент хочет перехватить Back, он регистрирует
+    ///    callback в BackDispatcher через ComponentContext.
     pub fn on_back(&mut self) -> BackHandling {
-        let idx = self.items.len().checked_sub(1);
-        match idx {
-            Some(idx) if idx < self.back_handlers.len() => {
-                let handlers = &self.back_handlers[idx];
-                if handlers.is_empty() {
-                    // Нет обработчика — стандартное поведение: pop
-                    self.pop();
-                    return BackHandling::Handled;
-                }
-                // Отправляем всем зарегистрированным обработчикам
-                for tx in handlers {
-                    let _ = tx.send(());
-                }
-                BackHandling::Handled
-            }
-            _ => BackHandling::NotHandled,
+        if self.items.is_empty() {
+            return BackHandling::NotHandled;
         }
+        self.pop();
+        BackHandling::Handled
     }
 
     /// Получить конфигурацию активного компонента.

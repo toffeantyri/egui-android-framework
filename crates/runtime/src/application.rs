@@ -92,16 +92,15 @@ pub trait Application: Sized + 'static {
     /// Приложение **должно** переопределить, если использует ChildStack.
     fn on_back_pressed(&mut self) {}
 
-    /// Завершить приложение (аналог finish()).
+    /// Запросить завершение приложения.
     ///
-    /// Вызывается из RootComponent когда стек навигации пуст
+    /// Вызывается когда стек навигации пуст
     /// (пользователь нажал Back на главном экране).
     ///
-    /// По умолчанию — завершает процесс через `std::process::exit(0)`.
-    /// Приложение может переопределить для graceful shutdown.
-    fn finish(&mut self) {
-        log::info!("Application::finish — завершение");
-        std::process::exit(0);
+    /// Устанавливает флаг destroy_requested = true.
+    /// Runtime (run.rs) должен проверить этот флаг после frame().
+    fn request_destroy(&mut self) -> bool {
+        false
     }
 
     // ─── Методы жизненного цикла ─────────────────────────────────────────

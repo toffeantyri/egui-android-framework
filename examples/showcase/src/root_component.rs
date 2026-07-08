@@ -1,6 +1,13 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
-
-use std::sync::mpsc;
+//!
+//! Обработка Back:
+//! - Системный Back (платформенная кнопка) → `BackDispatcher.handle()`
+//!   → зарегистрированные callback'и (NestedScreen, диалоги)
+//!   → если никто не обработал → `pop()` из ChildStack
+//! - UI Back (кнопка "← Назад") → `RootMsg::Back` → `handle(RootMsg::Back)`
+//!   → проверяет BackDispatcher → если никто не обработал → `pop()`
+//!
+//! Единый путь: все Back сначала проходят через BackDispatcher.
 
 use egui_android_framework::{
     core::{Component, LifecycleObserver, UiWrapper},
@@ -28,8 +35,8 @@ pub enum RootMsg {
 pub struct RootComponent {
     pub stack: ChildStack<Route, ScreenComponent>,
     store: StateStore<AppState>,
-    /// Отправитель сигнала о завершении (когда стек пуст).
-    finish_tx: Option<mpsc::Sender<()>>,
+    /// Флаг: запрошено завершение приложения (стек пуст).
+    destroy_requested: bool,
 }
 
 impl RootComponent {
@@ -41,13 +48,8 @@ impl RootComponent {
         Self {
             stack,
             store,
-            finish_tx: None,
+            destroy_requested: false,
         }
-    }
-
-    /// Установить отправитель сигнала завершения.
-    pub fn set_finish_tx(&mut self, tx: mpsc::Sender<()>) {
-        self.finish_tx = Some(tx);
     }
 
     pub fn sync_from_store(&mut self) {
@@ -57,28 +59,37 @@ impl RootComponent {
         }
     }
 
-    /// Обработать системную кнопку Back (вызывается из Application).
+    /// Получить флаг завершения.
+    pub fn is_destroy_requested(&self) -> bool {
+        self.destroy_requested
+    }
+
+    /// Обработать системную кнопку Back.
     ///
-    /// Если активный компонент не перехватил — делаем pop.
-    /// Если стек стал пуст — сигнал завершения.
+    /// Сначала проверяет активный компонент (NestedScreen, диалоги).
+    /// Если компонент не перехватил Back:
+    /// - Если стек пуст → ignore (не должно происходить)
+    /// - Если в стеке 1 элемент (Home) → завершение приложения
+    /// - Если в стеке > 1 элементов → pop
     pub fn handle_back(&mut self) {
+        if self.stack.is_empty() {
+            return;
+        }
+
+        // Проверяем активный компонент (NestedScreen может перехватить)
         let handled = self
             .stack
             .active_mut()
-            .map(|c| c.on_back())
+            .map(|c| c.handle_back())
             .unwrap_or(BackHandling::NotHandled);
 
         if handled == BackHandling::NotHandled {
-            if self.stack.is_empty() {
-                log::info!("RootComponent: стек пуст, завершение");
+            if self.stack.len() == 1 {
+                // Home — последний экран, завершаем приложение
+                log::info!("RootComponent: Back на Home — завершение приложения");
+                self.destroy_requested = true;
             } else {
                 self.stack.pop();
-                if self.stack.is_empty() {
-                    log::info!("RootComponent: после pop стек пуст, завершение");
-                    if let Some(ref finish_tx) = self.finish_tx {
-                        let _ = finish_tx.send(());
-                    }
-                }
             }
         }
     }
@@ -114,21 +125,9 @@ impl Component for RootComponent {
                 self.stack.push(route, component);
             }
             RootMsg::Back => {
-                // UI-кнопка назад: сначала спрашиваем активный компонент
-                let handled = self
-                    .stack
-                    .active_mut()
-                    .map(|c| c.on_back())
-                    .unwrap_or(BackHandling::NotHandled);
-                if handled == BackHandling::NotHandled {
-                    self.stack.pop();
-                    if self.stack.is_empty() {
-                        log::info!("RootComponent: после pop стек пуст, завершение");
-                        if let Some(ref finish_tx) = self.finish_tx {
-                            let _ = finish_tx.send(());
-                        }
-                    }
-                }
+                // UI-кнопка назад: сначала проверяем активный компонент
+                // Для единообразия используем ту же логику, что и системный Back
+                self.handle_back();
             }
             RootMsg::ToggleTheme => {
                 self.store.update(|s| s.is_dark_mode = !s.is_dark_mode);

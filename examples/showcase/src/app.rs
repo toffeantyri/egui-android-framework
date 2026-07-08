@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::{BackDispatcher, Component, LifecycleObserver},
+    core::{Component, LifecycleObserver},
     runtime::AndroidWakeHandle,
     runtime::AppConfig,
     runtime::Application,
@@ -27,10 +27,6 @@ pub struct ShowcaseApplication {
     config: AppConfig,
     state: StateStore<AppState>,
     _notify_rx: mpsc::Receiver<()>,
-    /// BackDispatcher — центральный обработчик системной кнопки Back.
-    back_dispatcher: BackDispatcher,
-    /// Receiver для сигнала о завершении (когда стек пуст).
-    finish_rx: Option<mpsc::Receiver<()>>,
 }
 
 impl LifecycleObserver for ShowcaseApplication {}
@@ -49,22 +45,13 @@ impl Application for ShowcaseApplication {
         });
         let (_notify_tx, notify_rx) = mpsc::channel::<()>();
 
-        let mut root = RootComponent::new(store.clone_state());
-
-        let (finish_tx, finish_rx) = mpsc::channel();
-        root.set_finish_tx(finish_tx);
-
-        // Создаём BackDispatcher — в него будут регистрироваться
-        // обработчики компонентов (NestedScreen, диалоги).
-        let back_dispatcher = BackDispatcher::new();
+        let root = RootComponent::new(store.clone_state());
 
         Self {
             root,
             config,
             state: store,
             _notify_rx: notify_rx,
-            back_dispatcher,
-            finish_rx: Some(finish_rx),
         }
     }
 
@@ -94,18 +81,11 @@ impl Application for ShowcaseApplication {
 
     fn on_back_pressed(&mut self) {
         log::info!("ShowcaseApplication: on_back_pressed");
-        // BackDispatcher вызывает обработчики от высокого приоритета к низкому.
-        // Если никто не обработал — RootComponent делает pop.
-        let handled = self.back_dispatcher.handle();
-        if !handled {
-            // Никто не перехватил Back — RootComponent сам решает
-            self.root.handle_back();
-        }
+        self.root.handle_back();
     }
 
-    fn finish(&mut self) {
-        log::info!("ShowcaseApplication: finish — завершение приложения");
-        std::process::exit(0);
+    fn request_destroy(&mut self) -> bool {
+        self.root.is_destroy_requested()
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
@@ -130,14 +110,6 @@ impl Application for ShowcaseApplication {
         // Drain'им сообщения от View
         for msg in receiver.try_iter() {
             self.root.handle(msg);
-        }
-
-        // Проверяем сигнал завершения (стек навигации пуст)
-        if let Some(ref finish_rx) = self.finish_rx {
-            if finish_rx.try_recv().is_ok() {
-                log::info!("ShowcaseApplication: получен сигнал завершения");
-                self.finish();
-            }
         }
 
         full_output
