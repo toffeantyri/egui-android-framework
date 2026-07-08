@@ -36,8 +36,8 @@
 //!
 //! ### Обратная совместимость
 //!
-//! Старая система (`ModifierExt` blanket-impl) продолжает работать.
-//! Новая система доступна через [`ModifierApply`].
+//! Новая система модификаторов — `Modifier<M>` value type.
+//! `ModifierExt` удалён. Используйте `Modifier::new().padding(N).background(C)`.
 //!
 //! ```ignore
 //! // Новый API

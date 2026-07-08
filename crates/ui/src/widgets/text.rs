@@ -13,7 +13,7 @@
 //!
 //! Text правильно отмеряет собственный размер (wrap-content) и корректно
 //! работает с padding, background, size, clickable и другими модификаторами
-//! как из legacy ModifierExt, так и из новой Modifier value type.
+//! как через Modifier value type, так и напрямую.
 //!
 //! Внутри использует `ui.allocate_exact_size()` с реальным размером galley,
 //! что гарантирует корректный layout в Column, Row, Stack и LazyColumn.

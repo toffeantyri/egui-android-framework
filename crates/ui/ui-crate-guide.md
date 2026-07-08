@@ -196,7 +196,7 @@ let (rect, response) = ui.allocate_space_with_sense(
 ```rust
 Button::new("Текст")
     .on_click(Msg::Clicked)
-    .padding(8.0)
+    .modifier(Modifier::new().padding(8.0))
     .render(ui, dispatch);
 ```
 
@@ -212,7 +212,7 @@ Button::new("Текст")
 - Фиксированный размер — через модификатор:
   ```rust
   Button::new("200x48")
-      .size(200.0, 48.0)
+      .modifier(Modifier::new().size(200.0, 48.0))
       .render(ui, dispatch);
   ```
 
@@ -237,7 +237,9 @@ Button::new("Текст")
 
 ```rust
 Text::new("Текст").render(ui, dispatch);
-Text::new("Текст").font_size(24.0).selectable(true).render(ui, dispatch);
+Text::new("Текст").font_size(24.0).selectable(true)
+    .modifier(Modifier::new().padding(4.0))
+    .render(ui, dispatch);
 ```
 
 **Размер:**
@@ -338,23 +340,13 @@ Modifier::new()
 | `.fade(opacity)` | Прозрачность через `multiply_opacity` |
 | `.slide(direction, offset)` | Смещение контента |
 
-### 7.2 Старая система (ModifierExt)
+### 7.2 УДАЛЕНО — Старая система (ModifierExt)
 
-**Расположение:** `egui_android_ui::modifier::legacy::ModifierExt`
+> ⚠️ Модуль `egui_android_ui::modifier::legacy::ModifierExt` **удалён**.
+> Используйте только новую систему `Modifier::new().padding(N).background(C)`.
 
-```rust
-Text::new("Текст")
-    .padding(8.0)
-    .background(egui::Color32::RED)
-    .clickable(())
-    .render(ui, dispatch);
-```
-
-Старая система использует wrapper-структуры (`Padded`, `SizedWidget`, `Background`,
-`Aligned`, `Clickable`, `ClickableWith`). Все они реализуют `Widget<M>` и делегируют
-рендер внутреннему виджету.
-
-**SizedWidget — контракт:** Создаёт child_ui с `Constraints::exact(width, height)`.
+Старая система использовала wrapper-структуры (`Padded`, `SizedWidget`, `Background`,
+`Aligned`, `Clickable`, `ClickableWith`). Теперь всё заменено на `Modifier` value type.
 
 ### 7.3 Порядок модификаторов (контракт)
 
@@ -410,7 +402,7 @@ Column::new()
 ### 8.2 Row
 
 ```rust
-Row::new(ui, dispatch, |ui, dispatch| {
+Row::new().show(ui, dispatch, |ui, dispatch| {
     Text::new("Левый").render(ui, dispatch);
     Text::new("Правый").render(ui, dispatch);
 });
@@ -426,8 +418,10 @@ Row::new(ui, dispatch, |ui, dispatch| {
 ### 8.3 Stack
 
 ```rust
-Stack::new(ui, dispatch, |ui, dispatch| {
-    Text::new("Фон").background(egui::Color32::BLUE).render(ui, dispatch);
+Stack::new().show(ui, dispatch, |ui, dispatch| {
+    Text::new("Фон")
+        .modifier(Modifier::new().background(egui::Color32::BLUE))
+        .render(ui, dispatch);
     Text::new("Поверх").render(ui, dispatch);
 });
 ```
@@ -445,8 +439,10 @@ Stack::new(ui, dispatch, |ui, dispatch| {
 
 ```rust
 let items = vec![1, 2, 3];
-LazyColumn::new(items, ui, dispatch, |item, ui, dispatch| {
-    Text::new(format!("Элемент {}", item)).render(ui, dispatch);
+LazyColumn::new(items).show(ui, dispatch, |item, ui, dispatch| {
+    Text::new(format!("Элемент {}", item))
+        .modifier(Modifier::new().padding(4.0))
+        .render(ui, dispatch);
 });
 ```
 
@@ -648,25 +644,20 @@ UiWrapper → Constraints (min_width, max_width, min_height, max_height)
 
 ## 14. Сравнение старой и новой системы модификаторов
 
-| Аспект | Старая (ModifierExt) | Новая (Modifier value type) |
+| Аспект | Старая (ModifierExt — **УДАЛЕНА**) | Новая (Modifier value type) |
 |---|---|---|
 | Тип | Wrapper-структуры на каждый модификатор | Единый `Modifier<M>` с вектором узлов |
 | Порядок | Через вложенность типов | Через порядок добавления в цепочке |
 | Constraints | Не поддерживает | Поддерживает через `UiWrapper` |
-| Производительность | N alloc'ов на N модификаторов | N alloc'ов (аналогично) |
-| Гибкость | Каждый модификатор — отдельный тип | Можно передавать как value |
+| Статус | ❌ Удалена | ✅ Актуальная |
 
-Обе системы работают параллельно и совместимы:
+Только новая система:
 ```rust
-// Старая
-Text::new("...").padding(8.0).background(RED).render(ui, dispatch);
-
-// Новая
+// Новая система (единственная)
 Text::new("...")
     .modifier(Modifier::new().padding(8.0).background(RED))
     .render(ui, dispatch);
 
-// Смешанная
 Button::new("...")
     .on_click(Msg::Click)
     .modifier(Modifier::new().fill_max_width().padding(8.0))
