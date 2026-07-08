@@ -17,6 +17,7 @@ use egui_android_framework::{
     },
 };
 
+
 use crate::root_component::RootMsg;
 
 /// Экран демонстрации новой Modifier системы.

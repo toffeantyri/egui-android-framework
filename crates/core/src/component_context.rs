@@ -7,6 +7,7 @@
 //!
 //! Каналы реализованы через стандартный `std::sync::mpsc`.
 
+use crate::back_dispatcher::BackDispatcher;
 use egui_android_runtime::StateStore;
 use std::sync::mpsc;
 
@@ -34,11 +35,8 @@ where
     store: StateStore<State>,
     /// Флаг: контекст жив (не уничтожен).
     alive: bool,
-    /// Отправитель BackPressed-событий.
-    /// Компонент может явно подписаться на Back, используя этот tx.
-    /// Если компонент не обрабатывает Back — событие никуда не уходит,
-    /// и RootComponent делает pop сам.
-    back_tx: Option<mpsc::Sender<()>>,
+    /// BackDispatcher для регистрации обработчиков Back.
+    pub back_dispatcher: BackDispatcher,
 }
 
 impl<NavEvent, DataCmd, State> ComponentContext<NavEvent, DataCmd, State>
@@ -61,28 +59,17 @@ where
             data_cmd_tx,
             store,
             alive: true,
-            back_tx: None,
+            back_dispatcher: BackDispatcher::new(),
         }
     }
 
-    /// Установить отправитель Back-уведомлений.
+    /// Обработать системную кнопку Back через BackDispatcher.
     ///
-    /// Если компонент хочет явно обрабатывать BackPressed,
-    /// он создаёт канал `(tx, rx)` и регистрирует tx здесь.
-    /// Когда нажат Back — в tx отправляется `()`.
-    /// Компонент сам решает, вызывать pop или нет.
-    pub fn set_back_handler(&mut self, tx: mpsc::Sender<()>) {
-        self.back_tx = Some(tx);
-    }
-
-    /// Снять обработчик Back (компонент больше не хочет перехватывать).
-    pub fn remove_back_handler(&mut self) {
-        self.back_tx = None;
-    }
-
-    /// Получить отправитель Back, если зарегистрирован.
-    pub fn back_handler(&self) -> Option<&mpsc::Sender<()>> {
-        self.back_tx.as_ref()
+    /// Вызывает зарегистрированные обработчики от высокого приоритета к низкому.
+    /// Если хотя бы один вернул `true` — Back обработан.
+    /// Возвращает `true`, если Back обработан.
+    pub fn handle_back(&mut self) -> bool {
+        self.back_dispatcher.handle()
     }
 
     /// Отправить навигационное событие родителю (push/pop/replace).

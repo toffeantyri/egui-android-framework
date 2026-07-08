@@ -18,12 +18,10 @@ use crate::navigation::Route;
 pub enum RootMsg {
     /// Перейти на указанный маршрут.
     Navigate(Route),
-    /// Вернуться назад.
+    /// Вернуться назад (pop из стека).
     Back,
     /// Переключить тему.
     ToggleTheme,
-    /// Завершить приложение (стек навигации пуст).
-    Finish,
 }
 
 /// Корневой компонент с навигацией.
@@ -58,6 +56,32 @@ impl RootComponent {
             active.set_dark_mode(app_state.is_dark_mode);
         }
     }
+
+    /// Обработать системную кнопку Back (вызывается из Application).
+    ///
+    /// Если активный компонент не перехватил — делаем pop.
+    /// Если стек стал пуст — сигнал завершения.
+    pub fn handle_back(&mut self) {
+        let handled = self
+            .stack
+            .active_mut()
+            .map(|c| c.on_back())
+            .unwrap_or(BackHandling::NotHandled);
+
+        if handled == BackHandling::NotHandled {
+            if self.stack.is_empty() {
+                log::info!("RootComponent: стек пуст, завершение");
+            } else {
+                self.stack.pop();
+                if self.stack.is_empty() {
+                    log::info!("RootComponent: после pop стек пуст, завершение");
+                    if let Some(ref finish_tx) = self.finish_tx {
+                        let _ = finish_tx.send(());
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl LifecycleObserver for RootComponent {}
@@ -90,33 +114,24 @@ impl Component for RootComponent {
                 self.stack.push(route, component);
             }
             RootMsg::Back => {
-                // BackPressed: сначала даём активному компоненту шанс
-                // обработать (NestedScreen может иметь вложенные экраны).
+                // UI-кнопка назад: сначала спрашиваем активный компонент
                 let handled = self
                     .stack
                     .active_mut()
                     .map(|c| c.on_back())
                     .unwrap_or(BackHandling::NotHandled);
                 if handled == BackHandling::NotHandled {
+                    self.stack.pop();
                     if self.stack.is_empty() {
-                        // Стек пуст — завершаем приложение
-                        log::info!("RootComponent: стек пуст, завершение");
-                    } else {
-                        self.stack.pop();
-                        if self.stack.is_empty() {
-                            log::info!("RootComponent: после pop стек пуст, завершение");
-                            if let Some(ref finish_tx) = self.finish_tx {
-                                let _ = finish_tx.send(());
-                            }
+                        log::info!("RootComponent: после pop стек пуст, завершение");
+                        if let Some(ref finish_tx) = self.finish_tx {
+                            let _ = finish_tx.send(());
                         }
                     }
                 }
             }
             RootMsg::ToggleTheme => {
                 self.store.update(|s| s.is_dark_mode = !s.is_dark_mode);
-            }
-            RootMsg::Finish => {
-                log::info!("RootComponent: получен Finish — стек пуст");
             }
         }
     }

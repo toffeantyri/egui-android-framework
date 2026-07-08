@@ -29,31 +29,31 @@ impl ModifiersScreen {
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
                 Text::new("Модификаторы")
-                                .modifier(Modifier::new().padding(8.0))
-                                .render(ui, dispatch);
+                    .modifier(Modifier::new().padding(8.0))
+                    .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Padding
                 Text::new("Padding 8px:").render(ui, dispatch);
                 Text::new("Текст с padding")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(egui::Color32::from_gray(60)),
-                                    )
-                                    .render(ui, dispatch);
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(egui::Color32::from_gray(60)),
+                    )
+                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Background
                 Text::new("Background:").render(ui, dispatch);
                 Text::new("Синий фон")
-                                    .modifier(
-                                        Modifier::new()
-                                            .background(egui::Color32::from_rgb(0, 80, 200))
-                                            .padding(12.0),
-                                    )
-                                    .render(ui, dispatch);
+                    .modifier(
+                        Modifier::new()
+                            .background(egui::Color32::from_rgb(0, 80, 200))
+                            .padding(12.0),
+                    )
+                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
@@ -85,12 +85,12 @@ impl ModifiersScreen {
                 Spacer::new(8.0).render(ui, dispatch);
                 Text::new("Счётчик (remember внутри замыкания):").render(ui, dispatch);
                 Text::new(format!("Значение: {}", click_count.get()))
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(egui::Color32::from_gray(60)),
-                                    )
-                                    .render(ui, dispatch);
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(egui::Color32::from_gray(60)),
+                    )
+                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
                 Button::new("← Назад")

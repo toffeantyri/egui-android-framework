@@ -3,12 +3,15 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::Component, core::LifecycleObserver, runtime::AndroidWakeHandle, runtime::AppConfig,
-    runtime::Application, runtime::Dispatcher, runtime::StateStore, runtime::UiNotifier,
+    core::{BackDispatcher, Component, LifecycleObserver},
+    runtime::AndroidWakeHandle,
+    runtime::AppConfig,
+    runtime::Application,
+    runtime::Dispatcher,
+    runtime::StateStore,
+    runtime::UiNotifier,
     ui::theme::MaterialTheme,
 };
-
-use crate::root_component::RootMsg;
 
 use crate::root_component::RootComponent;
 
@@ -24,10 +27,8 @@ pub struct ShowcaseApplication {
     config: AppConfig,
     state: StateStore<AppState>,
     _notify_rx: mpsc::Receiver<()>,
-    /// Dispatcher для отправки сообщений из обработчиков (например, Back).
-    /// Создаётся в `create()`, Receiver drain'ится в `frame()`.
-    back_dispatcher: Dispatcher<RootMsg>,
-    back_receiver: Option<mpsc::Receiver<RootMsg>>,
+    /// BackDispatcher — центральный обработчик системной кнопки Back.
+    back_dispatcher: BackDispatcher,
     /// Receiver для сигнала о завершении (когда стек пуст).
     finish_rx: Option<mpsc::Receiver<()>>,
 }
@@ -50,9 +51,12 @@ impl Application for ShowcaseApplication {
 
         let mut root = RootComponent::new(store.clone_state());
 
-        let (back_dispatcher, back_receiver) = Dispatcher::new();
         let (finish_tx, finish_rx) = mpsc::channel();
         root.set_finish_tx(finish_tx);
+
+        // Создаём BackDispatcher — в него будут регистрироваться
+        // обработчики компонентов (NestedScreen, диалоги).
+        let back_dispatcher = BackDispatcher::new();
 
         Self {
             root,
@@ -60,7 +64,6 @@ impl Application for ShowcaseApplication {
             state: store,
             _notify_rx: notify_rx,
             back_dispatcher,
-            back_receiver: Some(back_receiver),
             finish_rx: Some(finish_rx),
         }
     }
@@ -90,8 +93,19 @@ impl Application for ShowcaseApplication {
     }
 
     fn on_back_pressed(&mut self) {
-        log::info!("ShowcaseApplication: on_back_pressed — отправляем RootMsg::Back");
-        self.back_dispatcher.dispatch(RootMsg::Back);
+        log::info!("ShowcaseApplication: on_back_pressed");
+        // BackDispatcher вызывает обработчики от высокого приоритета к низкому.
+        // Если никто не обработал — RootComponent делает pop.
+        let handled = self.back_dispatcher.handle();
+        if !handled {
+            // Никто не перехватил Back — RootComponent сам решает
+            self.root.handle_back();
+        }
+    }
+
+    fn finish(&mut self) {
+        log::info!("ShowcaseApplication: finish — завершение приложения");
+        std::process::exit(0);
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
@@ -113,14 +127,7 @@ impl Application for ShowcaseApplication {
             });
         });
 
-        // Сначала drain'им Back-сообщения (из on_back_pressed)
-        if let Some(back_rx) = &self.back_receiver {
-            for msg in back_rx.try_iter() {
-                self.root.handle(msg);
-            }
-        }
-
-        // Потом drain'им сообщения от View
+        // Drain'им сообщения от View
         for msg in receiver.try_iter() {
             self.root.handle(msg);
         }

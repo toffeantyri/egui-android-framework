@@ -12,6 +12,7 @@
 //! Зависит от `egui-android-runtime` (для Dispatcher, StateStore).
 //! НЕ знает про ui, navigation.
 
+pub mod back_dispatcher;
 pub mod component;
 pub mod component_context;
 pub mod constraints;
@@ -20,6 +21,7 @@ pub mod ui_wrapper;
 pub mod view;
 pub mod widget;
 
+pub use back_dispatcher::*;
 pub use component::*;
 pub use component_context::*;
 pub use constraints::Constraints;

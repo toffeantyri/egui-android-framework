@@ -11,6 +11,7 @@ use egui_android_framework::{
     },
 };
 
+
 use crate::root_component::RootMsg;
 
 /// Экран демонстрации тем.
@@ -110,8 +111,8 @@ impl ThemesScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
-                    .render(ui, dispatch);
-            });
+                                        .modifier(Modifier::new().fill_max_width().padding(8.0))
+                                        .render(ui, dispatch);
+                                });
     }
 }
