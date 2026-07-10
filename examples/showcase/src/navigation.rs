@@ -25,6 +25,8 @@ pub enum Route {
     NestedA,
     NestedB,
     NestedC,
+    /// Кастомная обработка Back: меняет цвет фона вместо pop.
+    BackCustom,
 }
 
 impl Route {
@@ -43,6 +45,7 @@ impl Route {
             Route::NestedA => "Nested A",
             Route::NestedB => "Nested B",
             Route::NestedC => "Nested C",
+            Route::BackCustom => "Кастомный Back",
         }
     }
 
@@ -61,6 +64,7 @@ impl Route {
             Route::NestedA => "Первый вложенный экран",
             Route::NestedB => "Второй вложенный экран",
             Route::NestedC => "Третий вложенный экран",
+            Route::BackCustom => "Back переключает цвет фона",
         }
     }
 }

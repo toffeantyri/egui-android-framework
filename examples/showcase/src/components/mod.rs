@@ -13,9 +13,9 @@ use egui_android_framework::runtime::Dispatcher;
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::{
-    animations::AnimationsScreen, containers::ContainersScreen, home::HomeScreen,
-    modifier_value::ModifierValueScreen, modifiers::ModifiersScreen, nested::NestedScreen,
-    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
+    animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
+    home::HomeScreen, modifier_value::ModifierValueScreen, modifiers::ModifiersScreen,
+    nested::NestedScreen, state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
 };
 
 /// Единый enum для всех экранов.
@@ -29,6 +29,7 @@ pub enum ScreenComponent {
     Animations(AnimationsScreen),
     ModifierValue(ModifierValueScreen),
     Nested(NestedScreen),
+    BackCustom(BackCustomScreen),
 }
 
 impl ScreenComponent {
@@ -54,6 +55,7 @@ impl ScreenComponent {
             Route::NestedA | Route::NestedB | Route::NestedC => {
                 panic!("NestedA/B/C создаются через NestedScreen::push_sub, а не напрямую")
             }
+            Route::BackCustom => Self::BackCustom(BackCustomScreen::new()),
         }
     }
 
@@ -76,6 +78,7 @@ impl ScreenComponent {
             Self::Animations(s) => s.render(ui, dispatch),
             Self::ModifierValue(s) => s.render(ui, dispatch),
             Self::Nested(s) => s.render(ui, dispatch),
+            Self::BackCustom(s) => s.render(ui, dispatch),
         }
     }
 
@@ -83,6 +86,14 @@ impl ScreenComponent {
     pub fn as_nested_mut(&mut self) -> Option<&mut NestedScreen> {
         match self {
             Self::Nested(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Получить мутабельную ссылку на BackCustomScreen, если это он.
+    pub fn as_back_custom_mut(&mut self) -> Option<&mut BackCustomScreen> {
+        match self {
+            Self::BackCustom(s) => Some(s),
             _ => None,
         }
     }

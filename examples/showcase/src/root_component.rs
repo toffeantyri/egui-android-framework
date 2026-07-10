@@ -1,12 +1,12 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
 //!
 //! Обработка Back:
-//! - Если активный компонент — NestedScreen, сначала пробуем его
-//!   `handle_back()`. Если он вернул true (pop внутри вложенного стека) —
-//!   Back перехвачен.
+//! - Если активный компонент — BackCustomScreen, сначала пробуем его
+//!   `handle_back()` (кастомная логика — переключение цвета).
+//! - Если активный компонент — NestedScreen, затем пробуем его
+//!   `handle_back()` (pop из вложенного стека).
 //! - Затем `ComponentContext::on_back()` → `back_fallback` (pop из корневого
 //!   ChildStack или завершение).
-//! - После on_back() проверяем стек — если пуст, завершаем приложение.
 //!
 //! Системный Back (platform-android) и UI Back (кнопка "← Назад")
 //! идут через один путь.
@@ -115,22 +115,31 @@ impl RootComponent {
 
     /// Обработать Back.
     ///
-    /// 1. Если активный компонент — NestedScreen, пробуем handle_back()
-    ///    (pop из вложенного стека). Если он вернул true — Back перехвачен.
-    /// 2. Иначе — ComponentContext::on_back() → back_fallback:
+    /// 1. BackCustomScreen::handle_back() — кастомная логика (переключение цвета).
+    /// 2. NestedScreen::handle_back() — pop из вложенного стека.
+    /// 3. ComponentContext::on_back() → back_fallback:
     ///    - если стек > 1 → pop (возврат на предыдущий экран)
     ///    - если стек = 1 (Home) → false (завершаем приложение)
     ///    - если стек = 0 → false (не должно быть)
-    /// 3. После on_back(): если стек пуст — завершаем приложение.
+    /// 4. После on_back(): если стек пуст — завершаем приложение.
     pub fn on_back(&mut self) {
         log::info!(
             "RootComponent::on_back: start, stack.len={}",
             self.stack.len()
         );
 
-        // Шаг 1: если активный компонент — NestedScreen, даём ему шанс перехватить
+        // Шаг 1: если активный компонент имеет кастомную обработку Back — пробуем её.
+        // Сначала BackCustomScreen (приоритетная кастомная логика),
+        // затем NestedScreen (pop из вложенного стека).
+        if let Some(custom) = self.stack.active_mut().and_then(|c| c.as_back_custom_mut()) {
+            if custom.handle_back() {
+                log::info!(
+                    "RootComponent::on_back: BackCustomScreen перехватил Back (кастомная логика)"
+                );
+                return;
+            }
+        }
         if let Some(nested) = self.stack.active_mut().and_then(|c| c.as_nested_mut()) {
-            log::info!("RootComponent::on_back: активный компонент — NestedScreen");
             if nested.handle_back() {
                 log::info!("RootComponent::on_back: NestedScreen перехватил Back (pop из вложенного стека)");
                 return;

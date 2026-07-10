@@ -31,6 +31,7 @@ impl HomeScreen {
             Route::Animations,
             Route::ModifierValue,
             Route::Nested,
+            Route::BackCustom,
         ];
 
         Column::new()
