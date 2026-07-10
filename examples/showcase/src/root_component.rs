@@ -1,9 +1,11 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
 //!
 //! Обработка Back:
-//! - `ComponentContext::on_back()` — единая точка входа.
-//! - Сначала `BackDispatcher` (NestedScreen может перехватить).
-//! - Затем `back_fallback` (pop из ChildStack).
+//! - Если активный компонент — NestedScreen, сначала пробуем его
+//!   `handle_back()`. Если он вернул true (pop внутри вложенного стека) —
+//!   Back перехвачен.
+//! - Затем `ComponentContext::on_back()` → `back_fallback` (pop из корневого
+//!   ChildStack или завершение).
 //! - После on_back() проверяем стек — если пуст, завершаем приложение.
 //!
 //! Системный Back (platform-android) и UI Back (кнопка "← Назад")
@@ -32,8 +34,13 @@ pub enum RootMsg {
 }
 
 /// Корневой компонент с навигацией.
+///
+/// Хранит ChildStack в `Box`, чтобы указатель оставался стабильным
+/// при перемещении RootComponent (из `new()` в поле Application).
+/// `back_fallback` держит raw pointer на этот Box.
 pub struct RootComponent {
-    pub stack: ChildStack<Route, ScreenComponent>,
+    /// Корневой стек навигации. Box для стабильности указателя в back_fallback.
+    pub stack: Box<ChildStack<Route, ScreenComponent>>,
     store: StateStore<AppState>,
     /// Контекст компонента — центр навигации и обработки Back.
     pub context: ComponentContext<RootMsg, (), AppState>,
@@ -41,52 +48,62 @@ pub struct RootComponent {
 
 impl RootComponent {
     pub fn new(store: StateStore<AppState>) -> Self {
-        let mut stack = ChildStack::new();
-        let home = ScreenComponent::home();
-        stack.push(Route::Home, home);
-
-        // Создаём контекст без навигационного канала (root)
-        // и без data_cmd (пока не используется)
         let (nav_tx, _nav_rx) = std::sync::mpsc::channel();
         let ctx = ComponentContext::new(None, nav_tx, store.clone_state());
 
-        Self {
+        let stack = Box::new(ChildStack::new());
+
+        let mut instance = Self {
             stack,
             store,
             context: ctx,
-        }
-    }
+        };
 
-    /// Настроить контекст: установить back_fallback.
-    /// Вызывается после создания, т.к. back_fallback замыкается на self.
-    pub fn setup_context(&mut self) {
-        // Используем raw pointer для stack.
+        // Добавляем Home в корневой стек
+        let home = ScreenComponent::home();
+        instance.stack.push(Route::Home, home);
+
+        // Устанавливаем back_fallback.
+        // stack — Box, указатель на данные в куче стабилен при любых перемещениях Self.
         // finish_requested не трогаем из замыкания — проверяем стек после on_back().
         struct RawStack(*mut ChildStack<Route, ScreenComponent>);
         unsafe impl Send for RawStack {}
 
-        let raw = Box::new(RawStack(&mut self.stack as *mut _));
+        let ptr = &mut *instance.stack as *mut ChildStack<Route, ScreenComponent>;
+        let raw = Box::new(RawStack(ptr));
         let mut raw = Some(raw);
 
         let callback: Box<dyn FnMut() -> bool + Send> = Box::new(move || {
             let raw = raw.as_mut().unwrap();
             let stack = unsafe { &mut *raw.0 };
 
+            log::info!(
+                "back_fallback: stack.len={}, is_empty={}",
+                stack.len(),
+                stack.is_empty()
+            );
+
             if stack.is_empty() {
+                log::info!("back_fallback: стек пуст — возвращаем false");
                 return false;
             }
 
             if stack.len() == 1 {
                 // Не делаем pop — на Home Back означает завершение.
                 // finish_requested установит RootComponent после on_back().
+                log::info!("back_fallback: только Home — возвращаем false");
                 return false;
             }
 
+            log::info!("back_fallback: делаем pop из корневого стека");
             stack.pop();
+            log::info!("back_fallback: pop выполнен, stack.len={}", stack.len());
             true
         });
 
-        self.context.back_fallback = Some(callback);
+        instance.context.back_fallback = Some(callback);
+
+        instance
     }
 
     pub fn sync_from_store(&mut self) {
@@ -96,15 +113,54 @@ impl RootComponent {
         }
     }
 
-    /// Обработать Back через ComponentContext и проверить стек.
+    /// Обработать Back.
+    ///
+    /// 1. Если активный компонент — NestedScreen, пробуем handle_back()
+    ///    (pop из вложенного стека). Если он вернул true — Back перехвачен.
+    /// 2. Иначе — ComponentContext::on_back() → back_fallback:
+    ///    - если стек > 1 → pop (возврат на предыдущий экран)
+    ///    - если стек = 1 (Home) → false (завершаем приложение)
+    ///    - если стек = 0 → false (не должно быть)
+    /// 3. После on_back(): если стек пуст — завершаем приложение.
     pub fn on_back(&mut self) {
-        self.context.on_back();
+        log::info!(
+            "RootComponent::on_back: start, stack.len={}",
+            self.stack.len()
+        );
 
-        // Если стек пуст или остался только Home — завершаем приложение
-        if self.stack.is_empty() || self.stack.len() == 1 {
-            log::info!("RootComponent: стек пуст или Home — завершение приложения");
+        // Шаг 1: если активный компонент — NestedScreen, даём ему шанс перехватить
+        if let Some(nested) = self.stack.active_mut().and_then(|c| c.as_nested_mut()) {
+            log::info!("RootComponent::on_back: активный компонент — NestedScreen");
+            if nested.handle_back() {
+                log::info!("RootComponent::on_back: NestedScreen перехватил Back (pop из вложенного стека)");
+                return;
+            }
+            log::info!("RootComponent::on_back: NestedScreen НЕ перехватил, вложенный стек пуст");
+        }
+
+        // Шаг 2: BackDispatcher + back_fallback (pop из корневого стека)
+        let len_before = self.stack.len();
+        log::info!("RootComponent::on_back: вызываем context.on_back()");
+        let handled = self.context.on_back();
+        log::info!(
+            "RootComponent::on_back: после context.on_back(), stack.len={}, handled={}",
+            self.stack.len(),
+            handled
+        );
+
+        // Шаг 3: если стек не изменился и Back не обработан — значит Home, завершаем.
+        // Если стек стал пуст после pop — тоже завершаем.
+        if self.stack.is_empty() || (!handled && self.stack.len() == len_before) {
+            log::info!(
+                "RootComponent: завершение приложения (стек пуст или Home не обработал Back)"
+            );
             self.context.finish_requested = true;
         }
+
+        log::info!(
+            "RootComponent::on_back: end, finish_requested={}",
+            self.context.finish_requested
+        );
     }
 }
 
@@ -134,12 +190,10 @@ impl Component for RootComponent {
                         return;
                     }
                 }
-                // Nested требует ComponentContext для регистрации BackCallback
-                let component = if route == Route::Nested {
-                    ScreenComponent::from_route_with_ctx(&route, &mut self.context)
-                } else {
-                    ScreenComponent::from_route(&route)
-                };
+                // Создаём компонент по маршруту.
+                // NestedScreen больше не регистрирует callback в BackDispatcher —
+                // обработка Back идёт через прямой вызов handle_back() из on_back().
+                let component = ScreenComponent::from_route(&route);
                 self.stack.push(route, component);
             }
             RootMsg::Back => {

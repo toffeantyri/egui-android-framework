@@ -3,15 +3,13 @@
 //! Каждый экран — это структура, которая реализует простой render-метод,
 //! получая `Dispatcher<RootMsg>` для навигации и управления.
 //!
-//! # Передача ComponentContext
-//!
-//! Экран, которому нужен доступ к BackDispatcher (например, NestedScreen),
-//! получает `ComponentContext` при создании через `from_route_with_ctx()`.
+//! Создание экранов — через `from_route()`.
+//! NestedScreen не требует BackDispatcher — обработка Back идёт через
+//! прямой вызов `handle_back()` из RootComponent::on_back().
 
-use egui_android_framework::core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{Component, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 
-use crate::app::AppState;
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::{
@@ -39,36 +37,7 @@ impl ScreenComponent {
         Self::Home(HomeScreen::new())
     }
 
-    /// Создать экран по маршруту с контекстом.
-    ///
-    /// Передаёт `ComponentContext` экранам, которым нужен BackDispatcher
-    /// (NestedScreen). Остальные экраны не используют контекст.
-    pub fn from_route_with_ctx(
-        route: &Route,
-        ctx: &mut ComponentContext<RootMsg, (), AppState>,
-    ) -> Self {
-        match route {
-            Route::Home => Self::home(),
-            Route::Widgets => Self::Widgets(WidgetsScreen::new()),
-            Route::Modifiers => Self::Modifiers(ModifiersScreen::new()),
-            Route::Containers => Self::Containers(ContainersScreen::new()),
-            Route::Themes => Self::Themes(ThemesScreen::new()),
-            Route::State => Self::StateRef(StateScreen::new()),
-            Route::Animations => Self::Animations(AnimationsScreen::new()),
-            Route::ModifierValue => Self::ModifierValue(ModifierValueScreen::new()),
-            Route::Nested => Self::Nested(NestedScreen::new(ctx)),
-            // NestedA/B/C — нельзя создать без контекста NestedScreen;
-            // создаются через push_sub внутри NestedScreen
-            Route::NestedA | Route::NestedB | Route::NestedC => {
-                panic!("NestedA/B/C создаются через NestedScreen::push_sub, а не напрямую")
-            }
-        }
-    }
-
-    /// Создать экран по маршруту (без контекста).
-    ///
-    /// Используется для экранов без вложенной навигации.
-    /// Для Nested экранов используйте `from_route_with_ctx()`.
+    /// Создать экран по маршруту.
     pub fn from_route(route: &Route) -> Self {
         match route {
             Route::Home => Self::home(),
@@ -79,11 +48,11 @@ impl ScreenComponent {
             Route::State => Self::StateRef(StateScreen::new()),
             Route::Animations => Self::Animations(AnimationsScreen::new()),
             Route::ModifierValue => Self::ModifierValue(ModifierValueScreen::new()),
-            Route::Nested => {
-                panic!("Nested требует ComponentContext — используйте from_route_with_ctx()")
-            }
+            Route::Nested => Self::Nested(NestedScreen::new()),
+            // NestedA/B/C — нельзя создать без контекста NestedScreen;
+            // создаются через push_sub внутри NestedScreen
             Route::NestedA | Route::NestedB | Route::NestedC => {
-                panic!("NestedA/B/C создаются через NestedScreen::push_sub")
+                panic!("NestedA/B/C создаются через NestedScreen::push_sub, а не напрямую")
             }
         }
     }

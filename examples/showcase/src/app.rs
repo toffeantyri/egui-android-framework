@@ -45,8 +45,7 @@ impl Application for ShowcaseApplication {
         });
         let (_notify_tx, notify_rx) = mpsc::channel::<()>();
 
-        let mut root = RootComponent::new(store.clone_state());
-        root.setup_context();
+        let root = RootComponent::new(store.clone_state());
 
         Self {
             root,

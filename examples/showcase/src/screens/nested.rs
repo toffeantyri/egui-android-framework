@@ -1,14 +1,14 @@
 //! NestedScreen — экран с вложенной навигацией (ChildStack внутри).
 //!
-//! Демонстрирует обработку BackPressed через BackDispatcher.
-//! При создании принимает ComponentContext и регистрирует callback
-//! в BackDispatcher для обработки Back во вложенном стеке.
+//! Обработка Back идёт через прямой вызов `handle_back()` из
+//! `RootComponent::on_back()`, а не через BackDispatcher, чтобы избежать
+//! проблем с временем жизни raw pointer (callback в BackDispatcher переживает
+//! NestedScreen при pop из корневого стека, что приводит к SIGSEGV).
 //!
 //! - если есть вложенный экран → pop внутри (Handled)
 //! - если нет → NotHandled (Root делает pop)
 
 use egui_android_framework::{
-    core::{BackCallback, ComponentContext},
     navigation::ChildStack,
     runtime::Dispatcher,
     ui::{
@@ -19,65 +19,41 @@ use egui_android_framework::{
     },
 };
 
+use log;
+
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::nested_sub::NestedSubScreen;
 
 /// Экран с вложенной навигацией.
+///
+/// Обработка Back — через прямой вызов `handle_back()` из RootComponent.
+/// Не использует BackDispatcher, поэтому нет unsafe указателей.
 pub struct NestedScreen {
     /// Вложенный стек: Route — ключ, NestedSubScreen — компонент.
-    stack: ChildStack<Route, NestedSubScreen>,
-}
-
-/// Оборачивает `*mut ChildStack` в тип, реализующий `Send`.
-///
-/// Используется для передачи сырого указателя во вложение BackCallback.
-/// SAFETY: указатель корректен, пока жив родительский NestedScreen.
-struct RawStack(*mut ChildStack<Route, NestedSubScreen>);
-unsafe impl Send for RawStack {}
-
-impl RawStack {
-    fn make_callback(self) -> Box<dyn FnMut() -> bool + Send + 'static> {
-        // Мы уже реализовали Send для RawStack.
-        // Сохраняем RawStack в Box, чтобы closure захватывал
-        // опосредованно, а не напрямую `*mut`, который !Send.
-        let inner = Box::new(self);
-        Box::new(move || {
-            let stack = unsafe { &mut *inner.0 };
-            if stack.is_empty() {
-                false
-            } else {
-                stack.pop();
-                true
-            }
-        })
-    }
+    pub stack: ChildStack<Route, NestedSubScreen>,
 }
 
 impl NestedScreen {
-    /// Создать NestedScreen и зарегистрировать обработчик Back.
-    ///
-    /// Принимает `ComponentContext` чтобы зарегистрировать callback
-    /// в BackDispatcher. Callback перехватывает Back если вложенный
-    /// стек не пуст — делает pop внутри.
-    pub fn new(ctx: &mut ComponentContext<RootMsg, (), crate::app::AppState>) -> Self {
-        let stack = ChildStack::new();
+    pub fn new() -> Self {
+        Self {
+            stack: ChildStack::new(),
+        }
+    }
 
-        // Регистрируем callback в BackDispatcher ДО создания Self,
-        // чтобы избежать borrow conflict.
-        // SAFETY: callback живёт пока жив NestedScreen.
-        // Вызывается только из ComponentContext::on_back().
-        let raw_stack = RawStack(
-            &stack as *const ChildStack<Route, NestedSubScreen>
-                as *mut ChildStack<Route, NestedSubScreen>,
+    /// Обработать BackPressed — вызывается из RootComponent::on_back().
+    /// Возвращает true если Back обработан (pop внутри вложенного стека), false если нет.
+    pub fn handle_back(&mut self) -> bool {
+        log::info!(
+            "NestedScreen::handle_back: stack.is_empty={}",
+            self.stack.is_empty()
         );
-
-        ctx.back_dispatcher.register(BackCallback {
-            priority: 50,
-            handler: raw_stack.make_callback(),
-        });
-
-        Self { stack }
+        if self.stack.is_empty() {
+            return false;
+        }
+        self.stack.pop();
+        log::info!("NestedScreen::handle_back: pop выполнен");
+        true
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
