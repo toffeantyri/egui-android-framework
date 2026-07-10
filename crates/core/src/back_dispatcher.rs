@@ -6,7 +6,16 @@
 //! При нажатии Back обработчики вызываются от высокого приоритета к низкому.
 //! Первый, кто вернул `true`, перехватывает Back.
 //! Если никто не перехватил — `handle()` возвращает `false`, и вызывающий
-//! (обычно ChildStack) делает `pop()`.
+//! решает, что делать (pop из ChildStack или завершение приложения).
+
+/// Результат обработки BackPressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackHandling {
+    /// Компонент обработал Back сам — не делать pop.
+    Handled,
+    /// Компонент не обработал — можно делать pop.
+    NotHandled,
+}
 
 /// Callback для обработки Back.
 ///
@@ -21,7 +30,8 @@ pub struct BackCallback {
     /// - 0 — системное поведение (pop)
     pub priority: u32,
     /// Обработчик Back. Получает `()`, возвращает `bool`.
-    pub handler: Box<dyn FnMut() -> bool>,
+    /// Должен быть `Send` так как BackDispatcher используется в Component: Send.
+    pub handler: Box<dyn FnMut() -> bool + Send>,
 }
 
 impl std::fmt::Debug for BackCallback {

@@ -21,7 +21,7 @@ pub mod ui_wrapper;
 pub mod view;
 pub mod widget;
 
-pub use back_dispatcher::*;
+pub use back_dispatcher::{BackCallback, BackDispatcher, BackHandling};
 pub use component::*;
 pub use component_context::*;
 pub use constraints::Constraints;

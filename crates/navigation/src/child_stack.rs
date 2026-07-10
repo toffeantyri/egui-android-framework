@@ -8,15 +8,6 @@
 
 use egui_android_core::Component;
 
-/// Результат обработки BackPressed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackHandling {
-    /// Компонент обработал Back сам — не делать pop.
-    Handled,
-    /// Компонент не обработал — можно делать pop.
-    NotHandled,
-}
-
 /// Стек дочерних компонентов.
 ///
 /// # Параметры типа
@@ -141,21 +132,6 @@ where
     pub fn active_mut(&mut self) -> Option<&mut Comp> {
         let idx = self.items.len().checked_sub(1)?;
         Some(&mut self.items[idx].component)
-    }
-
-    /// Обработать BackPressed.
-    ///
-    /// Логика как в Decompose:
-    /// 1. Стек пуст → `NotHandled` (вызывающий решает).
-    /// 2. Есть элемент → делаем `pop()`, возвращаем `Handled`.
-    ///    Если компонент хочет перехватить Back, он регистрирует
-    ///    callback в BackDispatcher через ComponentContext.
-    pub fn on_back(&mut self) -> BackHandling {
-        if self.items.is_empty() {
-            return BackHandling::NotHandled;
-        }
-        self.pop();
-        BackHandling::Handled
     }
 
     /// Получить конфигурацию активного компонента.

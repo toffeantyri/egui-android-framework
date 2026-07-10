@@ -9,4 +9,4 @@
 
 pub mod child_stack;
 
-pub use child_stack::*;
+pub use child_stack::ChildStack;

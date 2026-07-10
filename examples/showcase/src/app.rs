@@ -45,7 +45,8 @@ impl Application for ShowcaseApplication {
         });
         let (_notify_tx, notify_rx) = mpsc::channel::<()>();
 
-        let root = RootComponent::new(store.clone_state());
+        let mut root = RootComponent::new(store.clone_state());
+        root.setup_context();
 
         Self {
             root,
@@ -80,12 +81,12 @@ impl Application for ShowcaseApplication {
     }
 
     fn on_back_pressed(&mut self) {
-        log::info!("ShowcaseApplication: on_back_pressed");
-        self.root.handle_back();
+        log::info!("ShowcaseApplication: on_back_pressed (через ComponentContext)");
+        self.root.on_back();
     }
 
     fn request_destroy(&mut self) -> bool {
-        self.root.is_destroy_requested()
+        self.root.context.finish_requested
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {

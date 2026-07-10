@@ -1,17 +1,17 @@
 //! RootComponent — корневой компонент с ChildStack и навигацией.
 //!
 //! Обработка Back:
-//! - Системный Back (платформенная кнопка) → `BackDispatcher.handle()`
-//!   → зарегистрированные callback'и (NestedScreen, диалоги)
-//!   → если никто не обработал → `pop()` из ChildStack
-//! - UI Back (кнопка "← Назад") → `RootMsg::Back` → `handle(RootMsg::Back)`
-//!   → проверяет BackDispatcher → если никто не обработал → `pop()`
+//! - `ComponentContext::on_back()` — единая точка входа.
+//! - Сначала `BackDispatcher` (NestedScreen может перехватить).
+//! - Затем `back_fallback` (pop из ChildStack).
+//! - После on_back() проверяем стек — если пуст, завершаем приложение.
 //!
-//! Единый путь: все Back сначала проходят через BackDispatcher.
+//! Системный Back (platform-android) и UI Back (кнопка "← Назад")
+//! идут через один путь.
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver, UiWrapper},
-    navigation::{BackHandling, ChildStack},
+    core::{Component, ComponentContext, LifecycleObserver, UiWrapper},
+    navigation::ChildStack,
     runtime::Dispatcher,
     runtime::StateStore,
 };
@@ -35,8 +35,8 @@ pub enum RootMsg {
 pub struct RootComponent {
     pub stack: ChildStack<Route, ScreenComponent>,
     store: StateStore<AppState>,
-    /// Флаг: запрошено завершение приложения (стек пуст).
-    destroy_requested: bool,
+    /// Контекст компонента — центр навигации и обработки Back.
+    pub context: ComponentContext<RootMsg, (), AppState>,
 }
 
 impl RootComponent {
@@ -45,11 +45,48 @@ impl RootComponent {
         let home = ScreenComponent::home();
         stack.push(Route::Home, home);
 
+        // Создаём контекст без навигационного канала (root)
+        // и без data_cmd (пока не используется)
+        let (nav_tx, _nav_rx) = std::sync::mpsc::channel();
+        let ctx = ComponentContext::new(None, nav_tx, store.clone_state());
+
         Self {
             stack,
             store,
-            destroy_requested: false,
+            context: ctx,
         }
+    }
+
+    /// Настроить контекст: установить back_fallback.
+    /// Вызывается после создания, т.к. back_fallback замыкается на self.
+    pub fn setup_context(&mut self) {
+        // Используем raw pointer для stack.
+        // finish_requested не трогаем из замыкания — проверяем стек после on_back().
+        struct RawStack(*mut ChildStack<Route, ScreenComponent>);
+        unsafe impl Send for RawStack {}
+
+        let raw = Box::new(RawStack(&mut self.stack as *mut _));
+        let mut raw = Some(raw);
+
+        let callback: Box<dyn FnMut() -> bool + Send> = Box::new(move || {
+            let raw = raw.as_mut().unwrap();
+            let stack = unsafe { &mut *raw.0 };
+
+            if stack.is_empty() {
+                return false;
+            }
+
+            if stack.len() == 1 {
+                // Не делаем pop — на Home Back означает завершение.
+                // finish_requested установит RootComponent после on_back().
+                return false;
+            }
+
+            stack.pop();
+            true
+        });
+
+        self.context.back_fallback = Some(callback);
     }
 
     pub fn sync_from_store(&mut self) {
@@ -59,38 +96,14 @@ impl RootComponent {
         }
     }
 
-    /// Получить флаг завершения.
-    pub fn is_destroy_requested(&self) -> bool {
-        self.destroy_requested
-    }
+    /// Обработать Back через ComponentContext и проверить стек.
+    pub fn on_back(&mut self) {
+        self.context.on_back();
 
-    /// Обработать системную кнопку Back.
-    ///
-    /// Сначала проверяет активный компонент (NestedScreen, диалоги).
-    /// Если компонент не перехватил Back:
-    /// - Если стек пуст → ignore (не должно происходить)
-    /// - Если в стеке 1 элемент (Home) → завершение приложения
-    /// - Если в стеке > 1 элементов → pop
-    pub fn handle_back(&mut self) {
-        if self.stack.is_empty() {
-            return;
-        }
-
-        // Проверяем активный компонент (NestedScreen может перехватить)
-        let handled = self
-            .stack
-            .active_mut()
-            .map(|c| c.handle_back())
-            .unwrap_or(BackHandling::NotHandled);
-
-        if handled == BackHandling::NotHandled {
-            if self.stack.len() == 1 {
-                // Home — последний экран, завершаем приложение
-                log::info!("RootComponent: Back на Home — завершение приложения");
-                self.destroy_requested = true;
-            } else {
-                self.stack.pop();
-            }
+        // Если стек пуст или остался только Home — завершаем приложение
+        if self.stack.is_empty() || self.stack.len() == 1 {
+            log::info!("RootComponent: стек пуст или Home — завершение приложения");
+            self.context.finish_requested = true;
         }
     }
 }
@@ -121,13 +134,17 @@ impl Component for RootComponent {
                         return;
                     }
                 }
-                let component = ScreenComponent::from_route(&route);
+                // Nested требует ComponentContext для регистрации BackCallback
+                let component = if route == Route::Nested {
+                    ScreenComponent::from_route_with_ctx(&route, &mut self.context)
+                } else {
+                    ScreenComponent::from_route(&route)
+                };
                 self.stack.push(route, component);
             }
             RootMsg::Back => {
-                // UI-кнопка назад: сначала проверяем активный компонент
-                // Для единообразия используем ту же логику, что и системный Back
-                self.handle_back();
+                // UI-кнопка назад — через ComponentContext (единый путь)
+                self.on_back();
             }
             RootMsg::ToggleTheme => {
                 self.store.update(|s| s.is_dark_mode = !s.is_dark_mode);
@@ -136,8 +153,6 @@ impl Component for RootComponent {
     }
 
     fn state(&self) -> &Self::State {
-        // state() не используется напрямую для RootComponent
-        // is_dark_mode передаётся через sync_from_store
         panic!("state() не поддерживается для RootComponent")
     }
 }

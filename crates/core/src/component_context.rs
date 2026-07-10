@@ -1,11 +1,22 @@
 //! Контекст компонента — [`ComponentContext`].
 //!
 //! Передаётся в компонент при создании и предоставляет:
-//! - Навигационный handle (push/pop/replace родительского стека).
+//! - BackDispatcher для регистрации обработчиков Back.
+//! - Fallback-callback (on_back_fallback) для pop из ChildStack или завершения.
 //! - Data layer handle (для отправки команд).
 //! - Доступ к [`StateStore`] для реактивного получения состояния.
 //!
 //! Каналы реализованы через стандартный `std::sync::mpsc`.
+//!
+//! # Обработка Back
+//!
+//! `ComponentContext::on_back()` — единая точка входа для Back:
+//! 1. Вызывает `back_dispatcher.handle()` (диалоги, nested stacks).
+//! 2. Если никто не обработал → вызывает `back_fallback` (pop/finish).
+//! 3. Если нет fallback → возвращает `false`.
+//!
+//! Системный Back (из platform-android) и UI Back (кнопка "← Назад")
+//! идут через один и тот же путь — `on_back()`.
 
 use crate::back_dispatcher::BackDispatcher;
 use egui_android_runtime::StateStore;
@@ -37,6 +48,19 @@ where
     alive: bool,
     /// BackDispatcher для регистрации обработчиков Back.
     pub back_dispatcher: BackDispatcher,
+    /// Fallback при Back, когда BackDispatcher не обработал.
+    ///
+    /// Устанавливается владельцем ChildStack (RootComponent, NestedScreen).
+    /// Вызывается из `on_back()` если `back_dispatcher.handle()` вернул `false`.
+    /// Возвращает `true` если Back обработан (pop сделан), `false` если нет.
+    ///
+    /// Должен быть `Send` так как `ComponentContext` используется в `Component: Send`.
+    pub back_fallback: Option<Box<dyn FnMut() -> bool + Send>>,
+    /// Флаг: запрошено завершение приложения (стек навигации пуст).
+    ///
+    /// Устанавливается `back_fallback-ом` когда ChildStack пуст.
+    /// Читается `Application::request_destroy()`.
+    pub finish_requested: bool,
 }
 
 impl<NavEvent, DataCmd, State> ComponentContext<NavEvent, DataCmd, State>
@@ -60,16 +84,29 @@ where
             store,
             alive: true,
             back_dispatcher: BackDispatcher::new(),
+            back_fallback: None,
+            finish_requested: false,
         }
     }
 
-    /// Обработать системную кнопку Back через BackDispatcher.
+    /// Обработать Back — единая точка входа.
     ///
-    /// Вызывает зарегистрированные обработчики от высокого приоритета к низкому.
-    /// Если хотя бы один вернул `true` — Back обработан.
+    /// 1. Вызывает `back_dispatcher.handle()` — зарегистрированные callback'и
+    ///    (диалоги, nested stacks) от высокого приоритета к низшему.
+    /// 2. Если никто не обработал → вызывает `back_fallback` (pop/finish).
+    /// 3. Если нет fallback → возвращает `false`.
+    ///
     /// Возвращает `true`, если Back обработан.
-    pub fn handle_back(&mut self) -> bool {
-        self.back_dispatcher.handle()
+    pub fn on_back(&mut self) -> bool {
+        if self.back_dispatcher.handle() {
+            return true;
+        }
+
+        if let Some(ref mut fallback) = self.back_fallback {
+            return fallback();
+        }
+
+        false
     }
 
     /// Отправить навигационное событие родителю (push/pop/replace).
