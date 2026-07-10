@@ -11,4 +11,4 @@ description = "UI layer — remember, builders, modifiers"
 egui = { workspace = true }
 log = { workspace = true }
 
-egui-android-core = { version = "0.3.2-alpha.1", path = "../core" }
+egui-android-core = { version = "0.3.3-alpha.1", path = "../core" }

@@ -216,7 +216,8 @@ Message = и событие, и семантика
 ### `ChildStack<C, Comp>` — `egui-android-navigation`
 - Стек дочерних компонентов с управлением жизненным циклом.
 - `push / pop / replace / bring_to_front / clear`.
-- `on_back() -> BackHandling` — обработка BackPressed (pop если не пуст).
+- `pop()` возвращает `Option<(C, Comp)>` — `None` если стек пуст.
+- При push/pop/replace вызываются lifecycle-методы компонентов (on_create, on_destroy).
 - Аналог `ChildStack` из Decompose.
 
 ### `BackDispatcher`, `BackCallback` — `egui-android-core`
@@ -224,7 +225,10 @@ Message = и событие, и семантика
 - `BackDispatcher::register(callback)` — зарегистрировать обработчик с приоритетом.
 - `BackDispatcher::handle() -> bool` — вызвать обработчики от высокого приоритета к низкому.
 - `BackCallback { priority, handler: Box<dyn FnMut() -> bool> }` — callback, true = Back перехвачен.
-- Приоритеты: 100 — диалоги, 50 — вложенные стеки, 10 — компонент, 0 — системное поведение.
+- Приоритеты: 100 — диалоги, 10 — компонент, 0 — системное поведение.
+- **Внимание:** callback в BackDispatcher может пережить зарегистрировавший его компонент.
+  Для экранов с кастомной обработкой Back используйте `handle_back()` через прямой вызов
+  из `RootComponent::on_back()`, без BackDispatcher.
 - Аналог `BackDispatcher` из Decompose.
 
 ### `UiWrapper` и `Constraints` — `egui-android-core`
@@ -348,6 +352,18 @@ if app_instance.request_destroy() {
 
 BackPressed обрабатывается по архитектуре Decompose: иерархический перехват с fallback на `pop()`.
 
+### ВАЖНО: Безопасность указателей
+
+`BackDispatcher` хранит callback'и, которые **переживают** зарегистрировавший их компонент.
+Если компонент уничтожается (pop из корневого ChildStack) — callback в BackDispatcher становится
+висячим указателем → **SIGSEGV**.
+
+**Правило:** Не регистрировать callback в BackDispatcher, если он ссылается на состояние компонента,
+которое может быть уничтожено раньше, чем callback будет вызван.
+
+Для экранов с кастомной обработкой Back используется **прямой вызов `handle_back()`**
+из `RootComponent::on_back()`, без BackDispatcher.
+
 ### Цепочка обработки
 
 ```
@@ -359,23 +375,53 @@ run.rs: app_instance.on_back_pressed()
   ↓
 Application::on_back_pressed()
   ↓
-RootComponent::handle_back()
-  ├── ScreenComponent::handle_back()
-  │   └── NestedScreen::handle_back()
-  │       ├── вложенный ChildStack не пуст → pop() → Handled
-  │       └── вложенный ChildStack пуст → NotHandled
-  ├── handled == NotHandled && стек = 1 (Home) → destroy_requested = true
-  └── handled == NotHandled && стек > 1 → pop() из Root ChildStack
+RootComponent::on_back()
+  ├── BackCustomScreen::handle_back()?
+  │   └── true → кастомная логика (переключение цвета)
+  ├── NestedScreen::handle_back()?
+  │   ├── вложенный ChildStack не пуст → pop() → true
+  │   └── вложенный ChildStack пуст → false
+  └── ComponentContext::on_back()
+      ├── BackDispatcher::handle()
+      │   └── зарегистрированные callback'и (диалоги, BottomSheet)
+      ├── back_fallback
+      │   ├── стек > 1 → pop() из Root ChildStack
+      │   └── стек = 1 (Home) → false (завершение приложения)
+      └── RootComponent проверяет: если стек не изменился и Back не обработан → завершение
+```
+
+### Как добавить экран с кастомной обработкой Back
+
+1. В структуре экрана реализовать метод `handle_back(&mut self) -> bool`
+2. Добавить вариант в `ScreenComponent` enum
+3. Добавить метод `as_*_mut()` в `ScreenComponent`
+4. В `RootComponent::on_back()` проверить активный компонент через `as_*_mut()`
+
+Пример — `BackCustomScreen` (переключает цвет фона при Back вместо pop):
+
+```rust,ignore
+pub struct BackCustomScreen {
+    bg: BgColor,
+}
+
+impl BackCustomScreen {
+    pub fn handle_back(&mut self) -> bool {
+        match self.bg {
+            BgColor::Blue => { self.bg = BgColor::Green; true }
+            BgColor::Green => false, // второй Back уходит на Root
+        }
+    }
+}
 ```
 
 ### Правила
 
 - **Platform не знает про Navigation** — только выставляет флаг `back_pressed`.
-- **Application не принимает решений** — только делегирует `RootComponent::handle_back()`.
+- **Application не принимает решений** — только делегирует `RootComponent::on_back()`.
 - **RootComponent решает** — проверить активный компонент, pop или завершение.
-- **Активный компонент (NestedScreen) может перехватить Back** — если есть вложенный стек.
+- **Активный компонент может перехватить Back** через `handle_back()`, вернув `true`.
 - **Home — последний экран** — Back на Home = завершение приложения (`destroy_requested = true`).
-- **UI-кнопка «← Назад»** — диспатчит `RootMsg::Back`, который вызывает `handle_back()` (тот же путь).
+- **UI-кнопка «← Назад»** — диспатчит `RootMsg::Back`, который вызывает `on_back()` (тот же путь).
 - **Не каналы** — ChildStack больше не содержит `back_handlers: Vec<Vec<mpsc::Sender<()>>>`.
   Только прямой вызов `handle_back()`.
 
@@ -386,6 +432,8 @@ RootComponent::handle_back()
 - `register(BackCallback { priority, handler })` — компонент регистрирует перехват.
 - `handle()` — вызывает от высокого приоритета к низкому.
 - Первый, кто вернул `true`, перехватывает Back.
+- **Внимание:** Не хранить в callback'ах ссылки на компоненты, которые могут быть уничтожены
+  раньше вызова callback'а. Для экранов использовать `handle_back()` напрямую.
 
 ## Android Lifecycle (как обрабатывается в platform-android)
 
@@ -482,7 +530,7 @@ loop {
 │
 └── examples/
     ├── counter/            — реактивный счётчик (Compose-like view)
-    └── showcase/           — витрина с навигацией (7 экранов)
+    └── showcase/           — витрина с навигацией (8 экранов)
 ```
 
 ## Зависимости (ключевые)

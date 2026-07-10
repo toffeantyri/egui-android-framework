@@ -19,8 +19,6 @@ use egui_android_framework::{
     },
 };
 
-use log;
-
 use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::nested_sub::NestedSubScreen;
@@ -44,15 +42,10 @@ impl NestedScreen {
     /// Обработать BackPressed — вызывается из RootComponent::on_back().
     /// Возвращает true если Back обработан (pop внутри вложенного стека), false если нет.
     pub fn handle_back(&mut self) -> bool {
-        log::info!(
-            "NestedScreen::handle_back: stack.is_empty={}",
-            self.stack.is_empty()
-        );
         if self.stack.is_empty() {
             return false;
         }
         self.stack.pop();
-        log::info!("NestedScreen::handle_back: pop выполнен");
         true
     }
 

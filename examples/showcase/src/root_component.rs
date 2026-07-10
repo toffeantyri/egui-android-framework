@@ -77,27 +77,15 @@ impl RootComponent {
             let raw = raw.as_mut().unwrap();
             let stack = unsafe { &mut *raw.0 };
 
-            log::info!(
-                "back_fallback: stack.len={}, is_empty={}",
-                stack.len(),
-                stack.is_empty()
-            );
-
             if stack.is_empty() {
-                log::info!("back_fallback: стек пуст — возвращаем false");
                 return false;
             }
 
             if stack.len() == 1 {
-                // Не делаем pop — на Home Back означает завершение.
-                // finish_requested установит RootComponent после on_back().
-                log::info!("back_fallback: только Home — возвращаем false");
                 return false;
             }
 
-            log::info!("back_fallback: делаем pop из корневого стека");
             stack.pop();
-            log::info!("back_fallback: pop выполнен, stack.len={}", stack.len());
             true
         });
 
@@ -123,53 +111,27 @@ impl RootComponent {
     ///    - если стек = 0 → false (не должно быть)
     /// 4. После on_back(): если стек пуст — завершаем приложение.
     pub fn on_back(&mut self) {
-        log::info!(
-            "RootComponent::on_back: start, stack.len={}",
-            self.stack.len()
-        );
-
-        // Шаг 1: если активный компонент имеет кастомную обработку Back — пробуем её.
-        // Сначала BackCustomScreen (приоритетная кастомная логика),
-        // затем NestedScreen (pop из вложенного стека).
+        // Шаг 1: BackCustomScreen — кастомная логика (переключение цвета)
         if let Some(custom) = self.stack.active_mut().and_then(|c| c.as_back_custom_mut()) {
             if custom.handle_back() {
-                log::info!(
-                    "RootComponent::on_back: BackCustomScreen перехватил Back (кастомная логика)"
-                );
                 return;
             }
         }
+        // Шаг 2: NestedScreen — pop из вложенного стека
         if let Some(nested) = self.stack.active_mut().and_then(|c| c.as_nested_mut()) {
             if nested.handle_back() {
-                log::info!("RootComponent::on_back: NestedScreen перехватил Back (pop из вложенного стека)");
                 return;
             }
-            log::info!("RootComponent::on_back: NestedScreen НЕ перехватил, вложенный стек пуст");
         }
 
-        // Шаг 2: BackDispatcher + back_fallback (pop из корневого стека)
+        // Шаг 3: BackDispatcher + back_fallback (pop из корневого стека или завершение)
         let len_before = self.stack.len();
-        log::info!("RootComponent::on_back: вызываем context.on_back()");
         let handled = self.context.on_back();
-        log::info!(
-            "RootComponent::on_back: после context.on_back(), stack.len={}, handled={}",
-            self.stack.len(),
-            handled
-        );
 
-        // Шаг 3: если стек не изменился и Back не обработан — значит Home, завершаем.
-        // Если стек стал пуст после pop — тоже завершаем.
+        // Шаг 4: если стек не изменился и Back не обработан — Home, завершаем.
         if self.stack.is_empty() || (!handled && self.stack.len() == len_before) {
-            log::info!(
-                "RootComponent: завершение приложения (стек пуст или Home не обработал Back)"
-            );
             self.context.finish_requested = true;
         }
-
-        log::info!(
-            "RootComponent::on_back: end, finish_requested={}",
-            self.context.finish_requested
-        );
     }
 }
 
