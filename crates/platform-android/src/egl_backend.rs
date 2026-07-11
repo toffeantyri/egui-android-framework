@@ -160,6 +160,31 @@ impl EglState {
         }
         log::info!("EGL initialized: {}.{}", major, minor);
 
+        // Устанавливаем формат буфера окна с альфа-каналом.
+        // По умолчанию ANativeWindow имеет WINDOW_FORMAT_RGBX_8888 (без альфы).
+        // Без этого glClear с alpha=0 не даст прозрачности.
+        log::info!("EglState::create: устанавливаем ANativeWindow формат RGBA_8888");
+        unsafe {
+            // ANativeWindow_setBuffersGeometry(window, width, height, format)
+            // WINDOW_FORMAT_RGBA_8888 = 1
+            type SetBuffersGeometry =
+                unsafe extern "C" fn(*mut std::ffi::c_void, i32, i32, i32) -> i32;
+            let func: SetBuffersGeometry = std::mem::transmute(libc::dlsym(
+                libc::RTLD_DEFAULT,
+                b"ANativeWindow_setBuffersGeometry\0".as_ptr() as *const libc::c_char,
+            ));
+            let result = func(
+                native_window.ptr().as_ptr() as *mut std::ffi::c_void,
+                0,
+                0,
+                1,
+            );
+            log::info!(
+                "EglState::create: ANativeWindow_setBuffersGeometry result = {} (0=ok)",
+                result
+            );
+        }
+
         // Выбираем конфиг: RGBA8888 + depth + stencil
         let attrib_list = [
             egl::EGL_SURFACE_TYPE,

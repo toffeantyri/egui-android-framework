@@ -16,6 +16,8 @@ pub mod egl_backend;
 pub mod input;
 pub mod insets;
 pub mod run;
+pub mod system_bars;
+pub mod theme;
 
 #[cfg(target_os = "android")]
 pub use run::run;

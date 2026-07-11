@@ -97,14 +97,32 @@ impl Application for ShowcaseApplication {
             MaterialTheme::light().apply(egui_ctx);
         }
 
+        // Обновляем цвета под системными барами в соответствии с темой
+        #[cfg(target_os = "android")]
+        {
+            let clear_color = if app_state.is_dark_mode {
+                0x1C_1B_1Fu32 // тёмный фон под барами
+            } else {
+                0xF5_F5_F5u32 // светлый фон под барами
+            };
+            egui_android_framework::platform_android::theme::set_clear_color(clear_color);
+        }
+
         self.root.sync_from_store();
 
         let (dispatcher, receiver) = Dispatcher::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.root.render(ui, &dispatcher);
-            });
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .inner_margin(egui::Margin::ZERO)
+                        .outer_margin(egui::Margin::ZERO),
+                )
+                .show(ctx, |ui| {
+                    self.root.render(ui, &dispatcher);
+                });
         });
 
         // Drain'им сообщения от View

@@ -35,6 +35,17 @@ pub fn run<A: Application>(app: AndroidApp) {
     app_instance.on_start();
     app_instance.on_resume();
 
+    // Устанавливаем прозрачные системные бары до начала цикла.
+    // Используем poll_events с MainEvent::InitWindow, чтобы дождаться окна.
+    // Первый InitWindow гарантированно придёт после on_resume.
+    let vm_ptr = app.vm_as_ptr() as usize;
+    let activity_ptr = app.activity_as_ptr() as usize;
+    app.run_on_java_main_thread(Box::new(move || {
+        let vm = vm_ptr as *mut std::ffi::c_void;
+        let activity = activity_ptr as *mut std::ffi::c_void;
+        crate::system_bars::set_transparent_system_bars(vm, activity);
+    }));
+
     let egui_ctx = egui::Context::default();
     let mut egl_state: Option<EglState> = None;
     let mut egui_painter: Option<egui_glow::Painter> = None;
@@ -69,6 +80,7 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                     // После создания окна запрашиваем insets через JNI на главном Java-потоке.
                     // В этот момент DecorView уже существует, getRootWindowInsets() вернёт корректные значения.
+                    // Системные бары уже установлены в начале run() — здесь только insets.
                     let vm_ptr = app.vm_as_ptr() as usize;
                     let activity_ptr = app.activity_as_ptr() as usize;
                     app.run_on_java_main_thread(Box::new(move || {
@@ -78,6 +90,16 @@ pub fn run<A: Application>(app: AndroidApp) {
                             crate::insets::store_insets(&insets);
                         } else {
                             log::warn!("JNI insets не получены — будет использован fallback");
+                        }
+
+                        // Определяем системную тему и сохраняем
+                        if let Some(theme) =
+                            crate::system_bars::detect_system_theme_jni(vm, activity)
+                        {
+                            crate::theme::init_system_theme(theme);
+                            log::info!("Системная тема: {:?}", theme);
+                            // Применяем цвета баров по умолчанию
+                            crate::system_bars::apply_system_bars_color_jni(vm, activity, theme);
                         }
                     }));
 
@@ -235,11 +257,47 @@ pub fn run<A: Application>(app: AndroidApp) {
                 let pp = egui_ctx.pixels_per_point();
 
                 #[cfg(debug_assertions)]
-                log::warn!(
-                    "[BATCH] native_size=({},{}) pp={} | insets=left:{:.1} top:{:.1} right:{:.1} bottom:{:.1}",
-                    w, h, pp,
-                    insets.left, insets.top, insets.right, insets.bottom
-                );
+                {
+                    use std::time::{Duration, Instant};
+                    static LAST_BATCH_LOG: std::sync::OnceLock<Instant> =
+                        std::sync::OnceLock::new();
+                    let now = Instant::now();
+                    let should_log = LAST_BATCH_LOG.get().map_or(true, |last| {
+                        now.duration_since(*last) >= Duration::from_secs(5)
+                    });
+                    if should_log {
+                        let _ = LAST_BATCH_LOG.set(now);
+                        if LAST_BATCH_LOG.get().map_or(false, |last| {
+                            now.duration_since(*last) < Duration::from_secs(5)
+                        }) {
+                            // set успешен — первый раз
+                        } else if let Some(last) = LAST_BATCH_LOG.get() {
+                            if now.duration_since(*last) >= Duration::from_secs(5) {
+                                // Обновляем через OnceLock нельзя, используем атомик
+                            }
+                        }
+                    }
+                }
+                #[cfg(debug_assertions)]
+                {
+                    // Логируем раз в 5 секунд
+                    use std::sync::atomic::{AtomicU64, Ordering};
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    static LAST_LOG_MS: AtomicU64 = AtomicU64::new(0);
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let last = LAST_LOG_MS.load(Ordering::Relaxed);
+                    if now_ms.saturating_sub(last) > 5000 || last == 0 {
+                        LAST_LOG_MS.store(now_ms, Ordering::Relaxed);
+                        log::warn!(
+                            "[BATCH] native_size=({},{}) pp={} | insets=left:{:.1} top:{:.1} right:{:.1} bottom:{:.1}",
+                            w, h, pp,
+                            insets.left, insets.top, insets.right, insets.bottom
+                        );
+                    }
+                }
 
                 // Все события в кадре — батчинг не нужен, патч egui сам обнуляет
                 // pointer.delta() на первом кадре нового drag.
@@ -279,12 +337,28 @@ pub fn run<A: Application>(app: AndroidApp) {
 
                 unsafe {
                     let gl = &*painter.gl();
-                    gl.clear_color(0.2, 0.2, 0.2, 1.0);
+
+                    // 1. Очищаем ВЕСЬ framebuffer цветом фона (под системными барами).
+                    // Прозрачность (alpha=0) не работает на MIUI/NativeActivity —
+                    // SurfaceFlinger рисует чёрный. Поэтому задаём явный цвет.
+                    gl.disable(glow::SCISSOR_TEST);
+                    let (cr, cg, cb) = crate::theme::current_clear_color();
+                    gl.clear_color(cr, cg, cb, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
+
+                    // 2. Включаем scissor — egui_glow будет рисовать только внутри content_rect.
+                    // Области под барами остаются с цветом из clear_color выше.
+                    let scissor_x = (insets.left * pp) as i32;
+                    let scissor_y = (insets.bottom * pp) as i32;
+                    let scissor_w = (w as f32 - insets.left * pp - insets.right * pp) as i32;
+                    let scissor_h = (h as f32 - insets.top * pp - insets.bottom * pp) as i32;
+                    gl.enable(glow::SCISSOR_TEST);
+                    gl.scissor(scissor_x, scissor_y, scissor_w.max(1), scissor_h.max(1));
                 }
 
                 let primitives =
                     egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+
                 painter.paint_and_update_textures(
                     [w, h],
                     full_output.pixels_per_point,
