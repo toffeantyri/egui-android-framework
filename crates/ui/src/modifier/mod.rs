@@ -543,14 +543,18 @@ mod value {
                     let _ = response.response;
                 }
                 ModifierNode::Width(w) => {
-                    let size = egui::vec2(*w, ui.available_height());
+                    // alloc'им только ширину, высоту оставляем контенту
                     let id_salt = ui.next_auto_id();
-                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    // alloc'им ровно w по ширине, контент определит высоту
+                    let inner_rect = ui.available_rect_before_wrap();
                     let layout = *ui.layout();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
-                            .max_rect(rect)
+                            .max_rect(egui::Rect::from_min_size(
+                                inner_rect.min,
+                                egui::vec2(*w, f32::INFINITY),
+                            ))
                             .layout(layout),
                     );
                     let child_constraints = Constraints::ranged(*w, *w, 0.0, f32::INFINITY);
@@ -558,61 +562,101 @@ mod value {
                         &mut UiWrapper::new(&mut child_ui, child_constraints),
                         dispatch,
                     );
+                    let content_height = child_ui.min_size().y.max(1.0);
+                    ui.allocate_exact_size(egui::vec2(*w, content_height), Sense::hover());
                 }
                 ModifierNode::Height(h) => {
-                    let size = egui::vec2(ui.available_width(), *h);
-                    let id_salt = ui.next_auto_id();
-                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    // alloc'им только высоту, ширину оставляем контенту
+                    let inner_rect = ui.available_rect_before_wrap();
                     let layout = *ui.layout();
+                    let id_salt = ui.next_auto_id();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
-                            .max_rect(rect)
+                            .max_rect(egui::Rect::from_min_size(
+                                inner_rect.min,
+                                egui::vec2(inner_rect.width(), *h),
+                            ))
                             .layout(layout),
                     );
-                    let child_constraints = Constraints::ranged(0.0, f32::INFINITY, *h, *h);
+                    let child_constraints = Constraints::ranged(0.0, inner_rect.width(), *h, *h);
                     rest(
                         &mut UiWrapper::new(&mut child_ui, child_constraints),
                         dispatch,
                     );
+                    let content_width = child_ui.min_size().x.max(1.0);
+                    ui.allocate_exact_size(egui::vec2(content_width, *h), Sense::hover());
                 }
                 ModifierNode::WidthIn { min, max } => {
                     let w = ui.available_width().clamp(*min, *max);
-                    let size = egui::vec2(w, ui.available_height());
-                    let id_salt = ui.next_auto_id();
-                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let inner_rect = ui.available_rect_before_wrap();
                     let layout = *ui.layout();
+                    let id_salt = ui.next_auto_id();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
-                            .max_rect(rect)
+                            .max_rect(egui::Rect::from_min_size(
+                                inner_rect.min,
+                                egui::vec2(w, f32::INFINITY),
+                            ))
                             .layout(layout),
                     );
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    let child_constraints = Constraints::ranged(*min, *max, 0.0, f32::INFINITY);
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
+                    let content_height = child_ui.min_size().y.max(1.0);
+                    ui.allocate_exact_size(egui::vec2(w, content_height), Sense::hover());
                 }
                 ModifierNode::HeightIn { min, max } => {
                     let h = ui.available_height().clamp(*min, *max);
-                    let size = egui::vec2(ui.available_width(), h);
-                    let id_salt = ui.next_auto_id();
-                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let inner_rect = ui.available_rect_before_wrap();
                     let layout = *ui.layout();
+                    let id_salt = ui.next_auto_id();
                     let mut child_ui = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(id_salt)
-                            .max_rect(rect)
+                            .max_rect(egui::Rect::from_min_size(
+                                inner_rect.min,
+                                egui::vec2(inner_rect.width(), h),
+                            ))
                             .layout(layout),
                     );
-                    rest(&mut UiWrapper::new_unconstrained(&mut child_ui), dispatch);
+                    let child_constraints =
+                        Constraints::ranged(0.0, inner_rect.width(), *min, *max);
+                    rest(
+                        &mut UiWrapper::new(&mut child_ui, child_constraints),
+                        dispatch,
+                    );
+                    let content_width = child_ui.min_size().x.max(1.0);
+                    ui.allocate_exact_size(egui::vec2(content_width, h), Sense::hover());
                 }
 
                 // ===== APPEARANCE =====
                 ModifierNode::Background(color) => {
-                    egui::Frame::NONE.fill(*color).show(ui, |show_ui| {
-                        let mut w = UiWrapper::new_unconstrained(show_ui);
+                    // Фон: используем scope, чтобы не alloc'ить лишнее место.
+                    // Scope alloc'ит только min_rect контента (без внешних margin).
+                    // Fill рисуем в scope_ui ДО контента через painter.scope,
+                    // чтобы fill оказался под контентом.
+                    ui.scope(|scope_ui| {
+                        // Рисуем подложку до контента (ShapeIdx будет перед shapes контента)
+                        let bg_shape_idx = scope_ui.painter().add(egui::Shape::Noop);
+                        let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
+                        // После контента fill_rect = scope_ui.min_rect()
+                        let fill_rect = scope_ui.min_rect();
+                        let shape = egui::Shape::Rect(egui::epaint::RectShape::filled(
+                            fill_rect, 0, *color,
+                        ));
+                        scope_ui.painter().set(bg_shape_idx, shape);
                     });
                 }
                 ModifierNode::Border { width, color } => {
+                    // Рамка: alloc'ит rect контента + stroke.
+                    // Используем Frame для корректного alloc'а outer_rect с учётом stroke.
+                    // ВАЖНО: это единственное место, где appearance-модификатор alloc'ит место,
+                    // потому что иначе stroke не поместился бы в alloc'ированную область.
                     egui::Frame::NONE
                         .stroke(egui::Stroke::new(*width, *color))
                         .show(ui, |show_ui| {
@@ -620,13 +664,11 @@ mod value {
                             rest(&mut w, dispatch);
                         });
                 }
-                ModifierNode::CornerRadius(radius) => {
-                    egui::Frame::NONE
-                        .corner_radius(egui::CornerRadius::same(*radius as u8))
-                        .show(ui, |show_ui| {
-                            let mut w = UiWrapper::new_unconstrained(show_ui);
-                            rest(&mut w, dispatch);
-                        });
+                ModifierNode::CornerRadius(_radius) => {
+                    // Скругление — чисто визуальное, не alloc'ит место.
+                    // Скругление применяется через Clip() или Background + CornerRadius
+                    // на уровне рисования. Если стоит отдельно — не влияет на layout.
+                    rest(ui, dispatch);
                 }
                 ModifierNode::Alpha(alpha) => {
                     ui.scope(|scope_ui| {
@@ -636,7 +678,8 @@ mod value {
                     });
                 }
                 ModifierNode::Clip(rounding) => {
-                    // Обрезаем содержимое по скруглению через Frame
+                    // Обрезаем содержимое по скруглению через Frame.
+                    // Clip — исключение: ему нужен Frame для clipping shapes внутри.
                     let frame = egui::Frame::NONE
                         .corner_radius(*rounding)
                         .inner_margin(egui::Margin::ZERO);

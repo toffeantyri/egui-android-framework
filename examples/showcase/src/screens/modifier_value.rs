@@ -139,6 +139,9 @@ impl ModifierValueScreen {
                     Modifier::new().width(200.0).height(48.0),
                     Colors::LIGHT_GREEN,
                 );
+                // ═══ [log] позиция курсора после 6 ═══
+                let pos_after_6 = ui.available_rect_before_wrap().min.y;
+                log::info!("[ex6] cursor after = {:.1}", pos_after_6);
 
                 show_example_bg(
                     ui,
@@ -148,6 +151,8 @@ impl ModifierValueScreen {
                     Modifier::new().width_in(100.0, 300.0).height_in(32.0, 64.0),
                     Color32::from_rgb(180, 220, 180),
                 );
+                let pos_after_7 = ui.available_rect_before_wrap().min.y;
+                log::info!("[ex7] cursor after = {:.1}", pos_after_7);
 
                 // ═══ Wrap content ═════════════════════════════════════
 

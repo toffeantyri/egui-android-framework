@@ -1862,3 +1862,91 @@ fn test_padding_edges_bottom_precise() {
         );
     });
 }
+
+#[test]
+fn test_width_height_real_pp() {
+    // Тест с pixels_per_point как на реальном устройстве (2.625)
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    let f = RefCell::new(Some(|ui: &mut UiWrapper| {
+        let bg = egui::Color32::from_gray(200);
+        let border_color = egui::Color32::from_gray(255);
+
+        let before = ui.available_rect_before_wrap();
+
+        // Пример 6
+        Text::new("200x48")
+            .modifier(
+                Modifier::new()
+                    .background(bg)
+                    .border(2.0, border_color)
+                    .then(Modifier::new().width(200.0).height(48.0)),
+            )
+            .render(ui, &dispatch);
+        let after6 = ui.available_rect_before_wrap();
+        eprintln!(
+            "ex6: before.y={:.1} after.y={:.1} consumed={:.1}",
+            before.min.y,
+            after6.min.y,
+            after6.min.y - before.min.y
+        );
+
+        // Пример 7
+        let before7 = ui.available_rect_before_wrap();
+        Text::new("100..300 32..64")
+            .modifier(
+                Modifier::new()
+                    .background(bg)
+                    .border(2.0, border_color)
+                    .then(Modifier::new().width_in(100.0, 300.0).height_in(32.0, 64.0)),
+            )
+            .render(ui, &dispatch);
+        let after7 = ui.available_rect_before_wrap();
+        eprintln!(
+            "ex7: before.y={:.1} after.y={:.1} consumed={:.1}",
+            before7.min.y,
+            after7.min.y,
+            after7.min.y - before7.min.y
+        );
+
+        // Сравниваем отступ от верха фона до текста
+        eprintln!(
+            "diff consumed: {:.1}",
+            (after7.min.y - before7.min.y) - (after6.min.y - before.min.y)
+        );
+    }));
+
+    let f = f.borrow_mut().take().unwrap();
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(2.625);
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            f(&mut UiWrapper::new_unconstrained(ui));
+        });
+    });
+}
+
+#[test]
+fn test_text_not_centered_vertically() {
+    // Text не должен центрироваться по вертикали внутри height.
+    // Регрессионный тест: отступ сверху должен быть 0 (без padding/border).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let mut wrapper = UiWrapper::new_unconstrained(ui);
+            let before = wrapper.available_rect_before_wrap();
+            Text::new("Test")
+                .modifier(Modifier::new().width(200.0).height(48.0))
+                .render(&mut wrapper, &dispatch);
+            let after = wrapper.available_rect_before_wrap();
+            let consumed = after.min.y - before.min.y;
+            // width(200) alloc'ит content_height, который включает height(48)
+            // ≈ 48 + small gap
+            assert!(
+                consumed >= 40.0 && consumed <= 60.0,
+                "height(48) alloc'ил {}px (ожидалось ~48)",
+                consumed
+            );
+        });
+    });
+}

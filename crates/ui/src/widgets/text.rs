@@ -15,8 +15,11 @@
 //! работает с padding, background, size, clickable и другими модификаторами
 //! как через Modifier value type, так и напрямую.
 //!
-//! Внутри использует `ui.allocate_exact_size()` с реальным размером galley,
+//! Внутри использует `ui.allocate_space()` с реальным размером galley,
 //! что гарантирует корректный layout в Column, Row, Stack и LazyColumn.
+//! Текст рисуется от верхнего левого угла выделенного rect (не центрируется
+//! по вертикали) — это соответствует контракту top_down layout и делает
+//! поведение Text единообразным с Button, Icon и Spacer.
 //! Текст переносится по строкам, если не помещается в доступную ширину.
 
 use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
@@ -116,8 +119,8 @@ impl<M> Widget<M> for Text {
                 // allocate_space clamp'нет до min_width.
                 let (rect, _response) = ui.allocate_space(text_size);
 
-                // Центрируем текст внутри rect по вертикали.
-                let text_pos = egui::pos2(rect.left(), rect.center().y - text_size.y / 2.0);
+                // Рисуем текст от верхнего левого угла rect (без центрирования).
+                let text_pos = egui::pos2(rect.left(), rect.top());
                 ui.painter_at(rect).galley(text_pos, galley, text_color);
             } else {
                 // Пустой текст — alloc'им нулевой размер
