@@ -88,6 +88,7 @@ pub struct Button<M> {
     on_click_callback: Option<Box<dyn Fn(&UiWrapper, &Dispatcher<M>)>>,
     height: f32,
     colors: ButtonColors,
+    text_color: Option<egui::Color32>,
 }
 
 impl<M: 'static> Button<M> {
@@ -98,6 +99,7 @@ impl<M: 'static> Button<M> {
             on_click_callback: None,
             height: 48.0,
             colors: ButtonColors::default(),
+            text_color: None,
         }
     }
 
@@ -161,6 +163,14 @@ impl<M: 'static> Button<M> {
         self.colors = ButtonColors { normal, pressed };
         self
     }
+
+    /// Установить цвет текста кнопки (переопределяет тему).
+    ///
+    /// Если не задан — используется `ui.visuals().text_color()` (зависит от темы).
+    pub fn text_color(mut self, color: egui::Color32) -> Self {
+        self.text_color = Some(color);
+        self
+    }
 }
 
 impl<M: Clone + 'static> Widget<M> for Button<M> {
@@ -170,7 +180,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         const VPAD: f32 = 8.0;
 
         let font_id = egui::FontId::proportional(18.0);
-        let text_color = egui::Color32::WHITE;
+        let text_color = self.text_color.unwrap_or_else(|| ui.visuals().text_color());
 
         // Измеряем текст
         let galley = ui

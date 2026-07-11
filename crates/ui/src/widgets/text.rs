@@ -104,6 +104,12 @@ impl<M> Widget<M> for Text {
                     ..Default::default()
                 });
                 let text_size = galley.size();
+                let text_color = galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|s| s.format.color)
+                    .unwrap_or_else(|| ui.visuals().text_color());
 
                 // alloc'им wrap-content размер через allocate_space (с учётом constraints).
                 // Если constraints.min_width > text_size.x (от FillMaxWidth),
@@ -112,8 +118,7 @@ impl<M> Widget<M> for Text {
 
                 // Центрируем текст внутри rect по вертикали.
                 let text_pos = egui::pos2(rect.left(), rect.center().y - text_size.y / 2.0);
-                ui.painter_at(rect)
-                    .galley(text_pos, galley, ui.visuals().text_color());
+                ui.painter_at(rect).galley(text_pos, galley, text_color);
             } else {
                 // Пустой текст — alloc'им нулевой размер
                 ui.allocate_space(egui::vec2(0.0, 0.0));

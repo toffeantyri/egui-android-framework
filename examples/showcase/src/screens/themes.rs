@@ -11,7 +11,6 @@ use egui_android_framework::{
     },
 };
 
-
 use crate::root_component::RootMsg;
 
 /// Экран демонстрации тем.
@@ -40,63 +39,59 @@ impl ThemesScreen {
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
                 Text::new("Темы")
-                                .modifier(Modifier::new().padding(8.0))
-                                .render(ui, dispatch);
+                    .modifier(Modifier::new().padding(8.0))
+                    .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Текущая тема
                 Text::new("Текущая тема:").render(ui, dispatch);
                 Text::new(if self.is_dark_mode {
-                                    "Тёмная"
-                                } else {
-                                    "Светлая"
-                                })
-                                .modifier(
-                                    Modifier::new()
-                                        .padding(8.0)
-                                        .background(theme.colors.primary),
-                                )
-                                .render(ui, dispatch);
+                    "Тёмная"
+                } else {
+                    "Светлая"
+                })
+                .modifier(
+                    Modifier::new()
+                        .padding(8.0)
+                        .background(theme.colors.primary),
+                )
+                .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Палитра цветов
                 Text::new("Палитра цветов:").render(ui, dispatch);
                 Text::new("Primary")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(theme.colors.primary),
-                                    )
-                                    .render(ui, dispatch);
-                                Text::new("Secondary")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(theme.colors.secondary),
-                                    )
-                                    .render(ui, dispatch);
-                                Text::new("Background")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(theme.colors.background),
-                                    )
-                                    .render(ui, dispatch);
-                                Text::new("Surface")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(theme.colors.surface),
-                                    )
-                                    .render(ui, dispatch);
-                                Text::new("Error")
-                                    .modifier(
-                                        Modifier::new()
-                                            .padding(8.0)
-                                            .background(theme.colors.error),
-                                    )
-                                    .render(ui, dispatch);
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(theme.colors.primary),
+                    )
+                    .render(ui, dispatch);
+                Text::new("Secondary")
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(theme.colors.secondary),
+                    )
+                    .render(ui, dispatch);
+                Text::new("Background")
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(theme.colors.background),
+                    )
+                    .render(ui, dispatch);
+                Text::new("Surface")
+                    .modifier(
+                        Modifier::new()
+                            .padding(8.0)
+                            .background(theme.colors.surface),
+                    )
+                    .render(ui, dispatch);
+                Text::new("Error")
+                    .modifier(Modifier::new().padding(8.0).background(theme.colors.error))
+                    .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
@@ -108,11 +103,23 @@ impl ThemesScreen {
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
+                Text::new("Кнопка с постоянным белым текстом (не зависит от темы):")
+                    .render(ui, dispatch);
+                Button::new("Белый текст")
+                    .on_click(RootMsg::ToggleTheme)
+                    .text_color(egui::Color32::WHITE)
+                    .colors(
+                        egui::Color32::from_rgb(0, 128, 255),
+                        egui::Color32::from_rgb(255, 120, 0),
+                    )
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                                        .modifier(Modifier::new().fill_max_width().padding(8.0))
-                                        .render(ui, dispatch);
-                                });
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+            });
     }
 }
