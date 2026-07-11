@@ -140,9 +140,13 @@ Constraints хранятся в двух местах:
 ### 4.2 Layout phase
 
 Виджет обязан:
-- вызывать `ui.allocate_space_with_sense(content_size, sense)` или `ui.allocate_space(content_size)`
+- вызывать `ui.allocate_space_with_sense(content_size, sense)` или `ui.allocate_exact_size(content_size, sense)`
   (эти методы учитывают `Constraints` через `clamp_size`),
 - **не использовать `available_size()` как размер по умолчанию**.
+  
+**Важно:** Text использует `ui.allocate_exact_size()` вместо `ui.allocate_space()`, 
+  потому что `allocate_space()` на устройствах с pp > 1 может аллоцировать rect
+  больше, чем реальная высота galley (см. issue #layout-alloc).
 
 ### 4.3 Paint phase
 
@@ -246,12 +250,14 @@ Text::new("Текст").font_size(24.0).selectable(true)
 - По умолчанию — wrap-content (размер galley)
 - Non-selectable: использует `LayoutJob` с переносом строк
 - Selectable: использует `ui.label()` (стандартный egui)
-- Растяжение через `allocate_space()` — если `Constraints::min_width > text_width`, alloc'ит min_width
+- Растяжение через `allocate_exact_size()` — если `Constraints::min_width > text_width`, alloc'ит min_width
 
 #### Контракт для Text
 
 - **Текст не должен растягивать контейнеры** — использует wrap (перенос строк), учитывает `max_width`.
 - **Selectable/non-selectable** — имеют разный layout-pipeline (осознанное архитектурное решение).
+- **Text использует `ui.allocate_exact_size(text_size, Sense::hover())`**, не `allocate_space`. Это устраняет DPI-зависимое расхождение между text_size.y и rect.height на устройствах с pp > 1.
+- **Текст рисуется от верхнего левого угла rect** (`rect.top()`), без вертикального центрирования.
 
 ### 6.3 Spacer
 
@@ -691,7 +697,7 @@ Button::new("...")
 - Height/Width через constraints,
 - negative modifiers (ошибки).
 
-**Тесты находятся в:** `crates/ui/tests/widget_tests.rs` (121 тест), `crates/ui/tests/remember_tests.rs` (14 тестов)
+**Тесты находятся в:** `crates/ui/tests/widget_tests.rs` (126 тестов), `crates/ui/tests/remember_tests.rs` (14 тестов), `crates/ui/tests/layout_tests.rs` (28 тестов)
 
 ```bash
 cargo test -p egui-android-ui
