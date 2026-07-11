@@ -451,3 +451,151 @@ fn test_column_top_down_consum_sum() {
         );
     });
 }
+
+// ═══ 10. WIDTH / HEIGHT ═══════════════════════════════════════════════════════════
+
+#[test]
+fn test_width_200_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("W").modifier(Modifier::new().width(200.0)).render(ui, &dispatch);
+        });
+        assert!(c <= 25.0, "width(200) consum={} > 25", c);
+    });
+}
+
+#[test]
+fn test_height_48_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("H").modifier(Modifier::new().height(48.0)).render(ui, &dispatch);
+        });
+        assert!(c <= 55.0, "height(48) consum={} > 55", c);
+    });
+}
+
+#[test]
+fn test_width_200_height_48_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("200x48")
+                .modifier(Modifier::new().width(200.0).height(48.0))
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 55.0, "width+height consum={} > 55", c);
+    });
+}
+
+#[test]
+fn test_width_in_height_in_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("S")
+                .modifier(Modifier::new().width_in(50.0, 200.0).height_in(32.0, 48.0))
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 55.0, "width_in+height_in consum={} > 55", c);
+    });
+}
+
+// ═══ 11. FILL_MAX_WIDTH / CLIP / SHADOW ═══════════════════════════════════════════
+
+#[test]
+fn test_fill_max_width_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("F")
+                .modifier(Modifier::new().fill_max_width())
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 25.0, "fill_max_width consum={} > 25", c);
+    });
+}
+
+#[test]
+fn test_clip_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("C")
+                .modifier(Modifier::new().clip(egui::CornerRadius::same(4)))
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 25.0, "clip consum={} > 25", c);
+    });
+}
+
+#[test]
+fn test_shadow_consumed() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("S")
+                .modifier(Modifier::new().shadow(4.0))
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 35.0, "shadow consum={} > 35", c);
+    });
+}
+
+// ═══ 12. ДВОЙНОЙ ALLOC (РЕГРЕССИЯ) ═══════════════════════════════════════════════
+
+#[test]
+fn test_no_double_alloc_wrap_content() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("Dbl")
+                .modifier(Modifier::new().wrap_content_size())
+                .render(ui, &dispatch);
+        });
+        assert!(c <= 22.0, "wrap_content_size consum={} > 22", c);
+    });
+}
+
+#[test]
+fn test_no_double_alloc_wrap_with_border() {
+    let c = show_example_bg_simple(Modifier::new().wrap_content_size());
+    assert!(c <= 25.0, "bg+border+wrap consum={} > 25", c);
+}
+
+// ═══ 13. ВСЕ МОДИФИКАТОРЫ PP=1 И PP=3.25 ═════════════════════════════════════════
+
+#[test]
+fn test_all_modifiers_consumed_pp1_and_pp325() {
+    fn run_at(pp: f32) {
+        with_pp(pp, |ui| {
+            let (dispatch, _rx) = Dispatcher::<()>::new();
+            let cases: Vec<(&str, Modifier<()>, f32)> = vec![
+                ("wrap_width", Modifier::new().wrap_content_width(), 22.0),
+                ("wrap_size", Modifier::new().wrap_content_size(), 22.0),
+                ("padding(8)", Modifier::new().padding(8.0).wrap_content_size(), 35.0),
+                ("width(200)", Modifier::new().width(200.0), 25.0),
+                ("height(48)", Modifier::new().height(48.0), 55.0),
+                ("width_in+height_in", Modifier::new().width_in(50.0, 200.0).height_in(32.0, 48.0), 55.0),
+                ("fill_max_width", Modifier::new().fill_max_width(), 25.0),
+                ("border(2)+wrap", Modifier::new().border(2.0, egui::Color32::WHITE).wrap_content_size(), 25.0),
+                ("alpha(0.5)", Modifier::new().alpha(0.5), 22.0),
+                ("clip", Modifier::new().clip(egui::CornerRadius::same(4)), 25.0),
+                ("shadow(4)", Modifier::new().shadow(4.0), 35.0),
+            ];
+            for (name, modifier, max_c) in cases {
+                let c = measure_consumed_y(ui, |ui| {
+                    Text::new("X").modifier(modifier).render(ui, &dispatch);
+                });
+                assert!(
+                    c <= max_c,
+                    "[pp={}] {} consum={} > {}",
+                    pp, name, c, max_c
+                );
+            }
+        });
+    }
+    run_at(1.0);
+    run_at(3.25);
+}
