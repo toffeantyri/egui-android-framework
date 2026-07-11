@@ -529,7 +529,7 @@ mod value {
                     let response = ui.scope(|scope_ui| {
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                    });
+                        });
                     let _ = response.response;
                 }
                 ModifierNode::WrapContentSize => {

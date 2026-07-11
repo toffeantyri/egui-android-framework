@@ -114,10 +114,8 @@ impl<M> Widget<M> for Text {
                     .map(|s| s.format.color)
                     .unwrap_or_else(|| ui.visuals().text_color());
 
-                // alloc'им wrap-content размер через allocate_space (с учётом constraints).
-                // Если constraints.min_width > text_size.x (от FillMaxWidth),
-                // allocate_space clamp'нет до min_width.
-                let (rect, _response) = ui.allocate_space(text_size);
+                // alloc'им wrap-content размер через allocate_exact_size.
+                let (rect, _response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
 
                 // Рисуем текст от верхнего левого угла rect (без центрирования).
                 let text_pos = egui::pos2(rect.left(), rect.top());
