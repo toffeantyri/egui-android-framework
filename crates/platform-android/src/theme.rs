@@ -86,6 +86,12 @@ pub fn set_clear_color(packed: u32) {
     CLEAR_COLOR.store(packed, Ordering::Relaxed);
 }
 
+/// Установить clear color из Color32 (удобно для синхронизации с MaterialTheme).
+pub fn set_clear_color_from(color: egui::Color32) {
+    let packed = ((color.r() as u32) << 16) | ((color.g() as u32) << 8) | (color.b() as u32);
+    CLEAR_COLOR.store(packed, Ordering::Relaxed);
+}
+
 /// Получить текущий clear color как (r, g, b) в диапазоне 0.0..1.0.
 pub fn current_clear_color() -> (f32, f32, f32) {
     let packed = CLEAR_COLOR.load(Ordering::Relaxed);

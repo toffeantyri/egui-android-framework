@@ -1,12 +1,14 @@
 //! Основная структура темы — объединяет цвета, типографику и скругления.
 
 mod colors;
+mod colors_palette;
 mod material;
 mod shapes;
 mod system_theme_colors;
 mod typography;
 
 pub use colors::ColorPalette;
+pub use colors_palette::Colors;
 pub use material::MaterialTheme;
 pub use shapes::Shapes;
 pub use system_theme_colors::{set_ui_theme_colors, ui_background_color, UiThemeColors};

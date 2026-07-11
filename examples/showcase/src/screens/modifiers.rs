@@ -34,19 +34,19 @@ impl ModifiersScreen {
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Padding
-                Text::new("Padding 8px:").render(ui, dispatch);
+                Text::new("Padding 8px (фон внутри padding):").render(ui, dispatch);
                 Text::new("Текст с padding")
                     .modifier(
                         Modifier::new()
-                            .padding(8.0)
-                            .background(egui::Color32::from_gray(60)),
+                            .background(egui::Color32::from_gray(60))
+                            .padding(8.0),
                     )
                     .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
                 // Background
-                Text::new("Background:").render(ui, dispatch);
+                Text::new("Background + padding (фон снаружи padding):").render(ui, dispatch);
                 Text::new("Синий фон")
                     .modifier(
                         Modifier::new()

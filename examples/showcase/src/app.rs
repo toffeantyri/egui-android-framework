@@ -97,16 +97,18 @@ impl Application for ShowcaseApplication {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // Обновляем цвета под системными барами в соответствии с темой
+        // Обновляем цвета под системными барами в соответствии с темой.
+        // Используем цвет background из MaterialTheme для синхронизации с panel_fill.
+        #[allow(unused_variables)]
+        let bg_color = if app_state.is_dark_mode {
+            MaterialTheme::dark().colors.background
+        } else {
+            MaterialTheme::light().colors.background
+        };
+
+        // На Android синхронизируем clear_color (фон под системными барами)
         #[cfg(target_os = "android")]
-        {
-            let clear_color = if app_state.is_dark_mode {
-                0x1C_1B_1Fu32 // тёмный фон под барами
-            } else {
-                0xF5_F5_F5u32 // светлый фон под барами
-            };
-            egui_android_framework::platform_android::theme::set_clear_color(clear_color);
-        }
+        egui_android_framework::platform_android::theme::set_clear_color_from(bg_color);
 
         self.root.sync_from_store();
 

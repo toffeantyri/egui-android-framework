@@ -200,6 +200,20 @@ mod value {
             Self { nodes: Vec::new() }
         }
 
+        /// Объединить с другим модификатором (nodes другого добавляются в конец).
+        /// Используется для композиции модификаторов из разных источников.
+        ///
+        /// ```ignore
+        /// let padding = Modifier::new().padding(16.0);
+        /// let style = Modifier::new().background(Red).clickable(msg);
+        /// let combined = padding.then(style);
+        /// // Порядок: Padding (внешний) → Background → Clickable (внутренний)
+        /// ```
+        pub fn then(mut self, other: Self) -> Self {
+            self.nodes.extend(other.nodes);
+            self
+        }
+
         // ─── Padding ────────────────────────────────────────────────────────
 
         /// Одинаковый отступ со всех сторон.
