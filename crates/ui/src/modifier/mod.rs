@@ -525,29 +525,22 @@ mod value {
                     );
                 }
                 ModifierNode::WrapContentWidth => {
-                    // Измеряем размер содержимого, рендерим один раз
+                    // scope сам alloc'ит min_rect в родителе.
                     let response = ui.scope(|scope_ui| {
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                        w.min_rect().size()
                     });
-                    let content_size = response.inner;
-                    // Аллоцируем ровно эту ширину
-                    ui.allocate_exact_size(
-                        egui::vec2(content_size.x, content_size.y),
-                        Sense::hover(),
-                    );
+                    let _ = response.response;
                 }
                 ModifierNode::WrapContentSize => {
-                    // Измеряем размер содержимого, рендерим один раз
+                    // scope сам alloc'ит min_rect контента в родителе,
+                    // дополнительный allocate_exact_size не нужен.
                     let response = ui.scope(|scope_ui| {
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                        w.min_rect().size()
                     });
-                    let content_size = response.inner;
-                    // Аллоцируем ровно этот размер
-                    ui.allocate_exact_size(content_size, Sense::hover());
+                    // response.rect — rect, alloc'ированный scope-ом
+                    let _ = response.response;
                 }
                 ModifierNode::Width(w) => {
                     let size = egui::vec2(*w, ui.available_height());

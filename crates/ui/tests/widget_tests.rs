@@ -1755,3 +1755,110 @@ fn test_width_modifier_via_constraints() {
         assert!(after_y < before_y, "Text с width 200 не потребил место");
     });
 }
+
+#[test]
+fn test_padding_bottom_not_excessive() {
+    // Padding должен быть симметричным: top == bottom.
+    // Регрессионный тест: bottom не должен быть больше чем задано.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("Тест")
+            .modifier(Modifier::new().padding(16.0).wrap_content_size())
+            .render(ui, &dispatch);
+
+        let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+
+        // Текст ~18px + padding 16*2 = 32px + rounding = ~50px
+        // Если consumed > 100 — bottom padding явно больше 16
+        assert!(
+            consumed <= 100.0,
+            "padding(16) потребил слишком много: {} (ожидалось ~50)",
+            consumed
+        );
+        assert!(
+            consumed >= 30.0,
+            "padding(16) потребил слишком мало: {} (ожидалось ~50)",
+            consumed
+        );
+    });
+}
+
+#[test]
+fn test_padding_top_bottom_symmetric() {
+    // Прямая проверка: top padding должен быть равен bottom padding.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        // Измеряем min_rect до и после
+        let min_rect_before = ui.min_rect();
+
+        // Вариант 1: padding(16) + wrap_content_size
+        Text::new("Тест")
+            .modifier(Modifier::new().padding(16.0).wrap_content_size())
+            .render(ui, &dispatch);
+
+        let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+
+        eprintln!(
+            "variant1 (padding+wrap): before_y={}, after_y={}, consumed={}",
+            before_y, after_y, consumed
+        );
+
+        // Вариант 2: только padding(16), без wrap
+        let before_y2 = ui.available_size().y;
+        Text::new("Тест")
+            .modifier(Modifier::new().padding(16.0))
+            .render(ui, &dispatch);
+        let consumed2 = before_y2 - ui.available_size().y;
+        eprintln!(
+            "variant2 (padding only): before_y2={}, consumed2={}",
+            before_y2, consumed2
+        );
+
+        assert!(
+            consumed <= 100.0,
+            "padding(16) потребил слишком много: {} (ожидалось ~50)",
+            consumed
+        );
+        assert!(
+            consumed >= 30.0,
+            "padding(16) потребил слишком мало: {} (ожидалось ~50)",
+            consumed
+        );
+    });
+}
+
+#[test]
+fn test_padding_edges_bottom_precise() {
+    // Проверка padding_edges с конкретным bottom.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before_y = ui.available_size().y;
+
+        Text::new("X")
+            .modifier(
+                Modifier::new()
+                    .padding_edges(0.0, 0.0, 0.0, 2.0)
+                    .wrap_content_size(),
+            )
+            .render(ui, &dispatch);
+
+        let consumed = before_y - ui.available_size().y;
+        eprintln!(
+            "padding_edges bottom=2: consumed={} (ожидалось ~= text_height+2)",
+            consumed
+        );
+
+        // bottom=2, top=0 — consumed должен быть ≈ text_height + 2
+        assert!(
+            consumed < 50.0,
+            "padding_edges bottom=2 потребил слишком много: {}",
+            consumed
+        );
+    });
+}

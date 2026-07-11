@@ -88,7 +88,7 @@ impl ModifierValueScreen {
                     "1) padding(all) — отступ со всех сторон",
                     "Текст с padding 16",
                     Modifier::new().padding(16.0).wrap_content_size(),
-                    Color32::from_rgb(60, 60, 80),
+                    Colors::LIGHT_BLUE,
                 );
 
                 show_example_bg(
@@ -97,7 +97,7 @@ impl ModifierValueScreen {
                     "2) padding_hv(h, v) — гор 16, вер 8",
                     "Горизонтальный и вертикальный padding",
                     Modifier::new().padding_hv(16.0, 8.0).wrap_content_size(),
-                    Color32::from_rgb(80, 40, 20),
+                    Colors::LIGHT_GREEN,
                 );
 
                 show_example_bg(
@@ -108,7 +108,7 @@ impl ModifierValueScreen {
                     Modifier::new()
                         .padding_edges(8.0, 16.0, 4.0, 2.0)
                         .wrap_content_size(),
-                    Color32::from_rgb(60, 30, 60),
+                    Colors::LIGHT_GRAY,
                 );
 
                 // ═══ Size constraints ══════════════════════════════════
@@ -119,7 +119,7 @@ impl ModifierValueScreen {
                     "4) fill_max_width() — на всю ширину родителя",
                     "На всю ширину",
                     Modifier::new().fill_max_width(),
-                    Color32::from_rgb(20, 40, 80),
+                    Color32::from_rgb(150, 180, 230),
                 );
 
                 show_example_bg(
@@ -128,7 +128,7 @@ impl ModifierValueScreen {
                     "5) fill_max_size() — всё доступное пространство",
                     "Весь экран",
                     Modifier::new().fill_max_size(),
-                    Color32::from_rgb(30, 30, 30),
+                    Colors::LIGHT_GRAY,
                 );
 
                 show_example_bg(
@@ -137,7 +137,7 @@ impl ModifierValueScreen {
                     "6) width(w) + height(h) — фиксированный размер",
                     "200x48",
                     Modifier::new().width(200.0).height(48.0),
-                    Color32::DARK_GREEN,
+                    Colors::LIGHT_GREEN,
                 );
 
                 show_example_bg(
@@ -146,7 +146,7 @@ impl ModifierValueScreen {
                     "7) width_in(min, max) + height_in(min, max)",
                     "Ширина 100..300, высота 32..64",
                     Modifier::new().width_in(100.0, 300.0).height_in(32.0, 64.0),
-                    Color32::from_rgb(40, 80, 40),
+                    Color32::from_rgb(180, 220, 180),
                 );
 
                 // ═══ Wrap content ═════════════════════════════════════
@@ -157,7 +157,7 @@ impl ModifierValueScreen {
                     "8) wrap_content_width() — ширина по содержимому",
                     "Короткий текст (wrap_content_width)",
                     Modifier::new().wrap_content_width(),
-                    Color32::RED,
+                    Colors::ORANGE,
                 );
 
                 show_example_bg(
@@ -166,7 +166,7 @@ impl ModifierValueScreen {
                     "9) wrap_content_size() — размер по содержимому",
                     "Короткий (wrap_content_size)",
                     Modifier::new().wrap_content_size(),
-                    Color32::BLUE,
+                    Colors::PURPLE,
                 );
 
                 // ═══ Appearance ════════════════════════════════════════
@@ -177,7 +177,7 @@ impl ModifierValueScreen {
                     "10) background(color) — цвет фона",
                     "Синий фон",
                     Modifier::new().padding(8.0),
-                    Color32::from_rgb(0, 80, 200),
+                    Colors::LIGHT_BLUE,
                 );
 
                 show_example(
@@ -197,7 +197,7 @@ impl ModifierValueScreen {
                     "12) alpha(a) — прозрачность 0.5",
                     "Полупрозрачный текст",
                     Modifier::new().padding(8.0).alpha(0.5),
-                    Color32::BLUE,
+                    Colors::LIGHT_BLUE,
                 );
 
                 show_example_bg(
@@ -208,7 +208,7 @@ impl ModifierValueScreen {
                     Modifier::new()
                         .clip(egui::CornerRadius::same(8))
                         .padding(8.0),
-                    Color32::from_rgb(40, 80, 40),
+                    Colors::LIGHT_GREEN,
                 );
 
                 // 14. shadow
@@ -232,7 +232,7 @@ impl ModifierValueScreen {
                     "15) clickable(msg) — клик → dispatch",
                     "Нажми меня (только текст!) — назад",
                     Modifier::new().padding(8.0).clickable(RootMsg::Back),
-                    Color32::from_rgb(60, 40, 80),
+                    Colors::PURPLE,
                 );
 
                 Text::new("16) clickable_with(closure) — клик → closure").render(ui, dispatch);
@@ -241,7 +241,7 @@ impl ModifierValueScreen {
                     .modifier(
                         Modifier::new()
                             .padding(8.0)
-                            .background(Color32::from_gray(50))
+                            .background(Colors::LIGHT_GRAY)
                             .border(1.0, Color32::WHITE),
                     )
                     .render(ui, dispatch);
@@ -250,7 +250,7 @@ impl ModifierValueScreen {
                     .modifier(
                         Modifier::new()
                             .padding(8.0)
-                            .background(Color32::from_rgb(40, 60, 40))
+                            .background(Colors::LIGHT_GREEN)
                             .border(1.0, Color32::WHITE)
                             .clickable_with({
                                 let counter = counter.clone();
@@ -274,7 +274,7 @@ impl ModifierValueScreen {
                         .padding(16.0)
                         .rounding(12.0)
                         .alpha(0.9),
-                    Color32::from_rgb(40, 40, 80),
+                    Colors::LIGHT_BLUE,
                 );
 
                 Spacer::new(16.0).render(ui, dispatch);
