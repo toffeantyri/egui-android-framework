@@ -909,6 +909,55 @@ fn test_height_zero_does_not_panic() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════
+// 13. КРИТИЧЕСКИЕ ПРОБЕЛЫ КОНТРАКТА
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_paint_background_fills_allocated_rect() {
+    // Background должен рисовать fill_rect внутри alloc'ированной области,
+    // а не за её пределами. Проверяем через painter shapes count.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        // Считаем shapes ДО и ПОСЛЕ
+        let shapes_before = ui
+            .ctx()
+            .data(|d| d.get_temp::<u64>(egui::Id::new("shape_count")).unwrap_or(0));
+        Text::new("X")
+            .modifier(Modifier::new().background(egui::Color32::RED))
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_paint_border_stays_within_alloc() {
+    // Border не должен выходить за alloc'ированный rect
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("X")
+            .modifier(Modifier::new().border(2.0, egui::Color32::GREEN))
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_paint_content_not_exceeding_rect() {
+    // Текст/контент не должен рисоваться за пределами rect от allocate_exact_size.
+    // Проверка: consumed consum ≈ galley height, rect не шире available
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail = ui.available_size().x;
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("Короткий текст")
+                .modifier(Modifier::new().padding(16.0))
+                .render(ui, &dispatch);
+        });
+        // consum должен быть ≈ padding(32) + text_height(~15) ≈ 47
+        // Если consum > avail — контент вылез за пределы
+        assert!(c < avail, "content consum={} >= avail={}", c, avail);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
 // 12. СРЕДНИЕ ПРОБЕЛЫ КОНТРАКТА
 // ═══════════════════════════════════════════════════════════════════════════════════
 

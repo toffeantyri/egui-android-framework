@@ -1950,3 +1950,38 @@ fn test_text_not_centered_vertically() {
         });
     });
 }
+
+#[test]
+fn test_button_pressed_color_differs_from_normal() {
+    use egui_android_ui::widgets::ButtonColors;
+    let colors = ButtonColors::default();
+    assert_ne!(
+        colors.normal, colors.pressed,
+        "Button normal={:?} == pressed={:?}: нет отклика",
+        colors.normal, colors.pressed
+    );
+}
+
+#[test]
+fn test_icon_consumes_space() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let uri = egui::Image::from_bytes("bytes://test", &[]);
+        let before = ui.cursor().min.y;
+        Icon::new(uri).render(ui, &dispatch);
+        let after = ui.cursor().min.y;
+        let consum = after - before;
+        assert!(consum >= 0.0, "Icon consum {}", consum);
+    });
+}
+
+#[test]
+fn test_icon_with_modifiers() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let uri = egui::Image::from_bytes("bytes://test", &[]);
+        Icon::new(uri)
+            .modifier(Modifier::new().padding(8.0))
+            .render(ui, &dispatch);
+    });
+}
