@@ -661,18 +661,16 @@ mod value {
 
                 // ===== APPEARANCE =====
                 ModifierNode::Background(color, rounding) => {
-                    // Фон: используем scope, чтобы не alloc'ить лишнее место.
-                    // Если constraints.min_width больше min_rect контента — расширяем
-                    // fill_rect до min_width (нужно для fill_max_width).
                     let corner_radius = egui::CornerRadius::same(*rounding as u8);
                     let min_width = ui.constraints().min_width;
+                    let avail = ui.available_width();
+                    let is_fmw = min_width > 0.0 && (min_width - avail).abs() < 1.0;
                     ui.scope(|scope_ui| {
                         let bg_shape_idx = scope_ui.painter().add(egui::Shape::Noop);
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
                         let mut fill_rect = scope_ui.min_rect();
-                        // Если constraints требуют ширину больше контента — расширяем
-                        if min_width > fill_rect.width() {
+                        if is_fmw && min_width > fill_rect.width() {
                             fill_rect = egui::Rect::from_min_size(
                                 fill_rect.min,
                                 egui::vec2(min_width, fill_rect.height()),
@@ -691,12 +689,17 @@ mod value {
                     color,
                     rounding,
                 } => {
-                    // Рамка: alloc'ит rect контента + stroke.
                     let rounding = egui::CornerRadius::same(*rounding as u8);
+                    let min_width = ui.constraints().min_width;
+                    let avail = ui.available_width();
+                    let is_fmw = min_width > 0.0 && (min_width - avail).abs() < 1.0;
                     egui::Frame::NONE
                         .stroke(egui::Stroke::new(*width, *color))
                         .corner_radius(rounding)
                         .show(ui, |show_ui| {
+                            if is_fmw {
+                                show_ui.set_min_width(min_width);
+                            }
                             let mut w = UiWrapper::new_unconstrained(show_ui);
                             rest(&mut w, dispatch);
                         });

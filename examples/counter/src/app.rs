@@ -33,12 +33,10 @@ pub struct CounterApp {
     root: CounterComponent,
     config: AppConfig,
     cmd_tx: mpsc::Sender<Msg>,
-    /// Канал уведомлений от data layer.
     notify_rx: mpsc::Receiver<()>,
-    /// Флаг: запрошено завершение (Back на главном экране).
     destroy_requested: bool,
-    /// Состояние темы приложения.
     theme_state: AppThemeState,
+    prev_dark_mode: Option<bool>,
 }
 
 impl LifecycleObserver for CounterApp {}
@@ -72,6 +70,7 @@ impl Application for CounterApp {
             notify_rx,
             destroy_requested: false,
             theme_state: AppThemeState::default(),
+            prev_dark_mode: None,
         }
     }
 
@@ -118,23 +117,25 @@ impl Application for CounterApp {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // Синхронизируем clear_color и цвета системных баров
-        #[cfg(target_os = "android")]
-        {
-            use egui_android_framework::core::SystemTheme;
-            use egui_android_framework::platform_android::system_bars;
-            use egui_android_framework::platform_android::theme::set_clear_color_from;
-            use egui_android_framework::ui::theme::Theme;
+        // При смене темы — обновляем системные бары (один раз, не каждый кадр)
+        if self.prev_dark_mode != Some(self.theme_state.is_dark_mode) {
+            self.prev_dark_mode = Some(self.theme_state.is_dark_mode);
+            #[cfg(target_os = "android")]
+            {
+                use egui_android_framework::core::SystemTheme;
+                use egui_android_framework::platform_android::system_bars;
+                use egui_android_framework::platform_android::theme::set_clear_color_from;
+                use egui_android_framework::ui::theme::Theme;
 
-            let theme = Theme::current(egui_ctx);
-            set_clear_color_from(theme.colors.background);
+                let theme = Theme::current(egui_ctx);
+                set_clear_color_from(theme.colors.background);
 
-            let sys_theme = if self.theme_state.is_dark_mode {
-                SystemTheme::Dark
-            } else {
-                SystemTheme::Light
-            };
-            system_bars::apply_system_bars_for_theme(sys_theme);
+                system_bars::apply_system_bars_for_theme(if self.theme_state.is_dark_mode {
+                    SystemTheme::Dark
+                } else {
+                    SystemTheme::Light
+                });
+            }
         }
 
         self.root.sync_from_store();

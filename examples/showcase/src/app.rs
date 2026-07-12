@@ -27,6 +27,7 @@ pub struct ShowcaseApplication {
     config: AppConfig,
     state: StateStore<AppState>,
     _notify_rx: mpsc::Receiver<()>,
+    prev_dark_mode: Option<bool>,
 }
 
 impl LifecycleObserver for ShowcaseApplication {}
@@ -52,6 +53,7 @@ impl Application for ShowcaseApplication {
             config,
             state: store,
             _notify_rx: notify_rx,
+            prev_dark_mode: None,
         }
     }
 
@@ -89,38 +91,38 @@ impl Application for ShowcaseApplication {
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
-        // Применяем тему в зависимости от состояния
         let app_state = self.state.state();
-        if app_state.is_dark_mode {
+        let new_dark = app_state.is_dark_mode;
+
+        // Применяем тему в зависимости от состояния
+        if new_dark {
             MaterialTheme::dark().apply(egui_ctx);
         } else {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // Обновляем цвета под системными барами в соответствии с темой.
-        // Используем цвет background из MaterialTheme для синхронизации с panel_fill.
-        #[allow(unused_variables)]
-        let bg_color = if app_state.is_dark_mode {
-            MaterialTheme::dark().colors.background
-        } else {
-            MaterialTheme::light().colors.background
-        };
+        // При смене темы — обновляем системные бары (один раз, не каждый кадр)
+        if self.prev_dark_mode != Some(new_dark) {
+            self.prev_dark_mode = Some(new_dark);
+            #[cfg(target_os = "android")]
+            {
+                use egui_android_framework::core::SystemTheme;
+                use egui_android_framework::platform_android::system_bars;
+                use egui_android_framework::platform_android::theme::set_clear_color_from;
 
-        // На Android синхронизируем цвет системных баров и clear_color
-        #[cfg(target_os = "android")]
-        {
-            use egui_android_framework::core::SystemTheme;
-            use egui_android_framework::platform_android::system_bars;
-            use egui_android_framework::platform_android::theme::set_clear_color_from;
+                let bg_color = if new_dark {
+                    MaterialTheme::dark().colors.background
+                } else {
+                    MaterialTheme::light().colors.background
+                };
 
-            let theme = if app_state.is_dark_mode {
-                SystemTheme::Dark
-            } else {
-                SystemTheme::Light
-            };
-
-            set_clear_color_from(bg_color);
-            system_bars::apply_system_bars_for_theme(theme);
+                set_clear_color_from(bg_color);
+                system_bars::apply_system_bars_for_theme(if new_dark {
+                    SystemTheme::Dark
+                } else {
+                    SystemTheme::Light
+                });
+            }
         }
 
         self.root.sync_from_store();

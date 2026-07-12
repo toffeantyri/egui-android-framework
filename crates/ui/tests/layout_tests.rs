@@ -657,6 +657,72 @@ fn test_fill_max_width_with_align_min_rect_width() {
 }
 
 #[test]
+fn test_width_200_via_then_does_not_expand() {
+    // Точная копия show_example_bg: background + border снаружи, width(200) через then
+    // Это ловит баг когда Border.set_min_width растягивал outer_rect на весь экран
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail = ui.available_size().x;
+        let mut min_w = 0.0f32;
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            // show_example_bg делает: background(bg).border(1.0, GREEN).then(modifier)
+            let inner = Modifier::new().width(200.0).height(48.0);
+            Text::new("200x48")
+                .modifier(
+                    Modifier::new()
+                        .background(egui::Color32::GRAY)
+                        .border(1.0, egui::Color32::GREEN)
+                        .then(inner),
+                )
+                .render(&mut w, &dispatch);
+            min_w = w.min_rect().width();
+        });
+        // min_rect должен быть ~202 (width(200) + border(1)*2), а не avail
+        assert!(
+            min_w < avail - 100.0,
+            "Width(200) через then: min_rect.width={} >= avail={} - 100 (должен быть ~202)",
+            min_w,
+            avail
+        );
+        assert!(
+            min_w >= 190.0 && min_w <= 250.0,
+            "Width(200) через then: min_rect.width={} вне 190-250",
+            min_w
+        );
+    });
+    // Проверяем на pp=3.25 (девайс)
+    with_pp(3.25, |ui| {
+        let avail = ui.available_size().x;
+        let mut min_w = 0.0f32;
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            let inner = Modifier::new().width(200.0).height(48.0);
+            Text::new("200x48")
+                .modifier(
+                    Modifier::new()
+                        .background(egui::Color32::GRAY)
+                        .border(1.0, egui::Color32::GREEN)
+                        .then(inner),
+                )
+                .render(&mut w, &dispatch);
+            min_w = w.min_rect().width();
+        });
+        assert!(
+            min_w < avail - 100.0,
+            "[pp=3.25] Width(200) через then: min_rect.width={} >= avail={} - 100",
+            min_w,
+            avail
+        );
+        assert!(
+            min_w >= 190.0 && min_w <= 250.0,
+            "[pp=3.25] Width(200) через then: min_rect.width={} вне 190-250",
+            min_w
+        );
+    });
+}
+
+#[test]
 fn test_fill_max_width_consum_with_border() {
     // Проверяем consum: padding(8*2=16) + text + border = ~31 на pp=1
     let (dispatch, _rx) = Dispatcher::<()>::new();
