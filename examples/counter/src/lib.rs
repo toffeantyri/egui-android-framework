@@ -5,6 +5,8 @@
 //! - `Application` как корень DI
 //! - Data layer с `StateStore` (без ручного poll())
 //! - `UiNotifier` для реактивного обновления UI
+//! - BackPressed — системная кнопка Назад → завершение приложения
+//! - Material Design 3 тема (светлая/тёмная) с корректными цветами текста на фоне
 
 pub mod app;
 pub mod component;

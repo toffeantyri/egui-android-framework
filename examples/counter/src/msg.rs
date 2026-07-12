@@ -10,6 +10,6 @@ pub struct CounterState {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Increment,
-    /// Переключить отображение details (remember-состояние в UI).
-    ToggleDetails,
+    /// Переключить тему (светлая/тёмная).
+    ToggleTheme,
 }

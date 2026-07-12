@@ -8,7 +8,7 @@ use egui_android_runtime::ui_notifier::{AndroidWakeHandle, UiNotifier};
 fn test_create_notifier() {
     let ctx = egui::Context::default();
     let (_notify_tx, rx) = mpsc::channel::<()>();
-    let wake = AndroidWakeHandle::new(|| {});
+    let _wake = AndroidWakeHandle::new(|| {});
 
     let mut notifier = UiNotifier::new(ctx, None, rx);
     notifier.check();

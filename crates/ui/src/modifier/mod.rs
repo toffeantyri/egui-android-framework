@@ -64,6 +64,9 @@ mod value {
     use egui_android_core::Constraints;
     use egui_android_core::Dispatcher;
 
+    /// Тип callback для clickable_with.
+    type ClickableCallback<M> = Box<dyn Fn(&Response, &Ui, &Dispatcher<M>)>;
+
     /// Единый тип модификатора — value type с цепочкой методов.
     ///
     /// Generic `M` обеспечивает type-safe dispatch для `clickable`.
@@ -128,7 +131,7 @@ mod value {
 
         // Interaction
         Clickable(M),
-        ClickableWith(Box<dyn Fn(&Response, &Ui, &Dispatcher<M>)>),
+        ClickableWith(ClickableCallback<M>),
     }
 
     // Реализуем Debug вручную из-за ClickableWith
@@ -529,7 +532,7 @@ mod value {
                     let response = ui.scope(|scope_ui| {
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                        });
+                    });
                     let _ = response.response;
                 }
                 ModifierNode::WrapContentSize => {

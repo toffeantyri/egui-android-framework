@@ -77,21 +77,22 @@ pub enum Msg {
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
-    modifier::ModifierExt,
+    modifier::{Modifier, ModifierDsl},
     widgets::{Button, Spacer, Text, Widget},
+    UiWrapper,
 };
 
 use crate::msg::{AppState, Msg};
 
 /// View-функция. Сообщения отправляются через dispatch в момент события.
-pub fn my_view(state: &AppState, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
-    Column::new(ui, dispatch, |ui, dispatch| {
+pub fn my_view(state: &AppState, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
+    Column::new().show(ui, dispatch, |ui, dispatch| {
         Text::new("Привет, мир!").render(ui, dispatch);
         Spacer::new(8.0).render(ui, dispatch);
 
         Button::new("Действие")
             .on_click(Msg::SomeAction)
-            .padding(8.0)
+            .modifier(Modifier::new().padding(8.0))
             .render(ui, dispatch);
     });
 }
@@ -102,14 +103,17 @@ pub fn my_view(state: &AppState, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
 - View НЕ хранит состояние (кроме локального `remember`)
 - Сообщения отправляются через `dispatch.dispatch(msg)` в момент события
 - Никаких `state.value = ...` внутри View
+- View принимает `&mut UiWrapper` (не `&mut egui::Ui`) — даёт доступ к Constraints
+- Контейнеры используют `.show(ui, dispatch, |ui, dispatch| { ... })` (Compose-like замыкания)
+- Модификаторы применяются через `.modifier(Modifier::new().padding(8.0).background(red))`
 
 **Для локального UI-состояния используется `remember`:**
 
 ```rust
 use egui_android_framework::ui::remember;
 
-pub fn my_view(state: &AppState, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
-    Column::new(ui, dispatch, |ui, dispatch| {
+pub fn my_view(state: &AppState, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
+    Column::new().show(ui, dispatch, |ui, dispatch| {
         let count = remember(ui, "counter", || 0i32);
 
         Text::new(format!("Счётчик: {}", count.get())).render(ui, dispatch);
@@ -137,7 +141,7 @@ pub fn my_view(state: &AppState, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) 
 
 ```rust
 use egui_android_framework::{
-    core::{Component, LifecycleObserver},
+    core::{Component, LifecycleObserver, UiWrapper},
     runtime::{Dispatcher, StateStore},
 };
 use crate::msg::{AppState, Msg};
@@ -167,7 +171,8 @@ impl Component for MyComponent {
     type Message = Msg;
 
     fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
-        my_view(&self.state_snapshot, ui, dispatch);
+        let mut wrapper = UiWrapper::new_unconstrained(ui);
+        my_view(&self.state_snapshot, &mut wrapper, dispatch);
     }
 
     fn handle(&mut self, _msg: Self::Message) {
@@ -228,7 +233,7 @@ pub fn my_data_layer(
 use std::sync::mpsc;
 use egui_android_framework::{
     runtime::{AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier},
-    core::{Component, LifecycleObserver},
+    core::{Component, LifecycleObserver, UiWrapper},
 };
 
 use crate::component::MyComponent;
@@ -282,9 +287,10 @@ impl Application for MyApp {
 
         let (dispatcher, receiver) = Dispatcher::new();
 
-        let full_output = egui_ctx.run(raw_input, |ctx| {
+        let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.root.render(ui, &dispatcher);
+                let mut wrapper = UiWrapper::new_unconstrained(ui);
+                self.root.render(&mut wrapper, &dispatcher);
             });
         });
 

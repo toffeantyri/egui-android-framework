@@ -1794,7 +1794,7 @@ fn test_padding_top_bottom_symmetric() {
         let before_y = ui.available_size().y;
 
         // Измеряем min_rect до и после
-        let min_rect_before = ui.min_rect();
+        let _min_rect_before = ui.min_rect();
 
         // Вариант 1: padding(16) + wrap_content_size
         Text::new("Тест")

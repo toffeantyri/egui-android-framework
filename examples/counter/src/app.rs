@@ -3,17 +3,30 @@
 //! Использует `StateStore` для реактивного состояния.
 //! Уведомления об изменении — через mpsc канал, проверяемый
 //! `UiNotifier` в главном цикле. Никаких фоновых потоков.
+//!
+//! # BackPressed
+//!
+//! Системная кнопка Назад → завершение приложения.
+//! `on_back_pressed()` устанавливает флаг `destroy_requested`,
+//! Runtime проверяет его после `frame()` и завершает цикл.
 
 use std::sync::mpsc;
 
 use egui_android_framework::{
     core::{Component, LifecycleObserver},
     runtime::{AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier},
+    ui::theme::MaterialTheme,
 };
 
 use crate::component::CounterComponent;
 use crate::data_layer::data_layer_worker;
 use crate::msg::{CounterState, Msg};
+
+/// Состояние приложения (тема).
+#[derive(Clone, Debug, Default)]
+pub struct AppThemeState {
+    pub is_dark_mode: bool,
+}
 
 /// Приложение-счётчик.
 pub struct CounterApp {
@@ -22,6 +35,10 @@ pub struct CounterApp {
     cmd_tx: mpsc::Sender<Msg>,
     /// Канал уведомлений от data layer.
     notify_rx: mpsc::Receiver<()>,
+    /// Флаг: запрошено завершение (Back на главном экране).
+    destroy_requested: bool,
+    /// Состояние темы приложения.
+    theme_state: AppThemeState,
 }
 
 impl LifecycleObserver for CounterApp {}
@@ -31,14 +48,13 @@ impl Application for CounterApp {
 
     fn create() -> Self {
         let config = AppConfig {
-            log_tag: "egui-counter2".into(),
+            log_tag: "egui-counter".into(),
             ..Default::default()
         };
 
         let store = StateStore::new(CounterState { count: 0 });
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>();
-        // Канал уведомлений: data layer → Runtime
         let (notify_tx, notify_rx) = mpsc::channel::<()>();
 
         let store_for_worker = store.clone_state();
@@ -54,6 +70,8 @@ impl Application for CounterApp {
             config,
             cmd_tx,
             notify_rx,
+            destroy_requested: false,
+            theme_state: AppThemeState::default(),
         }
     }
 
@@ -79,26 +97,71 @@ impl Application for CounterApp {
         wake: AndroidWakeHandle,
     ) -> Option<UiNotifier> {
         log::info!("CounterApp: создаём UiNotifier");
-        // Передаём notify_rx в UiNotifier — он будет проверять
-        // его в главном цикле без блокировок.
         let rx = std::mem::replace(&mut self.notify_rx, mpsc::channel().1);
         Some(UiNotifier::new(ctx.clone(), Some(wake), rx))
     }
 
+    fn on_back_pressed(&mut self) {
+        log::info!("CounterApp: Back нажата — завершаем приложение");
+        self.destroy_requested = true;
+    }
+
+    fn request_destroy(&mut self) -> bool {
+        self.destroy_requested
+    }
+
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
+        // Применяем тему в зависимости от состояния
+        if self.theme_state.is_dark_mode {
+            MaterialTheme::dark().apply(egui_ctx);
+        } else {
+            MaterialTheme::light().apply(egui_ctx);
+        }
+
+        // Синхронизируем clear_color с фоном темы для подсистемных баров
+        #[cfg(target_os = "android")]
+        {
+            use egui_android_framework::platform_android::theme::set_clear_color_from;
+            use egui_android_framework::ui::theme::Theme;
+            let theme = Theme::current(egui_ctx);
+            set_clear_color_from(theme.colors.background);
+        }
+
         self.root.sync_from_store();
 
         let (dispatcher, receiver) = Dispatcher::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.root.render(ui, &dispatcher);
-            });
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .inner_margin(egui::Margin::ZERO)
+                        .outer_margin(egui::Margin::ZERO),
+                )
+                .show(ctx, |ui| {
+                    self.root.render(ui, &dispatcher);
+                });
         });
 
         for msg in receiver.try_iter() {
-            self.root.handle(msg.clone());
-            let _ = self.cmd_tx.send(msg);
+            match &msg {
+                Msg::ToggleTheme => {
+                    self.theme_state.is_dark_mode = !self.theme_state.is_dark_mode;
+                    log::info!(
+                        "CounterApp: тема переключена на {}",
+                        if self.theme_state.is_dark_mode {
+                            "тёмную"
+                        } else {
+                            "светлую"
+                        }
+                    );
+                }
+                _ => {
+                    self.root.handle(msg.clone());
+                    let _ = self.cmd_tx.send(msg);
+                }
+            }
         }
 
         full_output

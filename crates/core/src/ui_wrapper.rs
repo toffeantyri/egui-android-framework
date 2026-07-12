@@ -28,8 +28,8 @@ fn write_cx(ui: &egui::Ui, constraints: Constraints) {
 pub enum UiWrapper<'a> {
     /// Wraps a mutable reference to `egui::Ui`.
     Borrowed(&'a mut egui::Ui, Constraints),
-    /// Wraps an owned `egui::Ui`.
-    Owned(egui::Ui, Constraints),
+    /// Wraps an owned `egui::Ui` (boxed to reduce enum size).
+    Owned(Box<egui::Ui>, Constraints),
 }
 
 impl<'a> UiWrapper<'a> {
@@ -88,10 +88,10 @@ impl<'a> UiWrapper<'a> {
         let constraints = read_cx(ui);
         write_cx(ui, constraints);
         let child_ui = ui.new_child(builder);
-        UiWrapper::Owned(child_ui, constraints)
+        UiWrapper::Owned(Box::new(child_ui), constraints)
     }
 
-    /// Create child UiWrapper with new constraints.
+    /// Create a child `Ui` with the given constraints.
     pub fn new_child_with_constraints(
         ui: &mut egui::Ui,
         builder: egui::UiBuilder,
@@ -99,7 +99,7 @@ impl<'a> UiWrapper<'a> {
     ) -> UiWrapper<'_> {
         write_cx(ui, constraints);
         let child_ui = ui.new_child(builder);
-        UiWrapper::Owned(child_ui, constraints)
+        UiWrapper::Owned(Box::new(child_ui), constraints)
     }
 
     fn ui_mut(&mut self) -> &mut egui::Ui {
@@ -186,7 +186,7 @@ mod tests {
     fn test_constraints_custom() {
         with_ui(|ui| {
             let constraints = Constraints::ranged(10.0, 200.0, 20.0, 300.0);
-            let mut wrapper = UiWrapper::new(ui, constraints);
+            let wrapper = UiWrapper::new(ui, constraints);
             assert_eq!(wrapper.constraints().min_width, 10.0);
         });
     }

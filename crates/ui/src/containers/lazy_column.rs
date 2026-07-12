@@ -39,6 +39,7 @@ impl LazyColumn {
     /// * `dispatch` — диспетчер сообщений
     /// * `item_builder` — замыкание, вызываемое для каждого элемента;
     ///   получает ссылку на элемент, ui и dispatch
+    #[allow(clippy::new_ret_no_self)]
     pub fn new<M: 'static, T, F>(
         items: Vec<T>,
         ui: &mut UiWrapper,

@@ -35,6 +35,7 @@ impl Row {
     /// * `ui` — текущий Ui
     /// * `dispatch` — диспетчер сообщений
     /// * `content` — замыкание, в котором рендерятся дочерние виджеты
+    #[allow(clippy::new_ret_no_self)]
     pub fn new<M: 'static, F>(ui: &mut UiWrapper, dispatch: &Dispatcher<M>, content: F)
     where
         F: FnOnce(&mut UiWrapper, &Dispatcher<M>),

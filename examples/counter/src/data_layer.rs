@@ -22,12 +22,11 @@ pub fn data_layer_worker(
                     state.count = state.count.wrapping_add(1);
                     log::info!("DataLayer: count -> {}", state.count);
                 });
-                // Уведомить Runtime об изменении
                 let _ = notify_tx.send(());
             }
-            Ok(Msg::ToggleDetails) => {
-                // ToggleDetails управляется remember внутри View, data layer игнорирует
-                log::info!("DataLayer: ToggleDetails (управляется remember)");
+            Ok(Msg::ToggleTheme) => {
+                // ToggleTheme обрабатывается в Application::frame()
+                log::info!("DataLayer: ToggleTheme (игнорируется в data layer)");
             }
             Err(_) => {
                 log::info!("DataLayer: канал закрыт, завершаемся");

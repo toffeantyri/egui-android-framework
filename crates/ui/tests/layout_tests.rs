@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
 use egui_android_ui::containers::Column;
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
-use egui_android_ui::widgets::{Spacer, Text};
+use egui_android_ui::widgets::Text;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Helper: with_ui
@@ -46,6 +46,7 @@ fn measure_consumed_y(ui: &mut UiWrapper, render: impl FnOnce(&mut UiWrapper)) -
 }
 
 /// Измерить rect.height от одного Text::render.
+#[allow(dead_code)]
 fn measure_text_rect(ui: &mut UiWrapper, text: &str, modifier: Modifier<()>) -> f32 {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     let mut rect_h = 0.0f32;
@@ -459,7 +460,9 @@ fn test_width_200_consumed() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let c = measure_consumed_y(ui, |ui| {
-            Text::new("W").modifier(Modifier::new().width(200.0)).render(ui, &dispatch);
+            Text::new("W")
+                .modifier(Modifier::new().width(200.0))
+                .render(ui, &dispatch);
         });
         assert!(c <= 25.0, "width(200) consum={} > 25", c);
     });
@@ -470,7 +473,9 @@ fn test_height_48_consumed() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let c = measure_consumed_y(ui, |ui| {
-            Text::new("H").modifier(Modifier::new().height(48.0)).render(ui, &dispatch);
+            Text::new("H")
+                .modifier(Modifier::new().height(48.0))
+                .render(ui, &dispatch);
         });
         assert!(c <= 55.0, "height(48) consum={} > 55", c);
     });
@@ -574,25 +579,39 @@ fn test_all_modifiers_consumed_pp1_and_pp325() {
             let cases: Vec<(&str, Modifier<()>, f32)> = vec![
                 ("wrap_width", Modifier::new().wrap_content_width(), 22.0),
                 ("wrap_size", Modifier::new().wrap_content_size(), 22.0),
-                ("padding(8)", Modifier::new().padding(8.0).wrap_content_size(), 35.0),
+                (
+                    "padding(8)",
+                    Modifier::new().padding(8.0).wrap_content_size(),
+                    35.0,
+                ),
                 ("width(200)", Modifier::new().width(200.0), 25.0),
                 ("height(48)", Modifier::new().height(48.0), 55.0),
-                ("width_in+height_in", Modifier::new().width_in(50.0, 200.0).height_in(32.0, 48.0), 55.0),
+                (
+                    "width_in+height_in",
+                    Modifier::new().width_in(50.0, 200.0).height_in(32.0, 48.0),
+                    55.0,
+                ),
                 ("fill_max_width", Modifier::new().fill_max_width(), 25.0),
-                ("border(2)+wrap", Modifier::new().border(2.0, egui::Color32::WHITE).wrap_content_size(), 25.0),
+                (
+                    "border(2)+wrap",
+                    Modifier::new()
+                        .border(2.0, egui::Color32::WHITE)
+                        .wrap_content_size(),
+                    25.0,
+                ),
                 ("alpha(0.5)", Modifier::new().alpha(0.5), 22.0),
-                ("clip", Modifier::new().clip(egui::CornerRadius::same(4)), 25.0),
+                (
+                    "clip",
+                    Modifier::new().clip(egui::CornerRadius::same(4)),
+                    25.0,
+                ),
                 ("shadow(4)", Modifier::new().shadow(4.0), 35.0),
             ];
             for (name, modifier, max_c) in cases {
                 let c = measure_consumed_y(ui, |ui| {
                     Text::new("X").modifier(modifier).render(ui, &dispatch);
                 });
-                assert!(
-                    c <= max_c,
-                    "[pp={}] {} consum={} > {}",
-                    pp, name, c, max_c
-                );
+                assert!(c <= max_c, "[pp={}] {} consum={} > {}", pp, name, c, max_c);
             }
         });
     }

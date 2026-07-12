@@ -39,7 +39,7 @@ impl NestedSubScreen {
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
         Column::new().show(ui, dispatch, |ui, dispatch| {
-            Text::new(format!("{}", self.label))
+            Text::new(self.label.to_string())
                 .modifier(
                     Modifier::new()
                         .padding(12.0)

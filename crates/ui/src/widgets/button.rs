@@ -82,10 +82,12 @@ impl Default for ButtonColors {
 /// Вся область кнопки реагирует на клик.
 ///
 /// Встроенная визуальная обратная связь: при нажатии цвет фона меняется.
+type OnClickCallback<M> = Box<dyn Fn(&UiWrapper, &Dispatcher<M>)>;
+
 pub struct Button<M> {
     text: String,
     on_click_msg: Option<M>,
-    on_click_callback: Option<Box<dyn Fn(&UiWrapper, &Dispatcher<M>)>>,
+    on_click_callback: Option<OnClickCallback<M>>,
     height: f32,
     colors: ButtonColors,
     text_color: Option<egui::Color32>,
