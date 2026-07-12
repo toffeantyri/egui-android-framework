@@ -234,6 +234,11 @@ Button::new("Текст")
 - **Wrap-content по умолчанию** — кнопка измеряет текст через galley и не растягивается без модификатора.
 - **Full-width только через модификатор** — `.size(...)`, `.fill_max_width()`.
 - **Многострочный текст** — Button использует multiline layout, учитывая `available_width()`.
+- **Визуальный отклик при нажатии** — `is_pointer_button_down_on()` переключает цвет на `pressed`.
+- **theme_colors** — автоматически выбирает pressed:
+  - Если normal яркий (Value > 0.5) — затемняет на 30%
+  - Если normal тёмный (Value <= 0.5) — осветляет на 40%
+- **Кастомные цвета:** `.colors(normal, pressed)` — полный контроль.
 
 ### 6.2 Text
 
@@ -423,23 +428,41 @@ Row::new().show(ui, dispatch, |ui, dispatch| {
 
 ### 8.3 Stack
 
+**Расположение:** `egui_android_ui::containers::Stack`  
+**Align:** `egui_android_ui::containers::Align`
+
 ```rust
-Stack::new().show(ui, dispatch, |ui, dispatch| {
-    Text::new("Фон")
-        .modifier(Modifier::new().background(egui::Color32::BLUE))
-        .render(ui, dispatch);
-    Text::new("Поверх").render(ui, dispatch);
-});
+Stack::new()
+    .add(Text::new("Фон").modifier(Modifier::new().background(egui::Color32::BLUE)))
+    .add_with_align(Text::new("По центру"), Align::Center)
+    .show(ui, dispatch);
 ```
 
-**Constraints на детей:** `Constraints::ranged(0, inner_rect.width, 0, inner_rect.height)`
-**Размер:** wrap-content (max размер детей)
+**Constraints на детей:** `Constraints::ranged(0, inner_rect.width, 0, inner_rect.height)`  
+**Размер:** wrap-content — `max(widths), max(heights)` среди детей
+
+**Архитектура (Вариант B — список детей):**
+- Вместо одного closure принимает список `Box<dyn Widget>` через builder:
+  `Stack::new().add(child1).add_with_align(child2, Align::Center).show(ui, dispatch)`
+- Двухфазный measure→layout (аналог Compose Box)
+
+**Measure phase:**
+- Каждый ребёнок рендерится в отдельном временном scope
+- Shapes попадают в пайнт-лист родителя (scope не изолирует paint)
+- Размер каждого ребёнка = `scope.min_rect().size()`
+- `stack_size = max(widths), max(heights)` — clamp по available
+
+**Layout phase:**
+- `ui.allocate_exact_size(stack_size)` — резервирует место в родителе
+- Shapes уже нарисованы в measure — второй рендер не нужен
+- Overlay: все дети в одном rect (shapes накладываются)
 
 **Контракт:**
-- Wrap-content — не использует `ui.available_size()` как размер
-- Измеряет всех детей, берёт max(child_size)
-- alloc в родителе после рендера
-- Из-за `FnOnce` ограничения — двойной проход (alloc + render)
+- Wrap-content — consum = max(children), не sum(children)
+- overlay — дети накладываются, не идут последовательно
+- fill_max_width — работает через модификатор ребёнка
+- Не требует патча egui (set_cursor не используется)
+- align и add_with_align — API заложено, отложено до публичного set_cursor
 
 ### 8.4 LazyColumn
 

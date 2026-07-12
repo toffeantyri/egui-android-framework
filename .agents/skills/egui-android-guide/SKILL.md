@@ -176,16 +176,20 @@ Message = и событие, и семантика
 - `Button::new(text).on_click(msg)` — при клике диспатчит сообщение (MVI-поток).
 - `Button::new(text).on_click_with(closure)` — при клике вызывает closure (локальное UI-действие).
   Можно комбинировать с `on_click()` — сначала msg, потом closure.
+- `Button::theme_colors(color)` — pressed вычисляется автоматически (затемняет/осветляет).
+- `Button::colors(normal, pressed)` — полный контроль цветов кнопки.
+- `Button::text_color(color)` — цвет текста кнопки.
 - `Text::new(text)` — отображает строку.
 - `Spacer::new(size)` — вертикальный отступ.
 - `Icon::new(image)` — отображает изображение.
 
 ### `Column`, `Row`, `Stack`, `LazyColumn` — `egui-android-ui`
-- Контейнеры на замыканиях (Compose-like), а не на builder pattern.
-- Принимают `&mut UiWrapper`, `&Dispatcher` и closure, в котором рендерятся дочерние виджеты.
+- Контейнеры, управляющие расположением дочерних виджетов.
 - `Column::new().show(ui, dispatch, |ui, dispatch| { ... })` — вертикальное расположение, spacing по умолч. 8.0.
-- `Row::new().show(ui, dispatch, |ui, dispatch| { ... })` — горизонтальное расположение, spacing по умолч. 8.0.
-- `Stack::new().show(ui, dispatch, |ui, dispatch| { ... })` — наложение виджетов.
+- `Row::new(ui, dispatch, |ui, dispatch| { ... })` — горизонтальное расположение, spacing по умолч. 8.0.
+- `Stack::new().add(child1).add(child2).show(ui, dispatch)` — наложение виджетов (builder pattern, список детей).
+  Двухфазный measure→layout: consum = max(children), overlay.
+  align отложен (ждёт `pub set_cursor`).
 - `LazyColumn::new(items).show(ui, dispatch, |item, ui, dispatch| { ... })` — скроллируемый список.
 - Контейнеры передают детям constraints: `fill_max_width()` внутри Column растягивает дочерний виджет на всю ширину.
 

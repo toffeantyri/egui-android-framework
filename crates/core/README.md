@@ -1,72 +1,52 @@
 # egui-android-core
 
-Базовые MVI-примитивы для egui-приложений на Android.
+**MVI-примитивы для egui-приложений на Android.**
 
-## Проблема
+Крейт содержит базовые типы и трейты для построения UI-компонентов
+с однонаправленным потоком данных: Component, ViewFn, Widget, LifecycleObserver,
+а также инфраструктурные элементы: UiWrapper (обёртка над egui::Ui с Constraints),
+BackDispatcher (обработка кнопки Back), Constraints (Compose-like ограничения).
 
-egui — immediate-mode GUI. В нём нет:
-- единого способа организовать код в компоненты с состоянием
-- системы сообщений между View и бизнес-логикой
-- управления жизненным циклом экранов
-- встроенной обработки системной кнопки Back
-
-Этот крейт предоставляет все эти примитивы.
+[![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core)
 
 ## Состав
 
-| Тип | Описание |
-|---|---|
-| **`Component`** | Узел дерева навигации. Хранит snapshot состояния, `render()` делегирует View, `handle()` обрабатывает сообщения |
-| **`ViewFn<S, M>`** | Чистая функция `(state, ui, dispatch) → ()`. View не имеет побочных эффектов |
-| **`Widget<M>`** | Трейт для виджетов и модификаторов. Принимает `&mut UiWrapper` (Compose-like BoxWithConstraints) |
-| **`LifecycleObserver`** | Трейт с методами `on_create / on_start / on_resume / on_pause / on_stop / on_destroy` (все с пустой реализацией) |
-| **`ComponentContext`** | Контекст компонента: `BackDispatcher`, `back_fallback`, `StateStore`, каналы навигации и data layer |
-| **`BackDispatcher`** | Менеджер обработки системной кнопки Back с приоритетами. Аналог `BackDispatcher` из Decompose |
-| **`BackCallback`** | Callback для BackDispatcher: `{ priority: u32, handler: Box<dyn FnMut() -> bool> }` |
-| **`UiWrapper`** | Обёртка над `egui::Ui` с поддержкой `Constraints` (min/max width/height) |
-| **`Constraints`** | Compose-like ограничения размера: `{ min_width, max_width, min_height, max_height }` |
+### `Component` — узел дерева навигации
+- Хранит snapshot состояния + ссылку на Store
+- `render(ui, &dispatcher)` — делегирует View-функции
+- `handle(msg)` — обрабатывает сообщение (команда в data layer)
+- `sync_from_store()` — обновляет snapshot из Store
+- Наследует `LifecycleObserver`
 
-### `ComponentContext::on_back()` — обработка Back
+### `Widget<M>` — трейт для всех виджетов
+- `render(&self, ui: &mut UiWrapper, dispatch)` — рендерит виджет
+- Принимает `&mut UiWrapper` — даёт доступ к Constraints (аналог Compose BoxWithConstraints)
+- Generic `M` — тип сообщения для диспатча
 
-```
-ComponentContext::on_back()
-  ├── BackDispatcher::handle() — зарегистрированные callback'и (приоритет)
-  └── back_fallback — pop из ChildStack или завершение
-```
+### `UiWrapper` — обёртка над egui::Ui
+- Хранит `Constraints` в поле + в `Context::data()` (переживает `Frame::show`)
+- `allocate_space(size)` — alloc с учётом constraints
+- `Deref<Target = egui::Ui>` — полная совместимость
+- Owned/Borrowed варианты для child_ui
 
-**Внимание:** callback в `BackDispatcher` может пережить зарегистрировавший его компонент. Для экранов с кастомной логикой используйте прямой вызов `handle_back()` из `RootComponent::on_back()`, без BackDispatcher.
+### `Constraints` — Compose-like ограничения размера
+- `min_width`, `max_width`, `min_height`, `max_height`
+- `exact(w, h)` / `ranged(min_w, max_w, min_h, max_h)` / `unconstrained()`
 
-## Зависимости
+### `LifecycleObserver`
+- `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`
+- Все методы имеют пустую реализацию по умолчанию
 
-- `egui` — GUI
-- `egui-android-runtime` — Dispatcher, StateStore
-- `log`
+### `BackDispatcher`
+- Центральный менеджер кнопки Back
+- Регистрация callback'ов с приоритетами
+- Обработка: диалоги → кастомная логика → ChildStack pop → завершение
 
-## Пример
+## Когда использовать
 
-```rust
-use egui_android_core::{Component, LifecycleObserver, ComponentContext};
+Подключайте `egui-android-core`, если вы:
+- пишете свой виджет/контейнер (нужен Widget трейт, UiWrapper, Constraints)
+- работаете с навигацией и жизненным циклом
+- реализуете кастомную обработку Back
 
-struct MyComponent { count: u32, ctx: ComponentContext<NavEvent, DataCmd, AppState> }
-
-impl LifecycleObserver for MyComponent {}
-
-impl Component for MyComponent {
-    type State = u32;
-    type Message = Msg;
-
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Msg>) {
-        ui.label(format!("{}", self.count));
-        if ui.button("+1").clicked() {
-            dispatch.dispatch(Msg::Increment);
-        }
-    }
-
-    fn handle(&mut self, msg: Msg) {
-        self.ctx.send_cmd(msg); // команда в data layer
-    }
-
-    fn state(&self) -> &u32 { &self.count }
-    fn sync_from_store(&mut self) { /* обновить snapshot из store */ }
-}
-```
+Для готовых виджетов используйте `egui-android-ui` (реэкспортится через core).

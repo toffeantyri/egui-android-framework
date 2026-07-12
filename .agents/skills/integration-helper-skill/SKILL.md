@@ -8,6 +8,57 @@ description: Инструкция по быстрой интеграции egui-
 Этот skill содержит пошаговые инструкции и шаблоны для создания Android-приложений
 на Rust с использованием egui и egui-android-framework.
 
+## Справочник API
+
+### Stack (контейнер-наложение)
+
+**Расположение:** `egui_android_framework::ui::containers::Stack`  
+**Align:** `egui_android_framework::ui::containers::Align`
+
+```rust
+use egui_android_framework::ui::containers::{Stack, Align};
+
+Stack::new()
+    .add(child1)
+    .add_with_align(child2, Align::Center)  // align отложен до pub set_cursor
+    .show(ui, dispatch);
+```
+
+**Правила:**
+- Принимает список детей (builder pattern), не один closure
+- Wrap-content: consum = max(children), не sum
+- Overlay: дети накладываются, не идут последовательно
+- Двухфазный measure→layout (как Compose Box)
+- fill_max_width работает через модификатор ребёнка
+
+### ButtonColors и визуальный отклик
+
+**Расположение:** `egui_android_framework::ui::widgets::ButtonColors`
+
+```rust
+use egui_android_framework::ui::{widgets::Button, theme::Colors};
+
+// 1. Дефолтные цвета (синий/оранжевый) — автоматически
+Button::new("Нажми").render(ui, dispatch);
+
+// 2. Цвета по теме — pressed вычисляется автоматически
+Button::new("Тема")
+    .theme_colors(c.primary)  // c — из Theme::current()
+    .text_color(c.on_primary)
+    .render(ui, dispatch);
+
+// 3. Кастомные цвета (полный контроль)
+Button::new("Кастом")
+    .colors(Colors::LIGHT_GREEN, Colors::EMERALD)
+    .text_color(Colors::WHITE)
+    .render(ui, dispatch);
+```
+
+**Правила `theme_colors`:**
+- Для светлых цветов (Value > 0.5) — затемняет на 30% для pressed
+- Для тёмных цветов (Value <= 0.5) — осветляет на 40% для pressed
+- Гарантирует normal ≠ pressed для любой темы
+
 ## Шаблон проекта
 
 Новое приложение состоит из следующих файлов:

@@ -1,89 +1,101 @@
 # egui-android-ui
 
-UI слой: виджеты, модификаторы, контейнеры, анимации, темы, локальное состояние.
+**Compose-like UI для egui на Android.**
+
+Крейт содержит готовые виджеты, контейнеры, модификаторы, анимации и темы
+для построения интерфейса в стиле Jetpack Compose.
+
+[![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui)
 
 ## Проблема
 
-egui предоставляет примитивные UI-элементы, но для создания Compose-like интерфейсов не хватает:
-- декларативных контейнеров (Column, Row, Stack) с автоматическим constraint propagation
-- системы модификаторов (padding, background, clickable) без вложенности
-- анимаций появления/исчезновения
-- готовой темы Material Design 3
-- локального состояния между кадрами (remember)
-
-Этот крейт предоставляет всё перечисленное.
+egui предоставляет низкоуровневые примитивы. Для построения сложного UI
+нужны Column, Row, Stack, LazyColumn, система модификаторов, темы, анимации.
+Этот крейт реализует всё это поверх egui.
 
 ## Возможности
 
 ### Виджеты
-- **`Button<M>`** — кнопка с `on_click(msg)` и `on_click_with(closure)` (оба можно комбинировать)
-- **`Text`** — текст с модификаторами
-- **`Spacer`** — вертикальный отступ
-- **`Icon`** — изображение
+- **Button** — с визуальным откликом при нажатии (pressed ≠ normal). `theme_colors()` — автоматический подбор pressed под любую тему. `colors(normal, pressed)` — полный контроль.
+- **Text** — однострочный и многострочный, с выравниванием.
+- **Spacer** — вертикальный отступ.
+- **Icon** — изображение.
 
-### Контейнеры (Compose-like замыкания)
-- **`Column`** — вертикальное расположение, spacing по умолч. 8.0
-- **`Row`** — горизонтальное расположение, spacing по умолч. 8.0
-- **`Stack`** — наложение виджетов
-- **`LazyColumn`** — скроллируемый список
-
-Все контейнеры принимают `&mut UiWrapper`, `&Dispatcher` и closure.
-Передают детям constraints: `fill_max_width()` внутри Column растягивает на всю ширину.
+### Контейнеры
+- **Column** — вертикальный layout (аналог Compose Column). Spacing настраивается. Scrollable.
+- **Row** — горизонтальный layout (аналог Compose Row).
+- **Stack** — наложение виджетов (аналог Compose Box). Двухфазный measure→layout. Wrap-content (consum = max children). Builder pattern со списком детей.
+- **LazyColumn** — скроллируемый список.
 
 ### Модификаторы
-`Modifier::new()` — value-тип, иммутабельные методы:
-`.padding(N)`, `.background(C)`, `.border(w, color)`, `.rounding(r)`, `.fill_max_width()`, `.fill_max_size()`,
-`.width(w)`, `.height(h)`, `.width_in(min, max)`, `.height_in(min, max)`,
-`.wrap_content_width()`, `.wrap_content_size()`,
-`.clickable(msg)`, `.clickable_with(closure)`, `.alpha(a)`, `.clip(r)`, `.shadow(e)`
-
-Применяются через `ModifierDsl`: `.modifier(Modifier::new().padding(8.0).background(red))`
-
-**Порядок имеет значение:** первый модификатор — самый внешний. `.background().border()` — border поверх background. `.padding().background()` — padding внутри фона.
-
-**Важно:** Text использует `ui.allocate_exact_size()` для alloc'а rect — это гарантирует, что rect.height == galley.size.y на любом DPI.
+- **Размер:** `width`, `height`, `width_in`, `height_in`, `fill_max_width`, `wrap_content_width`, `wrap_content_size`, `size`
+- **Внешний вид:** `background`, `border`, `clip`, `shadow`, `alpha`
+- **Расположение:** `padding`, `padding_edges`
+- **Взаимодействие:** `clickable`, `clickable_with`
+- **Анимации:** `fade`, `slide`
+- **Alignment:** `align(Center)` — через метод виджета
 
 ### Анимации
-- **`AnimatedVisibility<M>`** — плавное появление/исчезновение с длительностью
-- **`Fade<W,M>`** — прозрачность
-- **`Slide<W,M>`** — смещение
-- **`animate_value()` / `animate_bool()`** — хелперы интерполяции через `egui::Context`
-- **`AnimationExt<M>`** — extension trait: `.fade(opacity)`, `.slide(direction, offset)`
+- **Fade** — плавное появление/исчезновение
+- **Slide** — движение в 4 направлениях
+- **AnimatedVisibility** — Compose-like: fade + slide при show/hide
+- **animate_value**, **animate_bool** — интерполяция между значениями
 
-### Темы
-- **`Theme`** — установка/чтение через `egui::Context::data()`
-- **`MaterialTheme::light()` / `MaterialTheme::dark()`** — Material Design 3 палитры
-- **`ColorPalette`**, **`Typography`**, **`Shapes`** — составные части темы
+### Тема
+- **Material Design 3** — полная палитра (primary, secondary, background, surface, error и on-варианты)
+- **Typography** — 15 размеров от display_large до label_small
+- **Shapes** — small, medium, large скругления
+- Автоматическое определение системной темы (light/dark)
 
 ### Локальное состояние
-- **`remember(ui, key, || init)`** — создаёт/восстанавливает состояние между кадрами
-- **`RememberState<T>`** — внутри `Arc<RwLock<T>>`, методы `get()`, `set()`, `modify()` принимают `&self`
-- Работает внутри замыканий контейнеров
-
-## Зависимости
-
-- `egui` — GUI
-- `egui-android-core` — `Widget<M>`, `UiWrapper`, `Dispatcher`
+- **`remember<T>()`** — аналог Compose `remember`. Хранит состояние между кадрами через `Arc<RwLock<T>>`. Методы `get()`, `set()`, `modify()` работают через `&self`.
 
 ## Пример
 
 ```rust
-use egui_android_ui::prelude::*;
-use egui_android_core::UiWrapper;
+use egui_android_ui::{
+    containers::{Column, Stack, Align},
+    modifier::{Modifier, ModifierDsl},
+    widgets::{Button, Text, Widget},
+    remember,
+    theme::Theme,
+};
 
-fn my_view(state: &AppState, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
-    Column::new().show(ui, dispatch, |ui, dispatch| {
-        Text::new("Заголовок")
-            .modifier(Modifier::new().padding(16.0).background(egui::Color32::from_gray(40)))
-            .render(ui, dispatch);
+Column::new().show(ui, dispatch, |ui, dispatch| {
+    // Тема
+    let theme = Theme::current(ui.ctx());
+    let c = &theme.colors;
 
-        Button::new("Нажми меня")
-            .on_click(Msg::Clicked)
-            .modifier(Modifier::new()
-                .padding(8.0)
-                .background(egui::Color32::from_rgb(0, 128, 255))
-                .fill_max_width())
-            .render(ui, dispatch);
-    });
-}
+    // Текст с модификаторами
+    Text::new("Привет!")
+        .modifier(Modifier::new().padding(8.0).background(c.primary))
+        .render(ui, dispatch);
+
+    // Кнопка с визуальным откликом
+    Button::new("Нажми")
+        .theme_colors(c.primary)
+        .text_color(c.on_primary)
+        .on_click(Msg::Clicked)
+        .modifier(Modifier::new().fill_max_width().padding(8.0))
+        .render(ui, dispatch);
+
+    // Stack с наложением
+    Stack::new()
+        .add(Text::new("Фон").modifier(Modifier::new().background(c.surface)))
+        .add_with_align(Text::new("Центр"), Align::Center)
+        .show(ui, dispatch);
+
+    // Локальное состояние
+    let count = remember(ui, "cnt", || 0i32);
+    Text::new(format!("{}", count.get())).render(ui, dispatch);
+});
 ```
+
+## Когда использовать
+
+Подключайте `egui-android-ui`, если вы строите UI с помощью фреймворка.
+Все виджеты, контейнеры и модификаторы доступны через `egui-android-framework`
+(umbrella). Отдельный крейт нужен для:
+- написания своих виджетов/контейнеров
+- тестирования UI-компонентов
+- минимизации зависимостей

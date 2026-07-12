@@ -1,26 +1,28 @@
 # egui-android-platform
 
-Абстрактный Platform trait. Определяет контракт между платформой и фреймворком.
+**Абстрактный Platform trait для egui на Android.**
 
-## Проблема
+Определяет контракт платформы: Platform, PlatformEvent, FrameInput, FrameOutput, PlatformConfig.
+Конкретная реализация — в `egui-android-platform-android`.
 
-Android-специфичный код (EGL, NativeWindow, input) не должен быть жёстко завязан на фреймворк.
-Этот крейт определяет абстрактный контракт, который реализует `egui-android-platform-android`.
-В будущем возможно появление реализаций для других платформ (Linux, Windows).
+[![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform)
 
 ## Состав
 
-| Тип | Описание |
-|---|---|
-| **`Platform`** | Трейт для платформо-зависимой реализации (EGL, окно, ввод) |
-| **`PlatformEvent`** | События платформы: InitWindow, Resume, Pause, Stop, Destroy |
-| **`FrameInput` / `FrameOutput`** | Входные/выходные данные одного кадра |
-| **`PlatformConfig`** | Конфигурация платформы (размеры, плотность пикселей) |
+### Platform (trait)
+- Абстракция над платформой (Android, десктоп, web)
 
-## Реализации
+### PlatformEvent
+- События: Touch, Key, BackPressed, Lifecycle (Resume, Pause, Destroy)
 
-- **Android:** `egui-android-platform-android` — EGL, NDK input, главный цикл
+### FrameInput / FrameOutput
+- Входные/выходные данные для одного кадра
 
-## Зависимости
+### PlatformConfig
+- Настройки платформы
 
-Нет внешних зависимостей.
+## Когда использовать
+
+Подключайте `egui-android-platform`, если вы:
+- пишете свою платформенную реализацию
+- используете абстракцию для тестирования на хосте

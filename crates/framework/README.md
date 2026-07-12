@@ -1,35 +1,34 @@
 # egui-android-framework
 
-Umbrella-крейт. Re-export всех крейтов фреймворка в одном месте.
+**Umbrella-крейт. Re-export всех крейтов egui-android.**
 
-Не содержит собственной логики — только `pub use` всех публичных API дочерних крейтов.
+Содержит только `pub use` всех крейтов workspace.
+Подключайте этот крейт для простоты — он даёт доступ ко всему фреймворку.
+
+[![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework)
 
 ## Состав
 
-| Модуль | Крейт | Назначение |
-|---|---|---|
-| `egui_android_framework::core` | egui-android-core | MVI примитивы: Component, ViewFn, LifecycleObserver, BackDispatcher, UiWrapper |
-| `egui_android_framework::ui` | egui-android-ui | Виджеты, модификаторы, контейнеры, анимации, темы, remember |
-| `egui_android_framework::runtime` | egui-android-runtime | Application, Dispatcher, StateStore, UiNotifier |
-| `egui_android_framework::navigation` | egui-android-navigation | ChildStack с управлением жизненным циклом |
-| `egui_android_framework::platform` | egui-android-platform | Абстрактный Platform trait |
-| `egui_android_framework::platform_android` | egui-android-platform-android | Android: EGL, input, главный цикл, Back |
+- `egui-android-core` — Component, Widget, UiWrapper, Constraints, BackDispatcher
+- `egui-android-ui` — виджеты, контейнеры, модификаторы, анимации, темы
+- `egui-android-runtime` — Application, Dispatcher, StateStore
+- `egui-android-navigation` — ChildStack
+- `egui-android-platform` — абстрактный Platform trait
+- `egui-android-platform-android` — Android реализация (EGL, input)
 
-## Использование
+## Импорт
 
 ```rust
-use egui_android_framework::{
-    core::{Component, LifecycleObserver, BackDispatcher, UiWrapper},
-    ui::prelude::*,
-    runtime::{Application, Dispatcher, StateStore},
-    navigation::ChildStack,
-    platform_android::run,
+// Через umbrella
+use egui_android_framework::runtime::{Application, Dispatcher};
+use egui_android_framework::core::{Component, UiWrapper};
+use egui_android_framework::ui::{
+    containers::{Column, Stack, Align},
+    modifier::{Modifier, ModifierDsl},
+    widgets::{Button, Text, Widget},
+    theme::Theme,
 };
-```
 
-Эквивалентно подключению каждого крейта отдельно, но удобнее — достаточно одной зависимости в Cargo.toml:
-
-```toml
-[dependencies]
-egui-android-framework = "0.3"
+// Напрямую (если подключен только конкретный крейт)
+use egui_android_runtime::Application;
 ```
