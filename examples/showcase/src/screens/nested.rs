@@ -72,19 +72,19 @@ impl NestedScreen {
                 // Кнопки для навигации во вложенные экраны
                 Button::new("Перейти на Nested A")
                     .on_click(RootMsg::Navigate(Route::NestedA))
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested B")
                     .on_click(RootMsg::Navigate(Route::NestedB))
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested C")
                     .on_click(RootMsg::Navigate(Route::NestedC))
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
@@ -92,7 +92,7 @@ impl NestedScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);

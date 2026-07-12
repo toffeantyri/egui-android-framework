@@ -166,6 +166,28 @@ impl<M: 'static> Button<M> {
         self
     }
 
+    /// Установить цвета кнопки по теме: pressed высчитывается автоматически
+    /// как осветлённая/затемнённая версия normal (для визуального отклика).
+    ///
+    /// # Пример
+    ///
+    /// ```ignore
+    /// Button::new("Нажми")
+    ///     .theme_colors(c.primary)
+    ///     .text_color(c.on_primary)
+    ///     .render(ui, dispatch);
+    /// ```
+    pub fn theme_colors(mut self, normal: egui::Color32) -> Self {
+        // Осветляем на 30% в HSV для pressed
+        let hsv = egui::ecolor::HsvaGamma::from(normal);
+        let pressed = egui::Color32::from(egui::ecolor::HsvaGamma {
+            v: (hsv.v + 0.3).min(1.0),
+            ..hsv
+        });
+        self.colors = ButtonColors { normal, pressed };
+        self
+    }
+
     /// Установить цвет текста кнопки (переопределяет тему).
     ///
     /// Если не задан — используется `ui.visuals().text_color()` (зависит от темы).

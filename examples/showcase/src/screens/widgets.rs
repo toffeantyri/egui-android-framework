@@ -10,7 +10,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
-        theme::Theme,
+        theme::{Colors, Theme},
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -40,19 +40,20 @@ impl WidgetsScreen {
                 Spacer::new(4.0).render(ui, dispatch);
                 Text::new("Кнопка с реакцией на нажатие:").render(ui, dispatch);
 
-                // Стандартный Button — цвет меняется при нажатии (встроено)
+                // Стандартный Button — цвет меняется при нажатии
                 Button::new("Нажми меня")
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 
-                Text::new("Кнопка с кастомными цветами:").render(ui, dispatch);
-                Button::new("Вторичная")
-                    .colors(c.secondary, c.secondary)
-                    .text_color(c.on_secondary)
+                Text::new("Кнопка с кастомными цветами (травяной → изумрудный):")
+                    .render(ui, dispatch);
+                Button::new("Зелёная")
+                    .colors(Colors::LIGHT_GREEN, Colors::EMERALD)
+                    .text_color(Colors::WHITE)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
 
@@ -65,7 +66,7 @@ impl WidgetsScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);

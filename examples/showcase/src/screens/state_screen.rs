@@ -56,7 +56,7 @@ impl StateScreen {
                             count.modify(|c| *c += 1);
                         }
                     })
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
@@ -68,7 +68,7 @@ impl StateScreen {
                             count.modify(|c| *c -= 1);
                         }
                     })
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
@@ -80,7 +80,7 @@ impl StateScreen {
                             count.set(0);
                         }
                     })
-                    .colors(c.secondary, c.secondary)
+                    .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
@@ -117,7 +117,7 @@ impl StateScreen {
                         expanded.modify(|v| *v = !*v);
                     }
                 })
-                .colors(c.secondary, c.secondary)
+                .theme_colors(c.secondary)
                 .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
@@ -133,7 +133,7 @@ impl StateScreen {
                             log::info!("Счётчик сброшен при навигации назад");
                         }
                     })
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);

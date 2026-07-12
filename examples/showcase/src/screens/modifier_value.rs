@@ -311,7 +311,7 @@ impl ModifierValueScreen {
                 // Кнопка назад
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);

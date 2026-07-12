@@ -52,7 +52,7 @@ impl AnimationsScreen {
                     let show_box = show_box.clone();
                     move |_ui, _dispatch| show_box.modify(|v| *v = !*v)
                 })
-                .colors(c.secondary, c.secondary)
+                .theme_colors(c.secondary)
                 .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
@@ -97,7 +97,7 @@ impl AnimationsScreen {
                     let slide_open = slide_open.clone();
                     move |_ui, _dispatch| slide_open.modify(|v| *v = !*v)
                 })
-                .colors(c.secondary, c.secondary)
+                .theme_colors(c.secondary)
                 .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
@@ -113,7 +113,7 @@ impl AnimationsScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);

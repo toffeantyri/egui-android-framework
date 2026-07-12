@@ -71,7 +71,7 @@ pub fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>)
             // ── Кнопка +1 (primary цвета) ──────────────────────────────
             Button::new("+1")
                 .on_click(Msg::Increment)
-                .colors(c.primary, c.primary)
+                .theme_colors(c.primary)
                 .text_color(c.on_primary)
                 .modifier(Modifier::new().fill_max_width().padding(8.0))
                 .render(ui, dispatch);
@@ -90,7 +90,7 @@ pub fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>)
                     show_details.modify(|v| *v = !*v);
                 }
             })
-            .colors(c.secondary, c.secondary)
+            .theme_colors(c.secondary)
             .text_color(c.on_secondary)
             .modifier(Modifier::new().fill_max_width().padding(8.0))
             .render(ui, dispatch);
@@ -99,7 +99,7 @@ pub fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>)
             Spacer::new(8.0).render(ui, dispatch);
             Button::new("Переключить тему")
                 .on_click(Msg::ToggleTheme)
-                .colors(c.primary, c.primary)
+                .theme_colors(c.primary)
                 .text_color(c.on_primary)
                 .modifier(Modifier::new().fill_max_width().padding(8.0))
                 .render(ui, dispatch);

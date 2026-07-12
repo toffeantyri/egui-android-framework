@@ -130,7 +130,7 @@ impl ContainersScreen {
                                     clicked.modify(|c| *c = !*c);
                                 }
                             })
-                            .colors(c.secondary, c.secondary)
+                            .theme_colors(c.secondary)
                             .text_color(c.on_secondary)
                             .modifier(Modifier::new().padding(4.0))
                             .render(ui, dispatch);
@@ -140,7 +140,7 @@ impl ContainersScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .colors(c.primary, c.primary)
+                    .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
