@@ -32,10 +32,16 @@ egui предоставляет примитивные UI-элементы, но
 
 ### Модификаторы
 `Modifier::new()` — value-тип, иммутабельные методы:
-`.padding(N)`, `.background(C)`, `.fill_max_width()`, `.size(W, H)`,
-`.clickable(msg)`, `.align(Align)`, `.clip()`, `.shadow(Shadow)`
+`.padding(N)`, `.background(C)`, `.border(w, color)`, `.rounding(r)`, `.fill_max_width()`, `.fill_max_size()`,
+`.width(w)`, `.height(h)`, `.width_in(min, max)`, `.height_in(min, max)`,
+`.wrap_content_width()`, `.wrap_content_size()`,
+`.clickable(msg)`, `.clickable_with(closure)`, `.alpha(a)`, `.clip(r)`, `.shadow(e)`
 
 Применяются через `ModifierDsl`: `.modifier(Modifier::new().padding(8.0).background(red))`
+
+**Порядок имеет значение:** первый модификатор — самый внешний. `.background().border()` — border поверх background. `.padding().background()` — padding внутри фона.
+
+**Важно:** Text использует `ui.allocate_exact_size()` для alloc'а rect — это гарантирует, что rect.height == galley.size.y на любом DPI.
 
 ### Анимации
 - **`AnimatedVisibility<M>`** — плавное появление/исчезновение с длительностью
