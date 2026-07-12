@@ -6,9 +6,9 @@
 use std::cell::RefCell;
 
 use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
-use egui_android_ui::containers::Column;
+use egui_android_ui::containers::{Column, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
-use egui_android_ui::widgets::Text;
+use egui_android_ui::widgets::{Spacer, Text};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Helper: with_ui
@@ -620,7 +620,7 @@ fn test_all_modifiers_consumed_pp1_and_pp325() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════
-// 10. ТЕСТЫ FILL_MAX_WIDTH С ALIGN — проверка min_rect.width и consum
+// 10. ТЕСТЫ FILL_MAX_WIDTH С ALIGN
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -749,4 +749,161 @@ fn test_fill_max_width_consum_with_border() {
     };
     with_ui(|ui| check(ui));
     with_pp(3.25, |ui| check(ui));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// 11. МАЛЫЕ ПРОБЕЛЫ КОНТРАКТА
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_spacer_consum_same_at_pp1_and_pp325() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    let check = |ui: &mut UiWrapper| {
+        let c = measure_consumed_y(ui, |ui| {
+            Spacer::new(100.0).render(ui, &dispatch);
+        });
+        assert!((c - 100.0).abs() < 5.0, "Spacer consum={} != 100", c);
+    };
+    with_pp(1.0, |ui| check(ui));
+    with_pp(3.25, |ui| check(ui));
+}
+
+#[test]
+fn test_padding_zero_equals_no_padding() {
+    // padding(0) не должен менять consum относительно текста без padding
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().padding(0.0))
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 3.0,
+            "padding(0) меняет consum: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_border_zero_equals_no_border() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().border(0.0, egui::Color32::RED))
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 3.0,
+            "border(0) меняет consum: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_alpha_zero_equals_no_alpha() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().alpha(0.0))
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 3.0,
+            "alpha(0) меняет consum: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_padding_bg_vs_bg_padding_same_consum() {
+    // Оба порядка дают одинаковый consum, потому что background не alloc'ит место.
+    // padding(16) даёт +32px в обоих случаях.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().padding(16.0).background(egui::Color32::RED))
+                .render(ui, &dispatch);
+        });
+        let c2 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().background(egui::Color32::RED).padding(16.0))
+                .render(ui, &dispatch);
+        });
+        assert!((c1 - c2).abs() < 5.0, "padding+bg={} bg+padding={}", c1, c2);
+    });
+}
+
+#[test]
+fn test_width_in_does_not_change_text_height() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().width_in(50.0, 200.0))
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 5.0,
+            "width_in меняет высоту: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_stack_with_padding_background() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Stack::new(ui, &dispatch, |ui, dispatch| {
+            Text::new("A")
+                .modifier(Modifier::new().padding(8.0).background(egui::Color32::RED))
+                .render(ui, dispatch);
+            Text::new("B")
+                .modifier(Modifier::new().padding(8.0))
+                .render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_width_zero_does_not_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("X")
+            .modifier(Modifier::new().width(0.0))
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_height_zero_does_not_panic() {
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Text::new("X")
+            .modifier(Modifier::new().height(0.0))
+            .render(ui, &dispatch);
+    });
 }
