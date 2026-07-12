@@ -16,7 +16,7 @@ members = [
 version = "0.3.3-alpha.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://gitverse.ru/Tofy3434/egui-android-framework"
+repository = "https://github.com/toffeantyri/egui-android-framework"
 
 [workspace.dependencies]
 thiserror = "2.0"
