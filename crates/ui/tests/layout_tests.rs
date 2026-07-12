@@ -1309,3 +1309,170 @@ fn test_height_in_consum_equals_height() {
         );
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// 17. НОВЫЕ ТЕСТЫ ПО КОНТРАКТУ
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_row_wrap_content_width_consum() {
+    // Row с wrap_content_width не должен растягиваться на всю ширину.
+    // consum по ширине ≈ сумма ширин детей + spacing.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail = ui.available_size().x;
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            Row::new(&mut w, &dispatch, |ui, dispatch| {
+                Text::new("A")
+                    .modifier(Modifier::new().wrap_content_width())
+                    .render(ui, dispatch);
+                Text::new("B")
+                    .modifier(Modifier::new().wrap_content_width())
+                    .render(ui, dispatch);
+            });
+            let mr = w.min_rect();
+            // min_rect.width должен быть ≈ 2 * text_width + spacing(8), а не avail
+            assert!(
+                mr.width() < avail * 0.5,
+                "Row wrap_content: min_rect.width={} >= avail*0.5={} (должен быть < 50%% экрана)",
+                mr.width(),
+                avail * 0.5
+            );
+            assert!(
+                mr.width() > 0.0,
+                "Row wrap_content: min_rect.width={} <= 0",
+                mr.width()
+            );
+        });
+    });
+}
+
+#[test]
+fn test_lazy_column_in_scroll_area() {
+    // LazyColumn внутри ScrollArea: consum > 0, не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let items = vec!["A", "B", "C"];
+        let c = measure_consumed_y(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut w = UiWrapper::new_unconstrained(ui);
+                LazyColumn::new(items, &mut w, &dispatch, |item, ui, dispatch| {
+                    Text::new(*item).render(ui, dispatch);
+                });
+            });
+        });
+        // LazyColumn внутри ScrollArea должен потреблять место
+        assert!(c > 0.0, "LazyColumn in ScrollArea consum={} <= 0", c);
+    });
+}
+
+#[test]
+fn test_padding_8_pp325() {
+    // padding(8) на pp=3.25: consum ≈ text + 16
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_pp(3.25, |ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().padding(8.0).wrap_content_size())
+                .render(ui, &dispatch);
+        });
+        let diff = c1 - c0;
+        assert!(
+            (diff - 16.0).abs() < 5.0,
+            "[pp=3.25] padding(8) diff={} != ~16",
+            diff
+        );
+    });
+}
+
+#[test]
+fn test_clip_pp325() {
+    // clip на pp=3.25: consum не меняется относительно текста
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_pp(3.25, |ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("C").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("C")
+                .modifier(Modifier::new().clip(egui::CornerRadius::same(4)))
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 3.0,
+            "[pp=3.25] clip изменил consum: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_fill_max_width_pp325() {
+    // fill_max_width на pp=3.25: consum не меняется
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_pp(3.25, |ui| {
+        let c0 = measure_consumed_y(ui, |ui| {
+            Text::new("F").render(ui, &dispatch);
+        });
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("F")
+                .modifier(Modifier::new().fill_max_width())
+                .render(ui, &dispatch);
+        });
+        assert!(
+            (c0 - c1).abs() < 3.0,
+            "[pp=3.25] fill_max_width изменил consum: без={} с={}",
+            c0,
+            c1
+        );
+    });
+}
+
+#[test]
+fn test_paint_shapes_within_rect() {
+    // Paint Phase: background alloc'ит место внутри rect.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().background(egui::Color32::RED))
+                .render(ui, &dispatch);
+        });
+        // background alloc'ит место ≈ text_height
+        assert!(
+            (c - 18.0).abs() < 5.0,
+            "paint background consum={} != ~18",
+            c
+        );
+    });
+}
+
+#[test]
+fn test_constraints_inheritance_frame_show() {
+    // Integration test: constraints должны переживать Frame::show.
+    use egui_android_core::Constraints;
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let constraints = Constraints::exact(150.0, 80.0);
+        let mut wrapper = UiWrapper::new(ui, constraints);
+        let before = *wrapper.constraints();
+        let mut result = None::<Constraints>;
+        let _ = egui::Frame::default().show(&mut wrapper, |ui| {
+            let w = UiWrapper::new_unconstrained(ui);
+            result = Some(*w.constraints());
+        });
+        let after = result.expect("Frame::show не вызвал callback");
+        // width должно быть унаследовано
+        assert!(
+            after.max_width >= before.max_width - 10.0,
+            "Frame::show изменил constraints.max_width: before={:?}, after={:?}",
+            before.max_width,
+            after.max_width
+        );
+    });
+}
