@@ -6,7 +6,7 @@ use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
 use egui_android_ui::animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };
-use egui_android_ui::containers::{Column, LazyColumn, Row, Stack};
+use egui_android_ui::containers::{Align, Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
 use egui_android_ui::theme::{MaterialTheme, Shapes, Theme};
 use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
@@ -444,9 +444,7 @@ fn test_row_ordering_no_panic() {
 fn test_stack_empty() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Stack::new(ui, &dispatch, |_ui, _dispatch| {
-            // пустой стек — ничего не рендерим
-        });
+        Stack::<()>::new().show(ui, &dispatch);
     });
 }
 
@@ -454,10 +452,10 @@ fn test_stack_empty() {
 fn test_stack_with_children() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Stack::new(ui, &dispatch, |ui, dispatch| {
-            Text::new("Layer 1").render(ui, dispatch);
-            Text::new("Layer 2").render(ui, dispatch);
-        });
+        Stack::new()
+            .add(Text::new("Layer 1"))
+            .add(Text::new("Layer 2"))
+            .show(ui, &dispatch);
     });
 }
 
@@ -1333,16 +1331,18 @@ fn test_align_nested_row_in_column() {
 
 #[test]
 fn test_align_in_stack() {
-    // Aligned внутри Stack — проверяем alloc'ацию места.
+    // Stack применяет двухпроходное измерение: consum ≈ max(children).
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let c = measure_consumed_y(ui, |ui| {
-            Stack::new(ui, &dispatch, |ui, dispatch| {
-                Text::new("Центр").render(ui, dispatch);
-            });
+            Stack::new().add(Text::new("Центр")).show(ui, &dispatch);
         });
         // Stack с текстом: consum ≈ text_height ≈ 18
-        assert!(c > 0.0 && c < 100.0, "Stack consum={} не в (0, 100)", c);
+        assert!(
+            (c - 18.0).abs() < 5.0,
+            "Stack consum={} != ~18 (wrap-content)",
+            c
+        );
     });
 }
 

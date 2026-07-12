@@ -3,7 +3,7 @@
 use egui_android_framework::{
     runtime::Dispatcher,
     ui::{
-        containers::{Column, LazyColumn, Row, Stack},
+        containers::{Align, Column, LazyColumn, Row, Stack},
         modifier::{Modifier, ModifierDsl},
         remember,
         theme::Theme,
@@ -88,15 +88,17 @@ impl ContainersScreen {
 
                 // Stack (наложение)
                 Text::new("Stack (наложение):").render(ui, dispatch);
-                Stack::new(ui, dispatch, |ui, dispatch| {
-                    Text::new("Фон")
-                        .text_color(c.on_primary)
-                        .modifier(Modifier::new().background(c.primary).padding(8.0))
-                        .render(ui, dispatch);
-                    Text::new("Поверх")
-                        .modifier(Modifier::new().padding(8.0))
-                        .render(ui, dispatch);
-                });
+                Stack::new()
+                    .add(
+                        Text::new("Фон")
+                            .text_color(c.on_primary)
+                            .modifier(Modifier::new().background(c.primary).padding(8.0)),
+                    )
+                    .add_with_align(
+                        Text::new("Поверх").modifier(Modifier::new().padding(8.0)),
+                        Align::Center,
+                    )
+                    .show(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
 

@@ -1291,6 +1291,8 @@ impl Ui {
         self.placer.cursor()
     }
 
+    /// Set the cursor to a specific rect.
+    /// This can be used to reset cursor position for overlay layouts like Stack.
     pub(crate) fn set_cursor(&mut self, cursor: Rect) {
         self.placer.set_cursor(cursor);
     }

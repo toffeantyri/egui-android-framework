@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 
 use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
-use egui_android_ui::containers::{Column, LazyColumn, Row, Stack};
+use egui_android_ui::containers::{Align, Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
 use egui_android_ui::widgets::{Button, Spacer, Text};
 
@@ -1036,21 +1036,18 @@ fn test_stack_with_padding_background() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let c = measure_consumed_y(ui, |ui| {
-            Stack::new(ui, &dispatch, |ui, dispatch| {
-                Text::new("A")
-                    .modifier(Modifier::new().padding(8.0).background(egui::Color32::RED))
-                    .render(ui, dispatch);
-                Text::new("B")
-                    .modifier(Modifier::new().padding(8.0))
-                    .render(ui, dispatch);
-            });
+            Stack::new()
+                .add(
+                    Text::new("A")
+                        .modifier(Modifier::new().padding(8.0).background(egui::Color32::RED)),
+                )
+                .add(Text::new("B").modifier(Modifier::new().padding(8.0)))
+                .show(ui, &dispatch);
         });
-        // Известный баг: Stack alloc'ит детей последовательно (consum ≈ sum, не max).
-        // consum ≈ text_A(18) + padding_A(16) + spacing(?) + text_B(18) + padding_B(16) ≈ 68
-        // Должен быть ≈ 31 (max), но пока суммирует.
+        // Оба ребёнка имеют padding(8)=16px + text ≈ 31. Stack = max ≈ 31.
         assert!(
-            (c - 68.0).abs() < 10.0,
-            "Stack + padding + bg consum={} != ~68 (известный баг — суммирует вместо max)",
+            (c - 31.0).abs() < 5.0,
+            "Stack + padding + bg consum={} != ~31",
             c
         );
     });
@@ -1188,27 +1185,25 @@ fn test_column_in_row_nested_consum() {
 
 #[test]
 fn test_stack_children_overlap_not_sum() {
-    // Stack должен перекрывать детей (consum ≈ max), а не суммировать (consum ≈ sum).
-    // СЕЙЧАС ПАДАЕТ — Stack alloc'ит детей последовательно как Column.
+    // Stack = max(children), не sum(children).
+    // Два текста по ~18px. Stack = 18, не 36.
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let c_single = measure_consumed_y(ui, |ui| {
             Text::new("Высокий текст").render(ui, &dispatch);
         });
         let c_stack = measure_consumed_y(ui, |ui| {
-            Stack::new(ui, &dispatch, |ui, dispatch| {
-                Text::new("A").render(ui, dispatch);
-                Text::new("Высокий текст").render(ui, dispatch);
-            });
+            Stack::new()
+                .add(Text::new("A"))
+                .add(Text::new("Высокий текст"))
+                .show(ui, &dispatch);
         });
-        // Stack consum ≈ max(child) ≈ c_single, не sum = c_single + child2
-        let max_allowed = c_single * 1.5;
+        // Stack consum = max(children) = c_single (высота самого высокого)
         assert!(
-            c_stack <= max_allowed,
-            "Stack consum={} > max_allowed={} (дети не перекрываются: sum ≈ {})",
+            (c_stack - c_single).abs() < 5.0,
+            "Stack consum={} != single={} (должен быть max, не sum)",
             c_stack,
-            max_allowed,
-            c_single * 2.0
+            c_single
         );
     });
 }
@@ -1474,5 +1469,115 @@ fn test_constraints_inheritance_frame_show() {
             before.max_width,
             after.max_width
         );
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// 18. ТЕСТЫ STACK ПО КОНТРАКТУ
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stack_overlay_not_sum_width() {
+    // Два широких текста в Stack: consum = max(width, height), не sum.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            let before = w.min_rect();
+            Stack::new()
+                .add(Text::new("Короткий"))
+                .add(Text::new("Очень длинный текст для проверки ширины"))
+                .show(&mut w, &dispatch);
+            let after = w.min_rect();
+            // Ширина Stack = max(child_width), не сумма.
+            // Если бы суммировал — after.width был бы ~ 2x от before.width
+            assert!(
+                after.width() < 1000.0,
+                "Stack width={} слишком большой (должен быть wrap-content)",
+                after.width()
+            );
+        });
+    });
+}
+
+#[test]
+fn test_stack_fill_max_width() {
+    // Stack с fill_max_width растягивается на всю доступную ширину.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail = ui.available_size().x;
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            Stack::new()
+                .add(Text::new("Растянутый").modifier(Modifier::new().fill_max_width()))
+                .show(&mut w, &dispatch);
+            let mr = w.min_rect();
+            // fill_max_width внутри Stack должен растянуться на avail
+            assert!(
+                mr.width() >= avail - 10.0,
+                "Stack fill_max_width: min_rect.width={} < avail={} - 10",
+                mr.width(),
+                avail
+            );
+        });
+    });
+}
+
+#[test]
+fn test_stack_in_row_nested() {
+    // Stack внутри Row: consum Row = max(Stack, другой ребёнок).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Row::new(ui, &dispatch, |ui, dispatch| {
+                Stack::new()
+                    .add(Text::new("A"))
+                    .add(Text::new("B"))
+                    .show(ui, dispatch);
+                Text::new("C").render(ui, dispatch);
+            });
+        });
+        // Row consum = max(Stack≈18, text≈18) ≈ 18
+        assert!((c - 18.0).abs() < 5.0, "Stack in Row consum={} != ~18", c);
+    });
+}
+
+#[test]
+fn test_stack_overlay_three_children() {
+    // Три ребёнка в Stack: consum = max, не sum.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c_single = measure_consumed_y(ui, |ui| {
+            Text::new("X").render(ui, &dispatch);
+        });
+        let c_stack = measure_consumed_y(ui, |ui| {
+            Stack::new()
+                .add(Text::new("X"))
+                .add(Text::new("Y"))
+                .add(Text::new("Z"))
+                .show(ui, &dispatch);
+        });
+        // Stack consum ≈ max(child) ≈ c_single, не sum = 3 * c_single
+        assert!(
+            (c_stack - c_single).abs() < 5.0,
+            "Stack 3 children consum={} != single={} (должен быть max, не sum)",
+            c_stack,
+            c_single
+        );
+    });
+}
+
+#[test]
+fn test_stack_zero_modifiers_no_panic() {
+    // border(0) и padding(0) в Stack не должны паниковать.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Stack::new()
+            .add(
+                Text::new("A")
+                    .modifier(Modifier::new().border(0.0, egui::Color32::RED).padding(0.0)),
+            )
+            .add(Text::new("B"))
+            .show(ui, &dispatch);
     });
 }

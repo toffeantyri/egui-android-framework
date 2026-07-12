@@ -6,4 +6,4 @@ mod stack;
 pub use column::Column;
 pub use lazy_column::LazyColumn;
 pub use row::Row;
-pub use stack::Stack;
+pub use stack::{Align, Stack};
