@@ -1,6 +1,4 @@
 //! Вложенный экран внутри NestedScreen.
-//!
-//! Простой экран с текстом и кнопкой Back (pop из вложенного стека).
 
 use egui_android_framework::{
     core::{Component, LifecycleObserver},
@@ -8,6 +6,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -38,13 +37,12 @@ impl NestedSubScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
+
         Column::new().show(ui, dispatch, |ui, dispatch| {
             Text::new(self.label.to_string())
-                .modifier(
-                    Modifier::new()
-                        .padding(12.0)
-                        .background(egui::Color32::from_gray(60)),
-                )
+                .text_color(c.on_secondary)
+                .modifier(Modifier::new().padding(12.0).background(c.secondary))
                 .render(ui, dispatch);
 
             Spacer::new(8.0).render(ui, dispatch);
@@ -57,6 +55,8 @@ impl NestedSubScreen {
 
             Button::new("← Назад (на уровень Nested)")
                 .on_click(RootMsg::Back)
+                .colors(c.primary, c.primary)
+                .text_color(c.on_primary)
                 .modifier(Modifier::new().fill_max_width().padding(8.0))
                 .render(ui, dispatch);
         });

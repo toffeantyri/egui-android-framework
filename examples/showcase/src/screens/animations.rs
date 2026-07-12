@@ -7,6 +7,7 @@ use egui_android_framework::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
         remember,
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -23,6 +24,7 @@ impl AnimationsScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
         let show_box = remember(ui, "anim_show", || false);
         let slide_open = remember(ui, "anim_slide", || false);
 
@@ -37,11 +39,8 @@ impl AnimationsScreen {
                 // AnimatedVisibility
                 Text::new("AnimatedVisibility:").render(ui, dispatch);
                 Text::new(format!("visible = {}", *show_box.get()))
-                    .modifier(
-                        Modifier::new()
-                            .padding(4.0)
-                            .background(egui::Color32::from_gray(50)),
-                    )
+                    .text_color(c.on_secondary)
+                    .modifier(Modifier::new().padding(4.0).background(c.secondary))
                     .render(ui, dispatch);
 
                 Button::new(if *show_box.get() {
@@ -53,16 +52,21 @@ impl AnimationsScreen {
                     let show_box = show_box.clone();
                     move |_ui, _dispatch| show_box.modify(|v| *v = !*v)
                 })
+                .colors(c.secondary, c.secondary)
+                .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
 
                 AnimatedVisibility::new(*show_box.get(), 0.3)
                     .child(
-                        Text::new("Появляющийся текст").modifier(
-                            Modifier::new()
-                                .padding(12.0)
-                                .background(egui::Color32::from_gray(40)),
-                        ),
+                        Text::new("Появляющийся текст")
+                            .text_color(c.on_secondary)
+                            .modifier(
+                                Modifier::new()
+                                    .fill_max_width()
+                                    .padding(12.0)
+                                    .background(c.secondary),
+                            ),
                     )
                     .render(ui, dispatch);
 
@@ -80,11 +84,8 @@ impl AnimationsScreen {
                 // Slide
                 Text::new("Slide:").render(ui, dispatch);
                 Text::new(format!("slide_open = {}", *slide_open.get()))
-                    .modifier(
-                        Modifier::new()
-                            .padding(4.0)
-                            .background(egui::Color32::from_gray(50)),
-                    )
+                    .text_color(c.on_secondary)
+                    .modifier(Modifier::new().padding(4.0).background(c.secondary))
                     .render(ui, dispatch);
 
                 Button::new(if *slide_open.get() {
@@ -96,6 +97,8 @@ impl AnimationsScreen {
                     let slide_open = slide_open.clone();
                     move |_ui, _dispatch| slide_open.modify(|v| *v = !*v)
                 })
+                .colors(c.secondary, c.secondary)
+                .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
 
@@ -110,6 +113,8 @@ impl AnimationsScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });

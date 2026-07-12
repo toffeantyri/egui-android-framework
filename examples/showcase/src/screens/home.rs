@@ -5,6 +5,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -22,6 +23,7 @@ impl HomeScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
         let routes = vec![
             Route::Widgets,
             Route::Modifiers,
@@ -45,6 +47,8 @@ impl HomeScreen {
                 for route in routes {
                     Button::new(route.title())
                         .on_click(RootMsg::Navigate(route))
+                        .colors(c.primary, c.primary)
+                        .text_color(c.on_primary)
                         .modifier(Modifier::new().fill_max_width().padding(8.0))
                         .render(ui, dispatch);
                 }

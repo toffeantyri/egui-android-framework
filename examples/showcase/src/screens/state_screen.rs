@@ -9,11 +9,11 @@ use egui_android_framework::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
         remember,
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
 };
-
 
 use crate::root_component::RootMsg;
 
@@ -26,6 +26,8 @@ impl StateScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
+
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
@@ -42,11 +44,8 @@ impl StateScreen {
                 let count = remember(ui, "ss_count", || 0i32);
 
                 Text::new(format!("Значение: {}", count.get()))
-                    .modifier(
-                        Modifier::new()
-                            .padding(12.0)
-                            .background(egui::Color32::from_gray(60)),
-                    )
+                    .text_color(c.on_secondary)
+                    .modifier(Modifier::new().padding(12.0).background(c.secondary))
                     .render(ui, dispatch);
 
                 // Кнопки для изменения remember напрямую через on_click_with
@@ -57,6 +56,8 @@ impl StateScreen {
                             count.modify(|c| *c += 1);
                         }
                     })
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
 
@@ -67,6 +68,8 @@ impl StateScreen {
                             count.modify(|c| *c -= 1);
                         }
                     })
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
 
@@ -77,6 +80,8 @@ impl StateScreen {
                             count.set(0);
                         }
                     })
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
 
@@ -97,11 +102,8 @@ impl StateScreen {
                         "свёрнуто"
                     }
                 ))
-                .modifier(
-                    Modifier::new()
-                        .padding(8.0)
-                        .background(egui::Color32::from_gray(50)),
-                )
+                .text_color(c.on_secondary)
+                .modifier(Modifier::new().padding(8.0).background(c.secondary))
                 .render(ui, dispatch);
 
                 Button::new(if *expanded.get() {
@@ -115,22 +117,24 @@ impl StateScreen {
                         expanded.modify(|v| *v = !*v);
                     }
                 })
+                .colors(c.secondary, c.secondary)
+                .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
 
                 // Комбинированный пример: on_click(msg) + on_click_with(closure)
-                // on_click диспатчит RootMsg::Navigate(Route::Home) для навигации
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад (MVI + remember)")
-                    .on_click(RootMsg::Back) // MVI-поток: навигация назад
+                    .on_click(RootMsg::Back)
                     .on_click_with({
                         let count = count.clone();
                         move |_ui, _dispatch| {
-                            // Дополнительно: сбрасываем счётчик при уходе
                             count.set(0);
                             log::info!("Счётчик сброшен при навигации назад");
                         }
                     })
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 

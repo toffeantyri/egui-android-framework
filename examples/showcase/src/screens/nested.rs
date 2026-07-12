@@ -4,9 +4,6 @@
 //! `RootComponent::on_back()`, а не через BackDispatcher, чтобы избежать
 //! проблем с временем жизни raw pointer (callback в BackDispatcher переживает
 //! NestedScreen при pop из корневого стека, что приводит к SIGSEGV).
-//!
-//! - если есть вложенный экран → pop внутри (Handled)
-//! - если нет → NotHandled (Root делает pop)
 
 use egui_android_framework::{
     navigation::ChildStack,
@@ -14,6 +11,7 @@ use egui_android_framework::{
     ui::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
@@ -24,9 +22,6 @@ use crate::root_component::RootMsg;
 use crate::screens::nested_sub::NestedSubScreen;
 
 /// Экран с вложенной навигацией.
-///
-/// Обработка Back — через прямой вызов `handle_back()` из RootComponent.
-/// Не использует BackDispatcher, поэтому нет unsafe указателей.
 pub struct NestedScreen {
     /// Вложенный стек: Route — ключ, NestedSubScreen — компонент.
     pub stack: ChildStack<Route, NestedSubScreen>,
@@ -40,7 +35,6 @@ impl NestedScreen {
     }
 
     /// Обработать BackPressed — вызывается из RootComponent::on_back().
-    /// Возвращает true если Back обработан (pop внутри вложенного стека), false если нет.
     pub fn handle_back(&mut self) -> bool {
         if self.stack.is_empty() {
             return false;
@@ -50,6 +44,8 @@ impl NestedScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
+
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
@@ -76,20 +72,28 @@ impl NestedScreen {
                 // Кнопки для навигации во вложенные экраны
                 Button::new("Перейти на Nested A")
                     .on_click(RootMsg::Navigate(Route::NestedA))
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested B")
                     .on_click(RootMsg::Navigate(Route::NestedB))
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested C")
                     .on_click(RootMsg::Navigate(Route::NestedC))
+                    .colors(c.secondary, c.secondary)
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
 
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });

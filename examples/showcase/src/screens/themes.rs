@@ -26,7 +26,7 @@ impl ThemesScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
-        // Применяем тему из фреймворка
+        // Применяем тему
         if self.is_dark_mode {
             MaterialTheme::dark().apply(ui.ctx());
         } else {
@@ -34,6 +34,7 @@ impl ThemesScreen {
         }
 
         let theme = Theme::current(ui.ctx());
+        let c = &theme.colors;
 
         Column::new()
             .scrollable()
@@ -50,10 +51,12 @@ impl ThemesScreen {
                 } else {
                     "Светлая"
                 })
+                .text_color(c.on_primary)
                 .modifier(
                     Modifier::new()
+                        .fill_max_width()
                         .padding(8.0)
-                        .background(theme.colors.primary),
+                        .background(c.primary),
                 )
                 .render(ui, dispatch);
 
@@ -62,35 +65,49 @@ impl ThemesScreen {
                 // Палитра цветов
                 Text::new("Палитра цветов:").render(ui, dispatch);
                 Text::new("Primary")
+                    .text_color(c.on_primary)
                     .modifier(
                         Modifier::new()
+                            .fill_max_width()
                             .padding(8.0)
-                            .background(theme.colors.primary),
+                            .background(c.primary),
                     )
                     .render(ui, dispatch);
                 Text::new("Secondary")
+                    .text_color(c.on_secondary)
                     .modifier(
                         Modifier::new()
+                            .fill_max_width()
                             .padding(8.0)
-                            .background(theme.colors.secondary),
+                            .background(c.secondary),
                     )
                     .render(ui, dispatch);
                 Text::new("Background")
+                    .text_color(c.on_background)
                     .modifier(
                         Modifier::new()
+                            .fill_max_width()
                             .padding(8.0)
-                            .background(theme.colors.background),
+                            .background(c.background),
                     )
                     .render(ui, dispatch);
                 Text::new("Surface")
+                    .text_color(c.on_surface)
                     .modifier(
                         Modifier::new()
+                            .fill_max_width()
                             .padding(8.0)
-                            .background(theme.colors.surface),
+                            .background(c.surface),
                     )
                     .render(ui, dispatch);
                 Text::new("Error")
-                    .modifier(Modifier::new().padding(8.0).background(theme.colors.error))
+                    .text_color(c.on_error)
+                    .modifier(
+                        Modifier::new()
+                            .fill_max_width()
+                            .padding(8.0)
+                            .background(c.error),
+                    )
                     .render(ui, dispatch);
 
                 Spacer::new(8.0).render(ui, dispatch);
@@ -100,24 +117,27 @@ impl ThemesScreen {
                     .render(ui, dispatch);
                 Button::new("Переключить тему")
                     .on_click(RootMsg::ToggleTheme)
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
-                Text::new("Кнопка с постоянным белым текстом (не зависит от темы):")
-                    .render(ui, dispatch);
-                Button::new("Белый текст")
+                Text::new("Кнопка с белым текстом (не меняется от темы):").render(ui, dispatch);
+                Button::new("Белый текст всегда")
                     .on_click(RootMsg::ToggleTheme)
-                    .text_color(egui::Color32::WHITE)
                     .colors(
                         egui::Color32::from_rgb(0, 128, 255),
                         egui::Color32::from_rgb(255, 120, 0),
                     )
+                    .text_color(egui::Color32::WHITE)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });

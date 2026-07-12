@@ -6,11 +6,11 @@ use egui_android_framework::{
         containers::{Column, LazyColumn, Row, Stack},
         modifier::{Modifier, ModifierDsl},
         remember,
+        theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
 };
-
 
 use crate::root_component::RootMsg;
 
@@ -23,6 +23,8 @@ impl ContainersScreen {
     }
 
     pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+        let c = &Theme::current_from_ui(ui).colors;
+
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
@@ -35,23 +37,29 @@ impl ContainersScreen {
                 Text::new("Column (вертикально):").render(ui, dispatch);
                 Column::new().show(ui, dispatch, |ui, dispatch| {
                     Text::new("A")
+                        .text_color(c.on_secondary)
                         .modifier(
                             Modifier::new()
-                                .background(egui::Color32::from_gray(50))
+                                .fill_max_width()
+                                .background(c.secondary)
                                 .padding(4.0),
                         )
                         .render(ui, dispatch);
                     Text::new("B")
+                        .text_color(c.on_secondary)
                         .modifier(
                             Modifier::new()
-                                .background(egui::Color32::from_gray(60))
+                                .fill_max_width()
+                                .background(c.secondary)
                                 .padding(4.0),
                         )
                         .render(ui, dispatch);
                     Text::new("C")
+                        .text_color(c.on_secondary)
                         .modifier(
                             Modifier::new()
-                                .background(egui::Color32::from_gray(60))
+                                .fill_max_width()
+                                .background(c.secondary)
                                 .padding(4.0),
                         )
                         .render(ui, dispatch);
@@ -63,25 +71,16 @@ impl ContainersScreen {
                 Text::new("Row (горизонтально):").render(ui, dispatch);
                 Row::new(ui, dispatch, |ui, dispatch| {
                     Text::new("X")
-                        .modifier(
-                            Modifier::new()
-                                .background(egui::Color32::from_gray(50))
-                                .padding(4.0),
-                        )
+                        .text_color(c.on_secondary)
+                        .modifier(Modifier::new().background(c.secondary).padding(4.0))
                         .render(ui, dispatch);
                     Text::new("Y")
-                        .modifier(
-                            Modifier::new()
-                                .background(egui::Color32::from_gray(60))
-                                .padding(4.0),
-                        )
+                        .text_color(c.on_secondary)
+                        .modifier(Modifier::new().background(c.secondary).padding(4.0))
                         .render(ui, dispatch);
                     Text::new("Z")
-                        .modifier(
-                            Modifier::new()
-                                .background(egui::Color32::from_gray(70))
-                                .padding(4.0),
-                        )
+                        .text_color(c.on_secondary)
+                        .modifier(Modifier::new().background(c.secondary).padding(4.0))
                         .render(ui, dispatch);
                 });
 
@@ -91,7 +90,8 @@ impl ContainersScreen {
                 Text::new("Stack (наложение):").render(ui, dispatch);
                 Stack::new(ui, dispatch, |ui, dispatch| {
                     Text::new("Фон")
-                        .modifier(Modifier::new().background(egui::Color32::BLUE).padding(8.0))
+                        .text_color(c.on_primary)
+                        .modifier(Modifier::new().background(c.primary).padding(8.0))
                         .render(ui, dispatch);
                     Text::new("Поверх")
                         .modifier(Modifier::new().padding(8.0))
@@ -104,23 +104,25 @@ impl ContainersScreen {
                 Text::new("LazyColumn + on_click_with:").render(ui, dispatch);
                 let items: Vec<i32> = (1..=10).collect();
                 LazyColumn::new(items, ui, dispatch, |i, ui, dispatch| {
-                    // remember для каждого элемента списка — уникальный ключ
                     let clicked = remember(ui, format!("item_clicked_{}", i), || false);
 
                     Row::new(ui, dispatch, |ui, dispatch| {
+                        let bg = if *clicked.get() {
+                            c.primary
+                        } else {
+                            c.secondary
+                        };
+                        let fg = if *clicked.get() {
+                            c.on_primary
+                        } else {
+                            c.on_secondary
+                        };
+
                         Text::new(format!("Элемент {}", i))
-                            .modifier(
-                                Modifier::new()
-                                    .background(if *clicked.get() {
-                                        egui::Color32::from_rgb(0, 100, 200)
-                                    } else {
-                                        egui::Color32::from_gray(40)
-                                    })
-                                    .padding(6.0),
-                            )
+                            .text_color(fg)
+                            .modifier(Modifier::new().background(bg).padding(6.0))
                             .render(ui, dispatch);
 
-                        // Кнопка переключает remember напрямую через on_click_with
                         Button::new(if *clicked.get() { "✓" } else { "○" })
                             .on_click_with({
                                 let clicked = clicked.clone();
@@ -128,6 +130,8 @@ impl ContainersScreen {
                                     clicked.modify(|c| *c = !*c);
                                 }
                             })
+                            .colors(c.secondary, c.secondary)
+                            .text_color(c.on_secondary)
                             .modifier(Modifier::new().padding(4.0))
                             .render(ui, dispatch);
                     });
@@ -136,6 +140,8 @@ impl ContainersScreen {
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
                     .on_click(RootMsg::Back)
+                    .colors(c.primary, c.primary)
+                    .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });
