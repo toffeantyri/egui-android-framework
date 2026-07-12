@@ -119,10 +119,11 @@ mod value {
         },
 
         // Appearance
-        Background(Color32),
+        Background(Color32, f32), // (color, corner_radius)
         Border {
             width: f32,
             color: Color32,
+            rounding: f32,
         },
         CornerRadius(f32),
         Alpha(f32),
@@ -175,11 +176,18 @@ mod value {
                     .field("min", min)
                     .field("max", max)
                     .finish(),
-                ModifierNode::Background(c) => f.debug_tuple("Background").field(c).finish(),
-                ModifierNode::Border { width, color } => f
+                ModifierNode::Background(c, r) => {
+                    f.debug_tuple("Background").field(c).field(r).finish()
+                }
+                ModifierNode::Border {
+                    width,
+                    color,
+                    rounding,
+                } => f
                     .debug_struct("Border")
                     .field("width", width)
                     .field("color", color)
+                    .field("rounding", rounding)
                     .finish(),
                 ModifierNode::CornerRadius(v) => f.debug_tuple("CornerRadius").field(v).finish(),
                 ModifierNode::Alpha(v) => f.debug_tuple("Alpha").field(v).finish(),
@@ -297,15 +305,35 @@ mod value {
 
         // ─── Appearance ─────────────────────────────────────────────────────
 
-        /// Цвет фона.
+        /// Цвет фона (без скругления).
         pub fn background(mut self, color: Color32) -> Self {
-            self.nodes.push(ModifierNode::Background(color));
+            self.nodes.push(ModifierNode::Background(color, 0.0));
             self
         }
 
-        /// Рамка.
+        /// Цвет фона со скруглением углов.
+        pub fn background_with_rounding(mut self, color: Color32, radius: f32) -> Self {
+            self.nodes.push(ModifierNode::Background(color, radius));
+            self
+        }
+
+        /// Рамка (без скругления).
         pub fn border(mut self, width: f32, color: Color32) -> Self {
-            self.nodes.push(ModifierNode::Border { width, color });
+            self.nodes.push(ModifierNode::Border {
+                width,
+                color,
+                rounding: 0.0,
+            });
+            self
+        }
+
+        /// Рамка со скруглением.
+        pub fn border_with_rounding(mut self, width: f32, color: Color32, radius: f32) -> Self {
+            self.nodes.push(ModifierNode::Border {
+                width,
+                color,
+                rounding: radius,
+            });
             self
         }
 
@@ -637,31 +665,32 @@ mod value {
                 }
 
                 // ===== APPEARANCE =====
-                ModifierNode::Background(color) => {
+                ModifierNode::Background(color, rounding) => {
                     // Фон: используем scope, чтобы не alloc'ить лишнее место.
-                    // Scope alloc'ит только min_rect контента (без внешних margin).
-                    // Fill рисуем в scope_ui ДО контента через painter.scope,
-                    // чтобы fill оказался под контентом.
+                    let corner_radius = egui::CornerRadius::same(*rounding as u8);
                     ui.scope(|scope_ui| {
-                        // Рисуем подложку до контента (ShapeIdx будет перед shapes контента)
                         let bg_shape_idx = scope_ui.painter().add(egui::Shape::Noop);
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                        // После контента fill_rect = scope_ui.min_rect()
                         let fill_rect = scope_ui.min_rect();
                         let shape = egui::Shape::Rect(egui::epaint::RectShape::filled(
-                            fill_rect, 0, *color,
+                            fill_rect,
+                            corner_radius,
+                            *color,
                         ));
                         scope_ui.painter().set(bg_shape_idx, shape);
                     });
                 }
-                ModifierNode::Border { width, color } => {
+                ModifierNode::Border {
+                    width,
+                    color,
+                    rounding,
+                } => {
                     // Рамка: alloc'ит rect контента + stroke.
-                    // Используем Frame для корректного alloc'а outer_rect с учётом stroke.
-                    // ВАЖНО: это единственное место, где appearance-модификатор alloc'ит место,
-                    // потому что иначе stroke не поместился бы в alloc'ированную область.
+                    let rounding = egui::CornerRadius::same(*rounding as u8);
                     egui::Frame::NONE
                         .stroke(egui::Stroke::new(*width, *color))
+                        .corner_radius(rounding)
                         .show(ui, |show_ui| {
                             let mut w = UiWrapper::new_unconstrained(show_ui);
                             rest(&mut w, dispatch);

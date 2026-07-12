@@ -17,29 +17,13 @@ use egui_android_framework::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
         remember,
-        theme::Theme,
+        theme::{Colors, Theme},
         widgets::{Button, Spacer, Text, Widget},
         UiWrapper,
     },
 };
 
 use crate::root_component::RootMsg;
-
-/// Показать пример с рамкой.
-fn show_example(
-    ui: &mut UiWrapper,
-    dispatch: &Dispatcher<RootMsg>,
-    title: &str,
-    content: &str,
-    modifier: Modifier<RootMsg>,
-) {
-    let c = &Theme::current_from_ui(ui).colors;
-    Text::new(title).render(ui, dispatch);
-    Text::new(content)
-        .modifier(Modifier::new().border(1.0, c.outline).then(modifier))
-        .render(ui, dispatch);
-    Spacer::new(8.0).render(ui, dispatch);
-}
 
 /// Показать пример с рамкой и фоном. Цвет текста задаётся явно для контраста.
 fn show_example_bg(
@@ -51,14 +35,13 @@ fn show_example_bg(
     bg: Color32,
     text_color: Color32,
 ) {
-    let c = &Theme::current_from_ui(ui).colors;
     Text::new(title).render(ui, dispatch);
     Text::new(content)
         .text_color(text_color)
         .modifier(
             Modifier::new()
                 .background(bg)
-                .border(1.0, c.outline)
+                .border(1.0, Colors::LIGHT_GREEN)
                 .then(modifier),
         )
         .render(ui, dispatch);
@@ -194,16 +177,18 @@ impl ModifierValueScreen {
                     c.on_secondary,
                 );
 
-                show_example(
-                    ui,
-                    dispatch,
-                    "11) border(w, color) + rounding(radius)",
-                    "Рамка 2px, скругление 8px",
-                    Modifier::new()
-                        .padding(12.0)
-                        .border(2.0, c.outline)
-                        .rounding(8.0),
-                );
+                Text::new("11) border(w, color) + rounding(radius) — скругление 8px")
+                    .render(ui, dispatch);
+                Text::new("Рамка 2px со скруглением 8px")
+                    .text_color(c.on_surface)
+                    .modifier(
+                        Modifier::new()
+                            .padding(12.0)
+                            .background_with_rounding(c.surface, 8.0)
+                            .border_with_rounding(2.0, Colors::LIGHT_GREEN, 8.0),
+                    )
+                    .render(ui, dispatch);
+                Spacer::new(8.0).render(ui, dispatch);
 
                 show_example_bg(
                     ui,
@@ -215,17 +200,17 @@ impl ModifierValueScreen {
                     c.on_secondary,
                 );
 
-                show_example_bg(
-                    ui,
-                    dispatch,
-                    "13) clip(CornerRadius) — обрезка по скруглению",
-                    "Длинный текст, который будет обрезан по скруглению",
-                    Modifier::new()
-                        .clip(egui::CornerRadius::same(8))
-                        .padding(8.0),
-                    c.secondary,
-                    c.on_secondary,
-                );
+                Text::new("13) clip(CornerRadius) — обрезка по скруглению").render(ui, dispatch);
+                Text::new("Текст со скруглёнными углами фона (clip 12px)")
+                    .text_color(c.on_secondary)
+                    .modifier(
+                        Modifier::new()
+                            .clip(egui::CornerRadius::same(12))
+                            .background_with_rounding(c.secondary, 12.0)
+                            .padding(12.0),
+                    )
+                    .render(ui, dispatch);
+                Spacer::new(8.0).render(ui, dispatch);
 
                 // 14. shadow
                 Text::new("14) shadow(elevation) — тень").render(ui, dispatch);
