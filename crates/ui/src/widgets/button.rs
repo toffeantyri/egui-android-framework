@@ -178,12 +178,23 @@ impl<M: 'static> Button<M> {
     ///     .render(ui, dispatch);
     /// ```
     pub fn theme_colors(mut self, normal: egui::Color32) -> Self {
-        // Осветляем на 30% в HSV для pressed
+        // Для тёмной темы осветляем, для светлой затемняем.
+        // Определяем яркость цвета: если Value > 0.5 — это светлый цвет → затемняем.
+        // Если Value <= 0.5 — тёмный → осветляем.
         let hsv = egui::ecolor::HsvaGamma::from(normal);
-        let pressed = egui::Color32::from(egui::ecolor::HsvaGamma {
-            v: (hsv.v + 0.3).min(1.0),
-            ..hsv
-        });
+        let pressed = if hsv.v > 0.5 {
+            // Светлый цвет → затемняем на 30%
+            egui::Color32::from(egui::ecolor::HsvaGamma {
+                v: (hsv.v - 0.3).max(0.0),
+                ..hsv
+            })
+        } else {
+            // Тёмный цвет → осветляем на 40%
+            egui::Color32::from(egui::ecolor::HsvaGamma {
+                v: (hsv.v + 0.4).min(1.0),
+                ..hsv
+            })
+        };
         self.colors = ButtonColors { normal, pressed };
         self
     }
@@ -194,6 +205,12 @@ impl<M: 'static> Button<M> {
     pub fn text_color(mut self, color: egui::Color32) -> Self {
         self.text_color = Some(color);
         self
+    }
+
+    /// Получить текущие цвета кнопки (для тестов).
+    #[doc(hidden)]
+    pub fn get_colors(&self) -> &ButtonColors {
+        &self.colors
     }
 }
 

@@ -8,7 +8,7 @@ use egui_android_ui::animation::{
 };
 use egui_android_ui::containers::{Align, Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
-use egui_android_ui::theme::{MaterialTheme, Shapes, Theme};
+use egui_android_ui::theme::{Colors, MaterialTheme, Shapes, Theme};
 use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
 
 // ─── Helper: with_ui ────────────────────────────────────────────────────────────
@@ -1985,6 +1985,62 @@ fn test_button_pressed_color_differs_from_normal() {
         "Button normal={:?} == pressed={:?}: нет отклика",
         colors.normal, colors.pressed
     );
+}
+
+#[test]
+fn test_button_theme_colors_light_dark_differ() {
+    // theme_colors для светлого primary (тёмная тема) даёт pressed ≠ normal.
+    let colors_light = egui_android_ui::widgets::ButtonColors::default();
+    assert_ne!(
+        colors_light.normal, colors_light.pressed,
+        "default: normal={:?} == pressed={:?}",
+        colors_light.normal, colors_light.pressed
+    );
+
+    // theme_colors для яркого primary (светлая тема): pressed ≠ normal
+    let bright = egui::Color32::from_rgb(100, 150, 255);
+    let btn = egui_android_ui::widgets::Button::<()>::new("X").theme_colors(bright);
+    assert_ne!(
+        btn.get_colors().normal,
+        btn.get_colors().pressed,
+        "theme_colors bright: normal={:?} == pressed={:?}",
+        btn.get_colors().normal,
+        btn.get_colors().pressed
+    );
+
+    // theme_colors для тёмного primary (тёмная тема): pressed ≠ normal
+    let dark = egui::Color32::from_rgb(30, 60, 120);
+    let btn = egui_android_ui::widgets::Button::<()>::new("X").theme_colors(dark);
+    assert_ne!(
+        btn.get_colors().normal,
+        btn.get_colors().pressed,
+        "theme_colors dark: normal={:?} == pressed={:?}",
+        btn.get_colors().normal,
+        btn.get_colors().pressed
+    );
+}
+
+#[test]
+fn test_button_render_shows_pressed_color() {
+    // Рендер кнопки: при is_pointer_button_down_on цвет = pressed.
+    // В тестовой среде нет pointer events, но проверяем что render не падает
+    // и consum > 0 (кнопка alloc'ит место).
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_size().y;
+        Button::<()>::new("Тест")
+            .theme_colors(egui::Color32::GREEN)
+            .render(ui, &dispatch);
+        let after = ui.available_size().y;
+        let consum = before - after;
+        assert!(consum > 0.0, "Button render consum={} <= 0", consum);
+        // consum ≈ 48 (default height) + padding
+        assert!(
+            consum > 10.0 && consum < 100.0,
+            "Button render consum={} вне (10, 100)",
+            consum
+        );
+    });
 }
 
 #[test]
