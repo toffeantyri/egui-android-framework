@@ -24,6 +24,12 @@ fn with_ui(f: impl FnOnce(&mut UiWrapper)) {
     });
 }
 
+fn measure_consumed_y(ui: &mut UiWrapper, render: impl FnOnce(&mut UiWrapper)) -> f32 {
+    let before = ui.available_rect_before_wrap().min.y;
+    render(ui);
+    ui.available_rect_before_wrap().min.y - before
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════
 // WIDGET TESTS (23 tests)
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -1098,13 +1104,20 @@ fn test_background_size_matches_content() {
 fn test_align_in_column_uses_vertical_layout() {
     // Aligned в Column (вертикальный layout по умолчанию) должен
     // использовать Layout::top_down с указанным Align.
+    // Проверяем что Column alloc'ит место по вертикали.
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        // Column использует вертикальный layout
-        Column::new().show(ui, &dispatch, |ui, dispatch| {
-            Text::new("Центр").render(ui, dispatch);
+        let c = measure_consumed_y(ui, |ui| {
+            Column::new().show(ui, &dispatch, |ui, dispatch| {
+                Text::new("Центр").render(ui, dispatch);
+            });
         });
-        // Не паникует — тест пройден
+        // Column alloc'ит ≈ text_height ≈ 18
+        assert!(
+            (c - 18.0).abs() < 5.0,
+            "Column с текстом alloc'ила {}px (ожидалось ~18)",
+            c
+        );
     });
 }
 
@@ -1298,26 +1311,38 @@ fn test_clickable_in_column_uses_content_height() {
 
 #[test]
 fn test_align_nested_row_in_column() {
-    // Вложенная Row в Column с Aligned — проверяем что не паникует.
+    // Вложенная Row в Column — проверяем что consum > 0 (не пусто).
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Column::new().show(ui, &dispatch, |ui, dispatch| {
-            Row::new(ui, dispatch, |ui, dispatch| {
-                Text::new("Левый").render(ui, dispatch);
-                Text::new("Правый").render(ui, dispatch);
+        let c = measure_consumed_y(ui, |ui| {
+            Column::new().show(ui, &dispatch, |ui, dispatch| {
+                Row::new(ui, dispatch, |ui, dispatch| {
+                    Text::new("Левый").render(ui, dispatch);
+                    Text::new("Правый").render(ui, dispatch);
+                });
             });
         });
+        // Column + Row + 2 текста: consum ≈ max(text_height) ≈ 18
+        assert!(
+            c > 0.0 && c < 100.0,
+            "nested Row in Column consum={} не в (0, 100)",
+            c
+        );
     });
 }
 
 #[test]
 fn test_align_in_stack() {
-    // Aligned внутри Stack — проверяем что не паникует.
+    // Aligned внутри Stack — проверяем alloc'ацию места.
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
-        Stack::new(ui, &dispatch, |ui, dispatch| {
-            Text::new("Центр").render(ui, dispatch);
+        let c = measure_consumed_y(ui, |ui| {
+            Stack::new(ui, &dispatch, |ui, dispatch| {
+                Text::new("Центр").render(ui, dispatch);
+            });
         });
+        // Stack с текстом: consum ≈ text_height ≈ 18
+        assert!(c > 0.0 && c < 100.0, "Stack consum={} не в (0, 100)", c);
     });
 }
 
@@ -1370,6 +1395,7 @@ fn test_modifier_value_clickable_padded_background() {
 #[test]
 fn test_fill_max_width_in_scrollable_column() {
     // FillMaxWidth в Scrollable Column — симулирует HomeScreen.
+    // consum должен быть ~ сумме высот всех детей + spacing.
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let before_y = ui.available_size().y;
@@ -1395,18 +1421,11 @@ fn test_fill_max_width_in_scrollable_column() {
                     .render(ui, dispatch);
             });
 
-        let after_y = ui.available_size().y;
-        assert!(
-            after_y < before_y,
-            "scrollable Column не потребила место: {} -> {}",
-            before_y,
-            after_y
-        );
-        // Проверяем что было потреблено как минимум 3 * 48px (3 кнопки * высота)
-        let consumed_y = before_y - after_y;
+        let consumed_y = before_y - ui.available_size().y;
+        // Scrollable Column consum = весь available (растягивается на всю высоту)
         assert!(
             consumed_y > 100.0,
-            "scrollable Column потребила слишком мало: {}px (ожидалось > 100px)",
+            "scrollable Column потребила {}px (ожидалось >100)",
             consumed_y
         );
 
@@ -1506,17 +1525,13 @@ fn test_button_wrap_content_without_fill_max_width() {
 
         Button::<()>::new("Коротко").render(ui, &dispatch);
 
-        // available.y уменьшился (кнопка есть), но не на весь экран
         let after_y = ui.available_size().y;
+        let consumed = before_y - after_y;
+        // Кнопка имеет высоту ~48 (внутренний padding + текст)
         assert!(
-            after_y < before_y,
-            "Button без fill_maxWidth не потребил место"
-        );
-        assert!(
-            after_y > before_y * 0.9,
-            "Button без fill_maxWidth занял почти всю высоту: было {}, стало {}",
-            before_y,
-            after_y
+            consumed > 10.0 && consumed < 200.0,
+            "Button consum={} не в [10, 200]",
+            consumed
         );
     });
 }
@@ -1573,19 +1588,24 @@ fn test_fill_max_width_respects_narrow_container() {
             .modifier(Modifier::new().fill_max_width())
             .render(ui, &dispatch);
         let after_first = ui.available_size().y;
+        let consum_first = before_y - after_first;
 
         Button::<()>::new("Кнопка 2")
             .modifier(Modifier::new().fill_max_width())
             .render(ui, &dispatch);
         let after_second = ui.available_size().y;
+        let consum_second = after_first - after_second;
 
-        // Обе кнопки потребили место — не наложились
-        assert!(after_first < before_y, "первая кнопка не потребила место");
+        // Обе кнопки потребили положительное место — не наложились
         assert!(
-            after_second < after_first,
-            "вторая кнопка наложилась на первую: {} -> {}",
-            after_first,
-            after_second
+            consum_first > 0.0,
+            "первая кнопка потребила {}px",
+            consum_first
+        );
+        assert!(
+            consum_second > 0.0,
+            "вторая кнопка потребила {}px (наложение?)",
+            consum_second
         );
     });
 }
@@ -1913,6 +1933,12 @@ fn test_width_height_real_pp() {
             "diff consumed: {:.1}",
             (after7.min.y - before7.min.y) - (after6.min.y - before.min.y)
         );
+
+        // Проверяем что оба примера потребили место
+        let consum6 = after6.min.y - before.min.y;
+        let consum7 = after7.min.y - before7.min.y;
+        assert!(consum6 > 0.0, "ex6 consum={} <= 0", consum6);
+        assert!(consum7 > 0.0, "ex7 consum={} <= 0", consum7);
     }));
 
     let f = f.borrow_mut().take().unwrap();
@@ -1940,11 +1966,10 @@ fn test_text_not_centered_vertically() {
                 .render(&mut wrapper, &dispatch);
             let after = wrapper.available_rect_before_wrap();
             let consumed = after.min.y - before.min.y;
-            // width(200) alloc'ит content_height, который включает height(48)
-            // ≈ 48 + small gap
+            // width(200) + height(48) alloc'ит ≈ 48 (без центрирования)
             assert!(
-                consumed >= 40.0 && consumed <= 60.0,
-                "height(48) alloc'ил {}px (ожидалось ~48)",
+                (consumed - 48.0).abs() < 5.0,
+                "consumed={} != ~48 (баг: вертикальное центрирование?)",
                 consumed
             );
         });
@@ -1971,7 +1996,8 @@ fn test_icon_consumes_space() {
         Icon::new(uri).render(ui, &dispatch);
         let after = ui.cursor().min.y;
         let consum = after - before;
-        assert!(consum >= 0.0, "Icon consum {}", consum);
+        // Пустое изображение — consum ≥ 0 (не падает)
+        assert!(consum >= 0.0, "Icon consum {} < 0", consum);
     });
 }
 
@@ -1980,6 +2006,8 @@ fn test_icon_with_modifiers() {
     let (dispatch, _rx) = Dispatcher::<()>::new();
     with_ui(|ui| {
         let uri = egui::Image::from_bytes("bytes://test", &[]);
+        // Проверяем только что не падает — из-за пустого изображения
+        // невозможно предсказать точный consum
         Icon::new(uri)
             .modifier(Modifier::new().padding(8.0))
             .render(ui, &dispatch);
