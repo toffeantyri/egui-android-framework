@@ -16,6 +16,29 @@
 
 use jni::objects::JObject;
 use jni::sys::jobject;
+use std::sync::atomic::{AtomicPtr, Ordering};
+
+/// Глобальные указатели на JavaVM и Activity (устанавливаются один раз при init).
+static GLOBAL_VM: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static GLOBAL_ACTIVITY: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Сохранить указатели на JVM и Activity для последующего вызова apply_system_bars.
+pub fn init_global_pointers(vm: *mut std::ffi::c_void, activity: *mut std::ffi::c_void) {
+    GLOBAL_VM.store(vm, Ordering::Relaxed);
+    GLOBAL_ACTIVITY.store(activity, Ordering::Relaxed);
+}
+
+/// Применить цвета системных баров для текущей темы, используя глобальные указатели.
+/// Безопасно вызвать из любого потока (JNI attach делается внутри).
+pub fn apply_system_bars_for_theme(theme: SystemTheme) {
+    let vm = GLOBAL_VM.load(Ordering::Relaxed);
+    let activity = GLOBAL_ACTIVITY.load(Ordering::Relaxed);
+    if vm.is_null() || activity.is_null() {
+        log::warn!("apply_system_bars_for_theme: глобальные указатели не инициализированы");
+        return;
+    }
+    apply_system_bars_color_jni(vm, activity, theme);
+}
 
 /// Настроить системные бары: прозрачный статус-бар и навбар.
 ///
@@ -461,6 +484,96 @@ pub fn apply_system_bars_color_jni(
             "(I)V",
             &[jni::objects::JValue::Int(color)],
         );
+
+        // ─── Переключаем цвет иконок (светлые/тёмные) ─────────────────
+        // Для светлой темы — тёмные иконки (APPEARANCE_LIGHT_STATUS_BARS),
+        // для тёмной — светлые (без флага).
+        //
+        // Android 11+ (API 30): WindowInsetsController.setSystemBarsAppearance
+        // Android 6-10 (API 23-29): View.setSystemUiVisibility(SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
+
+        let decor_view = match env
+            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
+            .ok()
+            .and_then(|v| v.l().ok())
+        {
+            Some(dv) => dv,
+            None => {
+                log::warn!("apply_system_bars_color_jni: getDecorView вернул null");
+                return;
+            }
+        };
+
+        // Проверяем API level: пытаемся найти WindowInsetsController (API 30+)
+        let insets_controller = env.call_method(
+            &window,
+            "getInsetsController",
+            "()Landroid/view/WindowInsetsController;",
+            &[],
+        );
+
+        match insets_controller {
+            Ok(val) => {
+                // API 30+ — используем WindowInsetsController
+                if let Ok(controller) = val.l() {
+                    if !controller.is_null() {
+                        // APPEARANCE_LIGHT_STATUS_BARS    = 8  (бит 3)
+                        // APPEARANCE_LIGHT_NAVIGATION_BARS = 16 (бит 4)
+                        let mask = 8i32 | 16i32; // статус-бар + навбар
+                        let appearance = match theme {
+                            SystemTheme::Light => mask,
+                            SystemTheme::Dark => 0i32,
+                        };
+                        let _ = env.call_method(
+                            &controller,
+                            "setSystemBarsAppearance",
+                            "(II)V",
+                            &[
+                                jni::objects::JValue::Int(appearance),
+                                jni::objects::JValue::Int(mask),
+                            ],
+                        );
+                        log::info!(
+                            "apply_system_bars_color_jni: setSystemBarsAppearance(appearance={}, mask={}), theme={:?}",
+                            appearance, mask, theme
+                        );
+                    }
+                }
+            }
+            Err(_) => {
+                // API 23-29 — фолбэк на SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                let flag_light_status_bar = 0x00002000i32; // SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                let flag_light_nav_bar = 0x00000010i32; // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+
+                // Получаем текущие флаги
+                let current_flags = env
+                    .call_method(&decor_view, "getSystemUiVisibility", "()I", &[])
+                    .ok()
+                    .and_then(|v| Some(v.i().ok()?))
+                    .unwrap_or(0);
+
+                let new_flags = match theme {
+                    SystemTheme::Light => {
+                        current_flags | flag_light_status_bar | flag_light_nav_bar
+                    }
+                    SystemTheme::Dark => {
+                        current_flags & !flag_light_status_bar & !flag_light_nav_bar
+                    }
+                };
+
+                let _ = env.call_method(
+                    &decor_view,
+                    "setSystemUiVisibility",
+                    "(I)V",
+                    &[jni::objects::JValue::Int(new_flags)],
+                );
+                log::info!(
+                    "apply_system_bars_color_jni: setSystemUiVisibility(0x{:x}), theme={:?}",
+                    new_flags,
+                    theme
+                );
+            }
+        }
 
         log::info!(
             "apply_system_bars_color_jni: theme={:?}, color=0x{:08x}",

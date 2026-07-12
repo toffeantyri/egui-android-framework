@@ -118,13 +118,23 @@ impl Application for CounterApp {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // Синхронизируем clear_color с фоном темы для подсистемных баров
+        // Синхронизируем clear_color и цвета системных баров
         #[cfg(target_os = "android")]
         {
+            use egui_android_framework::core::SystemTheme;
+            use egui_android_framework::platform_android::system_bars;
             use egui_android_framework::platform_android::theme::set_clear_color_from;
             use egui_android_framework::ui::theme::Theme;
+
             let theme = Theme::current(egui_ctx);
             set_clear_color_from(theme.colors.background);
+
+            let sys_theme = if self.theme_state.is_dark_mode {
+                SystemTheme::Dark
+            } else {
+                SystemTheme::Light
+            };
+            system_bars::apply_system_bars_for_theme(sys_theme);
         }
 
         self.root.sync_from_store();

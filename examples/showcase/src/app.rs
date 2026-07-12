@@ -106,9 +106,22 @@ impl Application for ShowcaseApplication {
             MaterialTheme::light().colors.background
         };
 
-        // На Android синхронизируем clear_color (фон под системными барами)
+        // На Android синхронизируем цвет системных баров и clear_color
         #[cfg(target_os = "android")]
-        egui_android_framework::platform_android::theme::set_clear_color_from(bg_color);
+        {
+            use egui_android_framework::core::SystemTheme;
+            use egui_android_framework::platform_android::system_bars;
+            use egui_android_framework::platform_android::theme::set_clear_color_from;
+
+            let theme = if app_state.is_dark_mode {
+                SystemTheme::Dark
+            } else {
+                SystemTheme::Light
+            };
+
+            set_clear_color_from(bg_color);
+            system_bars::apply_system_bars_for_theme(theme);
+        }
 
         self.root.sync_from_store();
 

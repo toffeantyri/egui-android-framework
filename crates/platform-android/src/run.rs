@@ -83,6 +83,11 @@ pub fn run<A: Application>(app: AndroidApp) {
                     // Системные бары уже установлены в начале run() — здесь только insets.
                     let vm_ptr = app.vm_as_ptr() as usize;
                     let activity_ptr = app.activity_as_ptr() as usize;
+                    // Сохраняем глобальные указатели для apply_system_bars_for_theme
+                    crate::system_bars::init_global_pointers(
+                        vm_ptr as *mut std::ffi::c_void,
+                        activity_ptr as *mut std::ffi::c_void,
+                    );
                     app.run_on_java_main_thread(Box::new(move || {
                         let vm = vm_ptr as *mut std::ffi::c_void;
                         let activity = activity_ptr as *mut std::ffi::c_void;
@@ -145,11 +150,9 @@ pub fn run<A: Application>(app: AndroidApp) {
             if let Some(ref mut p) = egui_painter {
                 p.destroy();
             }
-            egui_painter = None;
             if let Some(ref mut state) = egl_state {
                 state.destroy();
             }
-            egl_state = None;
             log::info!("Выход из главного цикла (run)");
             break;
         }
