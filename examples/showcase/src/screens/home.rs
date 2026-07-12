@@ -26,7 +26,6 @@ impl HomeScreen {
         let c = &Theme::current_from_ui(ui).colors;
         let routes = vec![
             Route::Widgets,
-            Route::Modifiers,
             Route::Containers,
             Route::Themes,
             Route::State,

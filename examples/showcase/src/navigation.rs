@@ -7,8 +7,6 @@ pub enum Route {
     Home,
     /// Виджеты (Text, Button, Spacer).
     Widgets,
-    /// Модификаторы (padding, size, background, etc).
-    Modifiers,
     /// Контейнеры (Column, Row, Stack, LazyColumn).
     Containers,
     /// Темы (light/dark, палитра).
@@ -17,7 +15,7 @@ pub enum Route {
     State,
     /// Анимации.
     Animations,
-    /// Новая Modifier value type.
+    /// Все модификаторы (padding, size, background, border и т.д.).
     ModifierValue,
     /// Вложенная навигация (экран 1 со вложенными A, B, C).
     Nested,
@@ -35,12 +33,12 @@ impl Route {
         match self {
             Route::Home => "Главная",
             Route::Widgets => "Виджеты",
-            Route::Modifiers => "Модификаторы",
+
             Route::Containers => "Контейнеры",
             Route::Themes => "Темы",
             Route::State => "Локальное состояние",
             Route::Animations => "Анимации",
-            Route::ModifierValue => "Modifier Value",
+            Route::ModifierValue => "Модификаторы",
             Route::Nested => "Вложенная навигация",
             Route::NestedA => "Nested A",
             Route::NestedB => "Nested B",
@@ -54,12 +52,12 @@ impl Route {
         match self {
             Route::Home => "Список демо-экранов",
             Route::Widgets => "Text, Button, Spacer, Icon",
-            Route::Modifiers => "padding, size, background, align, clickable",
+
             Route::Containers => "Column, Row, Stack, LazyColumn",
             Route::Themes => "MaterialTheme, ColorPalette, Typography",
             Route::State => "remember, RememberState",
             Route::Animations => "AnimatedVisibility, Fade, Slide",
-            Route::ModifierValue => "Новая Modifier value type system",
+            Route::ModifierValue => "padding, size, background, border, clip, shadow и т.д.",
             Route::Nested => "Демо вложенной навигации с BackPressed",
             Route::NestedA => "Первый вложенный экран",
             Route::NestedB => "Второй вложенный экран",

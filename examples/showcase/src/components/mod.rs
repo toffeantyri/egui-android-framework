@@ -14,15 +14,14 @@ use crate::navigation::Route;
 use crate::root_component::RootMsg;
 use crate::screens::{
     animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
-    home::HomeScreen, modifier_value::ModifierValueScreen, modifiers::ModifiersScreen,
-    nested::NestedScreen, state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
+    home::HomeScreen, modifier_value::ModifierValueScreen, nested::NestedScreen,
+    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
 };
 
 /// Единый enum для всех экранов.
 pub enum ScreenComponent {
     Home(HomeScreen),
     Widgets(WidgetsScreen),
-    Modifiers(ModifiersScreen),
     Containers(ContainersScreen),
     Themes(ThemesScreen),
     StateRef(StateScreen),
@@ -43,7 +42,7 @@ impl ScreenComponent {
         match route {
             Route::Home => Self::home(),
             Route::Widgets => Self::Widgets(WidgetsScreen::new()),
-            Route::Modifiers => Self::Modifiers(ModifiersScreen::new()),
+
             Route::Containers => Self::Containers(ContainersScreen::new()),
             Route::Themes => Self::Themes(ThemesScreen::new()),
             Route::State => Self::StateRef(StateScreen::new()),
@@ -71,7 +70,7 @@ impl ScreenComponent {
         match self {
             Self::Home(s) => s.render(ui, dispatch),
             Self::Widgets(s) => s.render(ui, dispatch),
-            Self::Modifiers(s) => s.render(ui, dispatch),
+
             Self::Containers(s) => s.render(ui, dispatch),
             Self::Themes(s) => s.render(ui, dispatch),
             Self::StateRef(s) => s.render(ui, dispatch),
