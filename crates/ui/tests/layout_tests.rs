@@ -6,9 +6,9 @@
 use std::cell::RefCell;
 
 use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
-use egui_android_ui::containers::{Column, Stack};
+use egui_android_ui::containers::{Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
-use egui_android_ui::widgets::{Spacer, Text};
+use egui_android_ui::widgets::{Button, Spacer, Text};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Helper: with_ui
@@ -905,5 +905,156 @@ fn test_height_zero_does_not_panic() {
         Text::new("X")
             .modifier(Modifier::new().height(0.0))
             .render(ui, &dispatch);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// 12. СРЕДНИЕ ПРОБЕЛЫ КОНТРАКТА
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_column_in_row_nested_consum() {
+    // Column внутри Row: consum = max(child_A_height + spacing, child_B_height)
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        // consum Text("A") + Text("B") в Column = 2 * text_height + spacing(8) ≈ 38
+        let c_col = measure_consumed_y(ui, |ui| {
+            Column::new().show(ui, &dispatch, |ui, dispatch| {
+                Text::new("A").render(ui, dispatch);
+                Text::new("B").render(ui, dispatch);
+            });
+        });
+        let c_row = measure_consumed_y(ui, |ui| {
+            Row::new(ui, &dispatch, |ui, dispatch| {
+                Column::new().show(ui, dispatch, |ui, dispatch| {
+                    Text::new("A").render(ui, dispatch);
+                    Text::new("B").render(ui, dispatch);
+                });
+            });
+        });
+        // Row не должен добавлять высоту: consum ≈ Column consum
+        assert!(
+            (c_row - c_col).abs() < 10.0,
+            "Column in Row: c_row={} vs c_col={} различаются >10",
+            c_row,
+            c_col
+        );
+    });
+}
+
+#[test]
+fn test_stack_children_overlap_not_sum() {
+    // Stack должен перекрывать детей (consum ≈ max), а не суммировать (consum ≈ sum).
+    // СЕЙЧАС ПАДАЕТ — Stack alloc'ит детей последовательно как Column.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c_single = measure_consumed_y(ui, |ui| {
+            Text::new("Высокий текст").render(ui, &dispatch);
+        });
+        let c_stack = measure_consumed_y(ui, |ui| {
+            Stack::new(ui, &dispatch, |ui, dispatch| {
+                Text::new("A").render(ui, dispatch);
+                Text::new("Высокий текст").render(ui, dispatch);
+            });
+        });
+        // Stack consum ≈ max(child) ≈ c_single, не sum = c_single + child2
+        let max_allowed = c_single * 1.5;
+        assert!(
+            c_stack <= max_allowed,
+            "Stack consum={} > max_allowed={} (дети не перекрываются: sum ≈ {})",
+            c_stack,
+            max_allowed,
+            c_single * 2.0
+        );
+    });
+}
+
+#[test]
+fn test_lazy_column_consum_matches_children() {
+    // LazyColumn consum = сумма consum детей + spacing
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let items = vec!["A", "B", "C"];
+        let c = measure_consumed_y(ui, |ui| {
+            LazyColumn::new(items, ui, &dispatch, |item, ui, dispatch| {
+                Text::new(*item).render(ui, dispatch);
+            });
+        });
+        // consum = 3 * text_height + 2 * spacing(8) ≈ 3*15 + 16 = 61
+        assert!(
+            c >= 40.0 && c <= 80.0,
+            "LazyColumn 3 items consum={} вне 40-80",
+            c
+        );
+    });
+}
+
+#[test]
+fn test_spacer_no_double_alloc() {
+    // Spacer не делает двойной alloc: consum ≈ size на всех pp
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    let check = |ui: &mut UiWrapper| {
+        let c = measure_consumed_y(ui, |ui| {
+            Spacer::new(50.0).render(ui, &dispatch);
+        });
+        assert!((c - 50.0).abs() < 5.0, "Spacer consum={} != 50", c);
+    };
+    with_pp(1.0, |ui| check(ui));
+    with_pp(3.25, |ui| check(ui));
+}
+
+#[test]
+fn test_button_with_width_in_height_in_consum() {
+    // Button + width_in + height_in: consum ≈ height_in.max
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c_btn = measure_consumed_y(ui, |ui| {
+            Button::<()>::new("X")
+                .modifier(Modifier::new().width_in(50.0, 200.0).height_in(30.0, 100.0))
+                .render(ui, &dispatch);
+        });
+        // height_in(30, 100) — max_height=100, min_height=30. consum должен быть ≈ 30 (текст меньше)
+        assert!(
+            c_btn >= 25.0 && c_btn <= 110.0,
+            "Button + height_in consum={} вне 25-110",
+            c_btn
+        );
+    });
+}
+
+#[test]
+fn test_multiline_text_consum_exact() {
+    // Многострочный текст: consum ≈ N_строк × line_height
+    // cons
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c1 = measure_consumed_y(ui, |ui| {
+            Text::new("Строка1").render(ui, &dispatch);
+        });
+        let c3 = measure_consumed_y(ui, |ui| {
+            Text::new("Строка1\nСтрока2\nСтрока3").render(ui, &dispatch);
+        });
+        // 3 строки ≈ 3 × c1
+        assert!(
+            (c3 - c1 * 3.0).abs() < 10.0,
+            "multiline: 3×c1={} vs c3={} различаются >10",
+            c1 * 3.0,
+            c3
+        );
+    });
+}
+
+#[test]
+fn test_height_in_consum_equals_height() {
+    // height_in(100, 200) + Text: consum ≈ 100 (min_height)
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let c = measure_consumed_y(ui, |ui| {
+            Text::new("X")
+                .modifier(Modifier::new().width(100.0).height_in(100.0, 200.0))
+                .render(ui, &dispatch);
+        });
+        // height_in требует min=100 → consum ≥ 100
+        assert!(c >= 100.0, "height_in(100,200) consum={} < 100", c);
     });
 }
