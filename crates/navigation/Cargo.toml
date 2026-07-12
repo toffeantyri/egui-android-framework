@@ -11,5 +11,5 @@ description = "Navigation layer — ChildStack, Router"
 egui = { workspace = true }
 log = { workspace = true }
 
-egui-android-core = { version = "0.3.3-alpha.2", path = "../core" }
-egui-android-ui = { version = "0.3.3-alpha.2", path = "../ui" }
+egui-android-core = { version = "0.3.3-alpha.3", path = "../core" }
+egui-android-ui = { version = "0.3.3-alpha.3", path = "../ui" }

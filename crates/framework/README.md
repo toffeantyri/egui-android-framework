@@ -1,34 +1,215 @@
 # egui-android-framework
 
-**Umbrella-крейт. Re-export всех крейтов egui-android.**
-
-Содержит только `pub use` всех крейтов workspace.
-Подключайте этот крейт для простоты — он даёт доступ ко всему фреймворку.
+**MVI-фреймворк для egui на Android.** Позволяет писать нативные Android-приложения на Rust с GUI через egui, используя реактивную архитектуру в стиле Jetpack Compose.
 
 [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework)
+[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](#лицензия)
 
-## Состав
+## Проблема
 
-- `egui-android-core` — Component, Widget, UiWrapper, Constraints, BackDispatcher
-- `egui-android-ui` — виджеты, контейнеры, модификаторы, анимации, темы
-- `egui-android-runtime` — Application, Dispatcher, StateStore
-- `egui-android-navigation` — ChildStack
-- `egui-android-platform` — абстрактный Platform trait
-- `egui-android-platform-android` — Android реализация (EGL, input)
+egui — отличный immediate-mode GUI, но для создания полноценного Android-приложения на нём не хватает инфраструктуры:
 
-## Импорт
+- **Главный цикл** — нужно интегрировать `egui_glow` с NativeActivity, EGL, Android lifecycle
+- **Ввод** — Android MotionEvent → события egui (touch, клавиатура, back)
+- **Архитектура** — как организовать код: экраны, навигация, состояние, бизнес-логика
+- **Реактивность** — UI должен обновляться при изменении данных, а не по таймеру
+- **UI-компоненты** — нет готовых Column, Row, Stack, LazyColumn, модификаторов, тем
+- **Навигация** — нет ChildStack с жизненным циклом экранов
+
+Этот фреймворк решает все эти проблемы «из коробки».
+
+## Решение
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  egui-android-framework              │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌────────┐│
+│  │ platform │  │   core   │  │   ui   │  │ nav-   ││
+│  │  - EGL   │  │ Component│  │ Widgets│  │ igation││
+│  │  - Input │  │ ViewFn   │  │ Contain│  │ ChildS.││
+│  │  - Loop  │  │ Lifecycle│  │ Modif. │  │ Lifecy.││
+│  │          │  │ BackDisp.│  │ Anim.  │  │        ││
+│  │          │  │          │  │ Theme  │  │        ││
+│  └────┬─────┘  └────┬─────┘  └───┬────┘  └────┬───┘│
+│       └─────────────┼────────────┼─────────────┘    │
+│                     ▼            ▼                   │
+│            ┌──────────────────────────┐              │
+│            │        runtime           │              │
+│            │  Application | Dispatcher│              │
+│            │  StateStore | UiNotifier │              │
+│            └──────────────────────────┘              │
+└─────────────────────────────────────────────────────┘
+```
+
+**Ключевые возможности:**
+
+- ✅ **Единый главный цикл** — EGL + `poll_events()` + `egui_glow` + Android lifecycle
+- ✅ **Touch-ввод** — MotionEvent → egui::Event, поддержка скролла с инерцией (fling), батчинг событий для исключения скачков
+- ✅ **MVI-архитектура** — Component + ViewFn + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
+- ✅ **Compose-like UI** — Column, Row, Stack (с двухфазным measure→layout), LazyColumn. Модификаторы: padding, background, border, clip, shadow, alpha, width, height, width_in, height_in, fill_max_width, clickable, wrap_content, size. Анимации: Fade, Slide, AnimatedVisibility. Тема: Material Design 3 (light/dark)
+- ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy)
+- ✅ **Кнопка Back** — иерархическая обработка: кастомная логика экрана → BackDispatcher (диалоги) → ChildStack pop → завершение приложения
+- ✅ **Темы** — Material Design 3 light/dark с полной палитрой, типографикой, скруглениями. Автоматическое определение системной темы
+- ✅ **Системные панели** — автоматическая обработка insets (status bar, navigation bar), смена цвета панелей под тему
+- ✅ **Локальное UI-состояние** — `remember<T>()` (аналог Compose `remember`). Хранится между кадрами, не требует мутабельного доступа
+- ✅ **MIUI support** — корректировка отступов для Xiaomi устройств
+- ✅ **Минимальный APK** — opt-level = z, LTO, strip
+- ✅ **Визуальный отклик** — Button меняет цвет при нажатии (pressed ≠ normal). `theme_colors()` автоматически подбирает pressed под любую тему
+
+## Быстрый старт
+
+```bash
+# Установите xbuild
+cargo install xbuild
+
+# Клонируйте и запустите пример
+git clone https://github.com/toffeantyri/egui-android-framework
+cd egui-android-framework/examples/counter
+x run --device adb:XXXXXXXX
+```
+
+### Минимальный код приложения
 
 ```rust
-// Через umbrella
-use egui_android_framework::runtime::{Application, Dispatcher};
-use egui_android_framework::core::{Component, UiWrapper};
-use egui_android_framework::ui::{
-    containers::{Column, Stack, Align},
-    modifier::{Modifier, ModifierDsl},
-    widgets::{Button, Text, Widget},
-    theme::Theme,
+use egui_android_framework::{
+    core::*,
+    ui::prelude::*,
+    runtime::{Application, Dispatcher, StateStore, AppConfig},
+    platform_android::run,
 };
 
-// Напрямую (если подключен только конкретный крейт)
-use egui_android_runtime::Application;
+struct CounterApp;
+
+impl Application for CounterApp {
+    type State = u32;
+    type Message = Msg;
+
+    fn render(&self, state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
+        Column::new().show(ui, dispatch, |ui, dispatch| {
+            Text::new(format!("Счёт: {}", state))
+                .modifier(Modifier::new().padding(16.0))
+                .render(ui, dispatch);
+            Button::new("+1")
+                .on_click(Msg::Increment)
+                .render(ui, dispatch);
+            Button::new("Сброс")
+                .theme_colors(egui::Color32::RED)
+                .text_color(egui::Color32::WHITE)
+                .on_click(Msg::Reset)
+                .render(ui, dispatch);
+        });
+    }
+}
 ```
+
+### Пример UI с Compose-like синтаксисом
+
+```rust
+Column::new().show(ui, dispatch, |ui, dispatch| {
+    // Текст с отступом
+    Text::new("Заголовок")
+        .modifier(Modifier::new().padding(8.0))
+        .render(ui, dispatch);
+
+    // Кнопка на всю ширину с фоном
+    Button::new("Действие")
+        .theme_colors(c.primary)
+        .text_color(c.on_primary)
+        .on_click(Msg::Action)
+        .modifier(Modifier::new().fill_max_width().padding(8.0))
+        .render(ui, dispatch);
+
+    // Локальное состояние (remember)
+    let count = remember(ui, "counter", || 0i32);
+
+    // Stack с наложением (двухфазный measure→layout)
+    Stack::new()
+        .add(Text::new("Фон").modifier(Modifier::new().background(c.surface)))
+        .add_with_align(Text::new("По центру"), Align::Center)
+        .show(ui, dispatch);
+});
+```
+
+## Состав крейтов
+
+| Крейт | crates.io | Назначение |
+|---|---|---|
+| egui-android-core | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, ViewFn, Widget, LifecycleObserver, BackDispatcher, UiWrapper, Constraints |
+| egui-android-ui | [![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui) | Виджеты (Button, Text, Spacer, Icon), контейнеры (Column, Row, Stack, LazyColumn), модификаторы, remember, анимации, темы Material Design 3 |
+| egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier, AppConfig |
+| egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |
+| egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Абстрактный Platform trait, FrameInput, PlatformEvent |
+| egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл, lifecycle, system bars |
+| egui-android-framework | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
+
+## Технологии
+
+| Зависимость | Версия | Назначение |
+|---|---|---|
+| egui | 0.35 | GUI |
+| egui_glow | 0.35 | OpenGL рендеринг |
+| glow | 0.17 | OpenGL context |
+| android-activity | 0.6 | NativeActivity |
+| ndk | 0.9 | NDK bindings |
+| tokio (sync) | 1 | watch-каналы для StateStore |
+
+## Архитектура приложения
+
+```
+                    ┌──────────────────────┐
+                    │      Application      │
+                    │   (корень DI, каналы) │
+                    └──────┬───────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌──────────────┐   ┌──────────────┐   ┌─────────────────┐
+│  Navigation  │   │     UI       │   │      Core       │
+│  ChildStack  │   │  Виджеты     │   │  Component      │
+│  Lifecycle   │   │  Контейнеры  │   │  Widget<M>      │
+│              │   │  Модификаторы│   │  BackDispatcher │
+│              │   │  Анимации    │   │  ComponentCtx   │
+│              │   │  Тема        │   │  UiWrapper      │
+└──────┬───────┘   └──────┬───────┘   └────────┬────────┘
+       │                  │                    │
+       └──────────────────┼────────────────────┘
+                          │
+                          ▼
+                   ┌──────────────┐
+                   │   Runtime     │
+                   │ Dispatcher    │
+                   │ StateStore    │
+                   │ UiNotifier    │
+                   └───────┬───────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+              ▼                         ▼
+      ┌──────────────┐       ┌──────────────────┐
+      │   Platform   │       │ Platform-Android  │
+      │  (trait)     │◀──────│ EGL | Input      │
+      └──────────────┘       │ run<A>()          │
+                             │ Lifecycle         │
+                             │ System bars       │
+                             └──────────────────┘
+```
+
+### Поток данных (MVI + реактивное состояние)
+
+```
+UI (нажатие кнопки)
+  → dispatch.dispatch(Msg::Increment)
+    → Receiver накапливает сообщения
+      ← после render: drain receiver
+        → Component::handle(msg) — команда в data layer
+          → Data Layer → store.update(|s| s.count += 1)
+            → notify_tx.send(()) — сигнал Runtime
+              → UiNotifier::check() → request_repaint() + waker.wake()
+                → frame() → render(state, &dispatcher) → новый UI
+```
+
+## Лицензия
+
+MIT или Apache 2.0
