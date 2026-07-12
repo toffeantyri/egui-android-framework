@@ -164,16 +164,14 @@ impl<M> Widget<M> for Text {
                     .map(|s| s.format.color)
                     .unwrap_or_else(|| ui.visuals().text_color());
 
-                // Определяем размер alloc'а:
-                // - если задан align — alloc'им на всю доступную ширину (центрирование)
-                // - иначе — только под текст (wrap-content)
+                // Если задан align — alloc'им на доступную ширину, чтобы align имел смысл.
+                // Иначе — только под текст (wrap-content).
                 let alloc_size = if self.align.is_some() {
-                    let avail_width = ui.available_width().max(text_size.x);
-                    egui::vec2(avail_width, text_size.y)
+                    let avail_w = ui.available_width().max(text_size.x);
+                    egui::vec2(avail_w, text_size.y)
                 } else {
                     text_size
                 };
-
                 let (rect, _response) = ui.allocate_exact_size(alloc_size, egui::Sense::hover());
 
                 // Вычисляем позицию текста: по умолчанию левый верхний угол,

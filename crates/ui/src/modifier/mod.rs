@@ -506,7 +506,6 @@ mod value {
                 // ===== SIZE CONSTRAINTS =====
                 ModifierNode::FillMaxWidth => {
                     let available = ui.available_size();
-                    // Создаём child_ui на всю доступную ширину (без alloc в родителе).
                     let id_salt = ui.next_auto_id();
                     let inner_rect = ui.available_rect_before_wrap();
                     let layout = *ui.layout();
@@ -519,10 +518,6 @@ mod value {
                             ))
                             .layout(layout),
                     );
-                    // Устанавливаем constraints.min_width = available.x, чтобы
-                    // дочерние виджеты растянулись на всю ширину (match_parent).
-                    // Виджеты используют ui.allocate_space_with_sense() который
-                    // clamp'ит desired_size к constraints.min_width.
                     let child_constraints = Constraints::ranged(
                         available.x, // min_width = available.x
                         available.x, // max_width = available.x
@@ -667,12 +662,22 @@ mod value {
                 // ===== APPEARANCE =====
                 ModifierNode::Background(color, rounding) => {
                     // Фон: используем scope, чтобы не alloc'ить лишнее место.
+                    // Если constraints.min_width больше min_rect контента — расширяем
+                    // fill_rect до min_width (нужно для fill_max_width).
                     let corner_radius = egui::CornerRadius::same(*rounding as u8);
+                    let min_width = ui.constraints().min_width;
                     ui.scope(|scope_ui| {
                         let bg_shape_idx = scope_ui.painter().add(egui::Shape::Noop);
                         let mut w = UiWrapper::new_unconstrained(scope_ui);
                         rest(&mut w, dispatch);
-                        let fill_rect = scope_ui.min_rect();
+                        let mut fill_rect = scope_ui.min_rect();
+                        // Если constraints требуют ширину больше контента — расширяем
+                        if min_width > fill_rect.width() {
+                            fill_rect = egui::Rect::from_min_size(
+                                fill_rect.min,
+                                egui::vec2(min_width, fill_rect.height()),
+                            );
+                        }
                         let shape = egui::Shape::Rect(egui::epaint::RectShape::filled(
                             fill_rect,
                             corner_radius,

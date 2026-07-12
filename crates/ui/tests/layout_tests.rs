@@ -618,3 +618,69 @@ fn test_all_modifiers_consumed_pp1_and_pp325() {
     run_at(1.0);
     run_at(3.25);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// 10. ТЕСТЫ FILL_MAX_WIDTH С ALIGN — проверка min_rect.width и consum
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_fill_max_width_with_align_min_rect_width() {
+    // Проверяем, что fill_max_width + align(Center) + background + border + padding
+    // даёт min_rect на всю доступную ширину (на pp=1 и pp=3.25)
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+
+    let check = |ui: &mut UiWrapper| {
+        let avail = ui.available_size().x;
+        ui.scope(|scope_ui| {
+            let mut w = UiWrapper::new_unconstrained(scope_ui);
+            Text::new("X")
+                .align(egui::Align::Center)
+                .modifier(
+                    Modifier::new()
+                        .fill_max_width()
+                        .background(egui::Color32::GRAY)
+                        .border(1.0, egui::Color32::GREEN)
+                        .padding(8.0),
+                )
+                .render(&mut w, &dispatch);
+            let mr = w.min_rect();
+            assert!(
+                mr.width() >= avail - 10.0,
+                "min_rect.width={} < avail={} - 10",
+                mr.width(),
+                avail
+            );
+        });
+    };
+    with_ui(|ui| check(ui));
+    with_pp(3.25, |ui| check(ui));
+}
+
+#[test]
+fn test_fill_max_width_consum_with_border() {
+    // Проверяем consum: padding(8*2=16) + text + border = ~31 на pp=1
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+
+    let check = |ui: &mut UiWrapper| {
+        let before = ui.cursor().min.y;
+        Text::new("X")
+            .modifier(
+                Modifier::new()
+                    .fill_max_width()
+                    .background(egui::Color32::GRAY)
+                    .border(1.0, egui::Color32::GREEN)
+                    .padding(8.0),
+            )
+            .render(ui, &dispatch);
+        let after = ui.cursor().min.y;
+        let consum = after - before;
+        // consum должен быть > 20 (текст + padding), но не > 50
+        assert!(
+            consum >= 20.0 && consum <= 60.0,
+            "fill_max_width+border+padding consum={} вне 20-60",
+            consum
+        );
+    };
+    with_ui(|ui| check(ui));
+    with_pp(3.25, |ui| check(ui));
+}

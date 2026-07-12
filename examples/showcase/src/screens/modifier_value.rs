@@ -103,15 +103,40 @@ impl ModifierValueScreen {
 
                 // ═══ Size constraints ══════════════════════════════════
 
-                show_example_bg(
-                    ui,
-                    dispatch,
-                    "4) fill_max_width() — на всю ширину родителя",
-                    "На всю ширину",
-                    Modifier::new().fill_max_width(),
-                    c.secondary,
-                    c.on_secondary,
-                );
+                Text::new("4) fill_max_width() — на всю ширину родителя").render(ui, dispatch);
+                Text::new("Слева (default)")
+                    .text_color(c.on_secondary)
+                    .modifier(
+                        Modifier::new()
+                            .fill_max_width()
+                            .background(c.secondary)
+                            .border(1.0, Colors::LIGHT_GREEN)
+                            .padding(8.0),
+                    )
+                    .render(ui, dispatch);
+                Text::new("По центру")
+                    .align(egui::Align::Center)
+                    .text_color(c.on_secondary)
+                    .modifier(
+                        Modifier::new()
+                            .fill_max_width()
+                            .background(c.secondary)
+                            .border(1.0, Colors::LIGHT_GREEN)
+                            .padding(8.0),
+                    )
+                    .render(ui, dispatch);
+                Text::new("Справа")
+                    .align(egui::Align::RIGHT)
+                    .text_color(c.on_secondary)
+                    .modifier(
+                        Modifier::new()
+                            .fill_max_width()
+                            .background(c.secondary)
+                            .border(1.0, Colors::LIGHT_GREEN)
+                            .padding(8.0),
+                    )
+                    .render(ui, dispatch);
+                Spacer::new(8.0).render(ui, dispatch);
 
                 show_example_bg(
                     ui,
@@ -214,14 +239,12 @@ impl ModifierValueScreen {
 
                 // 14. shadow
                 Text::new("14) shadow(elevation) — тень").render(ui, dispatch);
-                Text::new("С тенью (elevation 4)")
+                Text::new("Блок с тенью (elevation 4)")
                     .text_color(c.on_surface)
                     .modifier(
                         Modifier::new()
-                            .padding(16.0)
                             .shadow(4.0)
-                            .background(c.surface)
-                            .border(1.0, c.outline),
+                            .background_with_rounding(c.surface, 4.0),
                     )
                     .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
