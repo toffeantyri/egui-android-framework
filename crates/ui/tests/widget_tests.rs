@@ -45,7 +45,7 @@ fn test_text_widget_renders() {
 
 #[test]
 fn test_text_widget_is_widget() {
-    fn takes_widget<M: 'static>(_w: impl WidgetTrait<M>) {}
+    fn takes_widget<M: 'static + Send>(_w: impl WidgetTrait<M>) {}
     takes_widget::<()>(Text::new("test"));
 }
 
@@ -173,7 +173,7 @@ fn test_spacer_widget_renders() {
 
 #[test]
 fn test_spacer_is_widget() {
-    fn takes_widget<M: 'static>(_w: impl WidgetTrait<M>) {}
+    fn takes_widget<M: 'static + Send>(_w: impl WidgetTrait<M>) {}
     takes_widget::<()>(Spacer::new(8.0));
 }
 
@@ -258,7 +258,7 @@ fn test_dispatcher_no_message() {
 
 #[test]
 fn test_widget_generic_with_different_messages() {
-    fn test_widget<M: 'static>(widget: impl WidgetTrait<M>) {
+    fn test_widget<M: 'static + Send>(widget: impl WidgetTrait<M>) {
         let (dispatch, _rx) = Dispatcher::<M>::new();
         with_ui(|ui| {
             widget.render(ui, &dispatch);
@@ -611,7 +611,7 @@ fn test_spacer_with_modifiers() {
 
 #[test]
 fn test_modifier_returns_widget() {
-    fn requires_widget<M: 'static>(_w: impl WidgetTrait<M>) {}
+    fn requires_widget<M: 'static + Send>(_w: impl WidgetTrait<M>) {}
     requires_widget::<()>(Text::new("test").modifier(Modifier::new().padding(4.0)));
     requires_widget::<()>(Text::new("test").modifier(Modifier::new().width(10.0).height(10.0)));
     requires_widget::<()>(

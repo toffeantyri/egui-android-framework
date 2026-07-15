@@ -12,21 +12,24 @@
 //! идут через один путь.
 
 use egui_android_framework::{
-    core::{Component, ComponentContext, LifecycleObserver, UiWrapper},
+    core::{ComponentContext, ComponentNode, LifecycleObserver, UiWrapper},
     navigation::ChildStack,
-    runtime::Dispatcher,
-    runtime::StateStore,
+    runtime::{DynDispatcher, StateStore},
 };
 
 use crate::app::AppState;
-use crate::components::ScreenComponent;
-use crate::navigation::Route;
+use crate::navigation::{NavigableRoute, Route};
+use crate::screens::{
+    animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
+    home::HomeScreen, modifier_value::ModifierValueScreen, nested::NestedScreen,
+    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
+};
 
 /// Сообщения корневого компонента.
 #[derive(Clone, Debug)]
 pub enum RootMsg {
-    /// Перейти на указанный маршрут.
-    Navigate(Route),
+    /// Перейти по маршруту (корневой стек или вложенный).
+    Navigate(NavigableRoute),
     /// Вернуться назад (pop из стека).
     Back,
     /// Переключить тему.
@@ -40,7 +43,7 @@ pub enum RootMsg {
 /// `back_fallback` держит raw pointer на этот Box.
 pub struct RootComponent {
     /// Корневой стек навигации. Box для стабильности указателя в back_fallback.
-    pub stack: Box<ChildStack<Route, ScreenComponent>>,
+    pub stack: Box<ChildStack<Route>>,
     store: StateStore<AppState>,
     /// Контекст компонента — центр навигации и обработки Back.
     pub context: ComponentContext<RootMsg, (), AppState>,
@@ -60,16 +63,17 @@ impl RootComponent {
         };
 
         // Добавляем Home в корневой стек
-        let home = ScreenComponent::home();
-        instance.stack.push(Route::Home, home);
+        instance
+            .stack
+            .push(Route::Home, Self::create_screen(&Route::Home));
 
         // Устанавливаем back_fallback.
         // stack — Box, указатель на данные в куче стабилен при любых перемещениях Self.
         // finish_requested не трогаем из замыкания — проверяем стек после on_back().
-        struct RawStack(*mut ChildStack<Route, ScreenComponent>);
+        struct RawStack(*mut ChildStack<Route>);
         unsafe impl Send for RawStack {}
 
-        let ptr = &mut *instance.stack as *mut ChildStack<Route, ScreenComponent>;
+        let ptr = &mut *instance.stack as *mut ChildStack<Route>;
         let raw = Box::new(RawStack(ptr));
         let mut raw = Some(raw);
 
@@ -94,10 +98,27 @@ impl RootComponent {
         instance
     }
 
+    fn create_screen(route: &Route) -> Box<dyn ComponentNode> {
+        match route {
+            Route::Home => Box::new(HomeScreen::new()),
+            Route::Widgets => Box::new(WidgetsScreen::new()),
+            Route::Containers => Box::new(ContainersScreen::new()),
+            Route::Themes => Box::new(ThemesScreen::new()),
+            Route::State => Box::new(StateScreen::new()),
+            Route::Animations => Box::new(AnimationsScreen::new()),
+            Route::ModifierValue => Box::new(ModifierValueScreen::new()),
+            Route::Nested => Box::new(NestedScreen::new()),
+            Route::BackCustom => Box::new(BackCustomScreen::new()),
+        }
+    }
+
     pub fn sync_from_store(&mut self) {
         let app_state = self.store.state();
+        // Пробрасываем is_dark_mode в ThemesScreen
         if let Some(active) = self.stack.active_mut() {
-            active.set_dark_mode(app_state.is_dark_mode);
+            if let Some(themes) = active.as_any_mut().downcast_mut::<ThemesScreen>() {
+                themes.is_dark_mode = app_state.is_dark_mode;
+            }
         }
     }
 
@@ -112,15 +133,19 @@ impl RootComponent {
     /// 4. После on_back(): если стек пуст — завершаем приложение.
     pub fn on_back(&mut self) {
         // Шаг 1: BackCustomScreen — кастомная логика (переключение цвета)
-        if let Some(custom) = self.stack.active_mut().and_then(|c| c.as_back_custom_mut()) {
-            if custom.handle_back() {
-                return;
+        if let Some(active) = self.stack.active_mut() {
+            if let Some(custom) = active.as_any_mut().downcast_mut::<BackCustomScreen>() {
+                if custom.handle_back() {
+                    return;
+                }
             }
         }
         // Шаг 2: NestedScreen — pop из вложенного стека
-        if let Some(nested) = self.stack.active_mut().and_then(|c| c.as_nested_mut()) {
-            if nested.handle_back() {
-                return;
+        if let Some(active) = self.stack.active_mut() {
+            if let Some(nested) = active.as_any_mut().downcast_mut::<NestedScreen>() {
+                if nested.handle_back() {
+                    return;
+                }
             }
         }
 
@@ -133,42 +158,22 @@ impl RootComponent {
             self.context.finish_requested = true;
         }
     }
-}
 
-impl LifecycleObserver for RootComponent {}
-
-impl Component for RootComponent {
-    type State = AppState;
-    type Message = RootMsg;
-
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
-        if let Some(active) = self.stack.active() {
-            let mut wrapper = UiWrapper::new_unconstrained(ui);
-            active.render(&mut wrapper, dispatch);
-        }
-    }
-
-    fn handle(&mut self, msg: Self::Message) {
+    pub fn handle_msg(&mut self, msg: RootMsg) {
         match msg {
-            RootMsg::Navigate(route) => {
-                // Если это вложенный экран (NestedA/B/C) и активный компонент — NestedScreen,
-                // то push во вложенный стек, а не в корневой.
-                let is_nested_sub =
-                    matches!(route, Route::NestedA | Route::NestedB | Route::NestedC);
-                if is_nested_sub {
-                    if let Some(nested) = self.stack.active_mut().and_then(|c| c.as_nested_mut()) {
-                        nested.push_sub(route);
-                        return;
+            RootMsg::Navigate(nav) => match nav {
+                NavigableRoute::Main(route) => {
+                    self.stack.push(route.clone(), Self::create_screen(&route));
+                }
+                NavigableRoute::Nested(route) => {
+                    if let Some(active) = self.stack.active_mut() {
+                        if let Some(nested) = active.as_any_mut().downcast_mut::<NestedScreen>() {
+                            nested.push_sub(route);
+                        }
                     }
                 }
-                // Создаём компонент по маршруту.
-                // NestedScreen больше не регистрирует callback в BackDispatcher —
-                // обработка Back идёт через прямой вызов handle_back() из on_back().
-                let component = ScreenComponent::from_route(&route);
-                self.stack.push(route, component);
-            }
+            },
             RootMsg::Back => {
-                // UI-кнопка назад — через ComponentContext (единый путь)
                 self.on_back();
             }
             RootMsg::ToggleTheme => {
@@ -177,7 +182,12 @@ impl Component for RootComponent {
         }
     }
 
-    fn state(&self) -> &Self::State {
-        panic!("state() не поддерживается для RootComponent")
+    /// Рендеринг с DynDispatcher для совместимости с ChildStack.
+    pub fn render_dyn(&self, ui: &mut UiWrapper, dyn_dispatcher: &DynDispatcher) {
+        if let Some(active) = self.stack.active() {
+            active.render(ui, dyn_dispatcher);
+        }
     }
 }
+
+impl LifecycleObserver for RootComponent {}

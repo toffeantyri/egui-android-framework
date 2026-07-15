@@ -5,6 +5,7 @@
 //! возвращается на Home только при повторном Back (через back_fallback).
 
 use egui_android_framework::{
+    core::{Component as UiComponent, LifecycleObserver},
     runtime::Dispatcher,
     ui::{
         containers::Column,
@@ -44,8 +45,15 @@ impl BackCustomScreen {
             BgColor::Green => false,
         }
     }
+}
 
-    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+impl LifecycleObserver for BackCustomScreen {}
+
+impl UiComponent for BackCustomScreen {
+    type State = ();
+    type Message = RootMsg;
+
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
         let c = &Theme::current_from_ui(ui).colors;
         Column::new()
             .scrollable()
@@ -103,5 +111,11 @@ impl BackCustomScreen {
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });
+    }
+
+    fn handle(&mut self, _msg: Self::Message) {}
+
+    fn state(&self) -> &Self::State {
+        &()
     }
 }

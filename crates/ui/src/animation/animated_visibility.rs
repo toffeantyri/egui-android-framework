@@ -6,7 +6,7 @@ pub struct AnimatedVisibility<M> {
     child: Option<Box<dyn Widget<M>>>,
 }
 
-impl<M: 'static> AnimatedVisibility<M> {
+impl<M: 'static + Send> AnimatedVisibility<M> {
     pub fn new(visible: bool, duration_secs: f32) -> Self {
         Self {
             visible,
@@ -20,7 +20,7 @@ impl<M: 'static> AnimatedVisibility<M> {
     }
 }
 
-impl<M: 'static> Widget<M> for AnimatedVisibility<M> {
+impl<M: 'static + Send> Widget<M> for AnimatedVisibility<M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let ctx = ui.ctx();
         let id = ui.id().with("animated_visibility");

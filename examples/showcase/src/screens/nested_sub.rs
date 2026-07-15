@@ -1,4 +1,6 @@
 //! Вложенный экран внутри NestedScreen.
+//!
+//! Использует отдельный enum NestedRoute — не зависит от корневого Route.
 
 use egui_android_framework::{
     core::{Component, LifecycleObserver},
@@ -12,7 +14,7 @@ use egui_android_framework::{
     },
 };
 
-use crate::navigation::Route;
+use crate::navigation::NestedRoute;
 use crate::root_component::RootMsg;
 
 /// Вложенный экран (Nested A, B, C).
@@ -27,16 +29,22 @@ impl NestedSubScreen {
         }
     }
 
-    pub fn from_route(route: &Route) -> Self {
+    pub fn from_route(route: &NestedRoute) -> Self {
         match route {
-            Route::NestedA => Self::new("Экран A"),
-            Route::NestedB => Self::new("Экран B"),
-            Route::NestedC => Self::new("Экран C"),
-            _ => Self::new("Неизвестный"),
+            NestedRoute::A => Self::new("Экран A"),
+            NestedRoute::B => Self::new("Экран B"),
+            NestedRoute::C => Self::new("Экран C"),
         }
     }
+}
 
-    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+impl LifecycleObserver for NestedSubScreen {}
+
+impl Component for NestedSubScreen {
+    type State = ();
+    type Message = RootMsg;
+
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
         let c = &Theme::current_from_ui(ui).colors;
 
         Column::new().show(ui, dispatch, |ui, dispatch| {
@@ -61,15 +69,6 @@ impl NestedSubScreen {
                 .render(ui, dispatch);
         });
     }
-}
-
-impl LifecycleObserver for NestedSubScreen {}
-
-impl Component for NestedSubScreen {
-    type State = ();
-    type Message = ();
-
-    fn render(&self, _ui: &mut egui::Ui, _dispatch: &Dispatcher<Self::Message>) {}
 
     fn handle(&mut self, _msg: Self::Message) {}
 

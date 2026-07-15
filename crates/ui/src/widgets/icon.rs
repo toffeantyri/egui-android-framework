@@ -16,7 +16,7 @@ impl Icon {
     }
 }
 
-impl<M> Widget<M> for Icon {
+impl<M: Send> Widget<M> for Icon {
     fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         ui.add(self.icon.clone());
     }

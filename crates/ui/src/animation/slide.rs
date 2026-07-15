@@ -27,7 +27,7 @@ impl<W, M> Slide<W, M> {
     }
 }
 
-impl<W: Widget<M>, M> Widget<M> for Slide<W, M> {
+impl<W: Widget<M>, M: Send> Widget<M> for Slide<W, M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         let offset_vec = match self.direction {
             SlideDirection::Left => egui::vec2(-self.offset, 0.0),

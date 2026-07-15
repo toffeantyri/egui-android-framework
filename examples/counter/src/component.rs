@@ -40,9 +40,8 @@ impl Component for CounterComponent {
     type State = u32;
     type Message = Msg;
 
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>) {
-        let mut wrapper = UiWrapper::new_unconstrained(ui);
-        counter_view(&self.count, &mut wrapper, dispatch)
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+        counter_view(&self.count, ui, dispatch)
     }
 
     fn handle(&mut self, msg: Self::Message) {

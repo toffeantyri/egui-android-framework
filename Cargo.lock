@@ -232,6 +232,7 @@ version = "0.3.3-alpha.3"
 dependencies = [
  "egui",
  "egui-android-core",
+ "egui-android-runtime",
  "egui-android-ui",
  "log",
 ]

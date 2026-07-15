@@ -3,17 +3,17 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver},
+    core::{LifecycleObserver, UiWrapper},
     runtime::AndroidWakeHandle,
     runtime::AppConfig,
     runtime::Application,
-    runtime::Dispatcher,
+    runtime::DynDispatcher,
     runtime::StateStore,
     runtime::UiNotifier,
     ui::theme::MaterialTheme,
 };
 
-use crate::root_component::RootComponent;
+use crate::root_component::{RootComponent, RootMsg};
 
 /// Корневое состояние приложения.
 #[derive(Clone, Debug, Default)]
@@ -127,7 +127,7 @@ impl Application for ShowcaseApplication {
 
         self.root.sync_from_store();
 
-        let (dispatcher, receiver) = Dispatcher::new();
+        let (dyn_dispatcher, dyn_receiver) = DynDispatcher::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default()
@@ -138,13 +138,16 @@ impl Application for ShowcaseApplication {
                         .outer_margin(egui::Margin::ZERO),
                 )
                 .show(ctx, |ui| {
-                    self.root.render(ui, &dispatcher);
+                    let mut wrapper = UiWrapper::new_unconstrained(ui);
+                    RootComponent::render_dyn(&self.root, &mut wrapper, &dyn_dispatcher);
                 });
         });
 
-        // Drain'им сообщения от View
-        for msg in receiver.try_iter() {
-            self.root.handle(msg);
+        // Drain'им сообщения от View (DynDispatcher)
+        for msg in dyn_receiver.try_iter() {
+            if let Ok(root_msg) = msg.downcast::<RootMsg>() {
+                self.root.handle_msg(*root_msg);
+            }
         }
 
         full_output

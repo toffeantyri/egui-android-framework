@@ -10,12 +10,12 @@ pub use slide::{Slide, SlideDirection};
 
 use egui_android_core::widget::Widget;
 
-pub trait AnimationExt<M>: Widget<M> + Sized {
+pub trait AnimationExt<M: Send>: Widget<M> + Sized {
     fn fade(self, opacity: f32) -> Fade<Self, M>;
     fn slide(self, direction: SlideDirection, offset: f32) -> Slide<Self, M>;
 }
 
-impl<T: Widget<M>, M> AnimationExt<M> for T {
+impl<T: Widget<M>, M: Send> AnimationExt<M> for T {
     fn fade(self, opacity: f32) -> Fade<Self, M> {
         Fade::new(self, opacity)
     }

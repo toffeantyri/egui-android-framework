@@ -113,7 +113,7 @@ impl Text {
     }
 }
 
-impl<M> Widget<M> for Text {
+impl<M: Send> Widget<M> for Text {
     fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         if self.selectable {
             if let Some(size) = self.font_size {

@@ -1,30 +1,30 @@
 //! NestedScreen — экран с вложенной навигацией (ChildStack внутри).
 //!
+//! Использует отдельный enum NestedRoute для вложенных экранов.
 //! Обработка Back идёт через прямой вызов `handle_back()` из
 //! `RootComponent::on_back()`, а не через BackDispatcher, чтобы избежать
-//! проблем с временем жизни raw pointer (callback в BackDispatcher переживает
-//! NestedScreen при pop из корневого стека, что приводит к SIGSEGV).
+//! проблем с временем жизни raw pointer.
 
 use egui_android_framework::{
+    core::{ComponentNode, LifecycleObserver, UiWrapper},
     navigation::ChildStack,
-    runtime::Dispatcher,
+    runtime::{Dispatcher, DynDispatcher},
     ui::{
         containers::Column,
         modifier::{Modifier, ModifierDsl},
         theme::Theme,
         widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
     },
 };
 
-use crate::navigation::Route;
+use crate::navigation::{NavigableRoute, NestedRoute};
 use crate::root_component::RootMsg;
 use crate::screens::nested_sub::NestedSubScreen;
 
 /// Экран с вложенной навигацией.
 pub struct NestedScreen {
-    /// Вложенный стек: Route — ключ, NestedSubScreen — компонент.
-    pub stack: ChildStack<Route, NestedSubScreen>,
+    /// Вложенный стек: NestedRoute — ключ, NestedSubScreen — компонент.
+    pub stack: ChildStack<NestedRoute>,
 }
 
 impl NestedScreen {
@@ -34,16 +34,25 @@ impl NestedScreen {
         }
     }
 
-    /// Обработать BackPressed — вызывается из RootComponent::on_back().
-    pub fn handle_back(&mut self) -> bool {
-        if self.stack.is_empty() {
-            return false;
-        }
-        self.stack.pop();
-        true
+    /// Перейти на вложенный экран.
+    pub fn push_sub(&mut self, route: NestedRoute) {
+        let sub = NestedSubScreen::from_route(&route);
+        self.stack.push(route, Box::new(sub));
     }
 
-    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+    /// Проверить, пуст ли вложенный стек.
+    pub fn is_sub_stack_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+}
+
+impl LifecycleObserver for NestedScreen {}
+
+impl ComponentNode for NestedScreen {
+    fn render(&self, ui: &mut UiWrapper, dyn_dispatcher: &DynDispatcher) {
+        let typed: Dispatcher<RootMsg> = dyn_dispatcher.wrap();
+        let dispatch = &typed;
+
         let c = &Theme::current_from_ui(ui).colors;
 
         Column::new()
@@ -65,25 +74,27 @@ impl NestedScreen {
                     Text::new("Текущий экран:")
                         .modifier(Modifier::new().padding(8.0))
                         .render(ui, dispatch);
-                    active.render(ui, dispatch);
+                    active.render(ui, dyn_dispatcher);
                     Spacer::new(16.0).render(ui, dispatch);
                 }
 
-                // Кнопки для навигации во вложенные экраны
+                // Кнопки для навигации во вложенные экраны.
+                // Шлём RootMsg::NavigateNested — RootComponent перенаправит
+                // в NestedScreen::push_sub.
                 Button::new("Перейти на Nested A")
-                    .on_click(RootMsg::Navigate(Route::NestedA))
+                    .on_click(RootMsg::Navigate(NavigableRoute::Nested(NestedRoute::A)))
                     .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested B")
-                    .on_click(RootMsg::Navigate(Route::NestedB))
+                    .on_click(RootMsg::Navigate(NavigableRoute::Nested(NestedRoute::B)))
                     .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
                     .render(ui, dispatch);
                 Button::new("Перейти на Nested C")
-                    .on_click(RootMsg::Navigate(Route::NestedC))
+                    .on_click(RootMsg::Navigate(NavigableRoute::Nested(NestedRoute::C)))
                     .theme_colors(c.secondary)
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().fill_max_width().padding(4.0))
@@ -99,14 +110,21 @@ impl NestedScreen {
             });
     }
 
-    /// Перейти на вложенный экран.
-    pub fn push_sub(&mut self, route: Route) {
-        let sub = NestedSubScreen::from_route(&route);
-        self.stack.push(route, sub);
+    fn handle_back(&mut self) -> bool {
+        if self.stack.is_empty() {
+            return false;
+        }
+        self.stack.pop();
+        true
     }
 
-    /// Проверить, пуст ли вложенный стек.
-    pub fn is_sub_stack_empty(&self) -> bool {
-        self.stack.is_empty()
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn handle_dyn(&mut self, _msg: Box<dyn std::any::Any + Send>) {}
 }

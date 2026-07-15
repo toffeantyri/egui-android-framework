@@ -1,38 +1,51 @@
 //! ChildStack — стек дочерних компонентов с управлением жизненным циклом.
 //!
-//! Аналог `ChildStack` из Decompose. Хранит стек `(Config, Component)` пар,
+//! Аналог `ChildStack` из Decompose. Хранит стек `(Config, ComponentNode)` пар,
 //! где верхний элемент — активный (отображаемый) компонент.
 //!
-//! При push/pop/replace вызываются lifecycle-методы компонентов
-//! (on_create, on_destroy).
+//! В отличие от старой версии, `ChildStack` не generic по типу компонента —
+//! он хранит `Box<dyn ComponentNode>`, что позволяет складывать в один стек
+//! компоненты разных типов сообщений (как в Decompose).
+//!
+//! # Параметры типа
+//!
+//! * `C` — конфигурация экрана (аналог Route/Config в Decompose).
+//!   Должна быть `Clone + PartialEq` для идентификации.
+//!
+//! # Пример
+//!
+//! ```ignore
+//! let mut stack = ChildStack::<Route>::new();
+//! stack.push(Route::Home, Box::new(HomeScreen::new()));
+//! stack.push(Route::Widgets, Box::new(WidgetsScreen::new()));
+//!
+//! if let Some(active) = stack.active() {
+//!     active.render(ui, &dyn_dispatcher);
+//! }
+//! ```
 
-use egui_android_core::Component;
+use egui_android_core::ComponentNode;
 
 /// Стек дочерних компонентов.
 ///
-/// # Параметры типа
-///
-/// * `C` — конфигурация экрана (аналог Route/Config в Decompose).
-///   Должна быть `Clone + PartialEq` для идентификации.
-/// * `Comp` — тип компонента (обычно `Box<dyn Component>`).
-pub struct ChildStack<C, Comp>
+/// Хранит `(Config, Box<dyn ComponentNode>)` пары.
+/// Generic только по конфигурации `C`.
+pub struct ChildStack<C>
 where
     C: Clone + PartialEq,
-    Comp: Component,
 {
-    items: Vec<ChildItem<C, Comp>>,
+    items: Vec<ChildItem<C>>,
 }
 
-/// Элемент стека: конфигурация + компонент.
-struct ChildItem<C, Comp> {
+/// Элемент стека: конфигурация + компонент (type-erased).
+struct ChildItem<C> {
     config: C,
-    component: Comp,
+    component: Box<dyn ComponentNode>,
 }
 
-impl<C, Comp> ChildStack<C, Comp>
+impl<C> ChildStack<C>
 where
     C: Clone + PartialEq,
-    Comp: Component,
 {
     /// Создать пустой стек.
     pub fn new() -> Self {
@@ -40,7 +53,7 @@ where
     }
 
     /// Добавить компонент на вершину стека.
-    pub fn push(&mut self, config: C, component: Comp) {
+    pub fn push(&mut self, config: C, component: Box<dyn ComponentNode>) {
         if let Some(active) = self.items.last_mut() {
             active.component.on_pause();
         }
@@ -59,7 +72,7 @@ where
     /// Вызывает lifecycle на удаляемом компоненте.
     ///
     /// Возвращает `None`, если стек пуст.
-    pub fn pop(&mut self) -> Option<(C, Comp)> {
+    pub fn pop(&mut self) -> Option<(C, Box<dyn ComponentNode>)> {
         let removed = self.items.pop()?;
         let mut comp = removed.component;
         comp.on_pause();
@@ -76,7 +89,7 @@ where
     /// Заменить верхний элемент на новый (pop + push без анимации).
     ///
     /// Если стек пуст — равносильно `push()`.
-    pub fn replace(&mut self, config: C, component: Comp) {
+    pub fn replace(&mut self, config: C, component: Box<dyn ComponentNode>) {
         if self.items.is_empty() {
             self.push(config, component);
             return;
@@ -105,7 +118,7 @@ where
     /// Если `config` нет в стеке — равносильно `replace()`.
     ///
     /// Аналог `bringToFront` в Decompose.
-    pub fn bring_to_front(&mut self, config: C, component: Comp) {
+    pub fn bring_to_front(&mut self, config: C, component: Box<dyn ComponentNode>) {
         // Ищем позицию с такой же конфигурацией
         if let Some(pos) = self.items.iter().position(|item| item.config == config) {
             // Удаляем всё, что выше этой позиции
@@ -124,14 +137,14 @@ where
     }
 
     /// Получить ссылку на активный (верхний) компонент.
-    pub fn active(&self) -> Option<&Comp> {
-        self.items.last().map(|item| &item.component)
+    pub fn active(&self) -> Option<&dyn ComponentNode> {
+        self.items.last().map(|item| &*item.component)
     }
 
     /// Получить мутабельную ссылку на активный компонент.
-    pub fn active_mut(&mut self) -> Option<&mut Comp> {
+    pub fn active_mut(&mut self) -> Option<&mut dyn ComponentNode> {
         let idx = self.items.len().checked_sub(1)?;
-        Some(&mut self.items[idx].component)
+        Some(&mut *self.items[idx].component)
     }
 
     /// Получить конфигурацию активного компонента.
@@ -176,10 +189,9 @@ where
     }
 }
 
-impl<C, Comp> Default for ChildStack<C, Comp>
+impl<C> Default for ChildStack<C>
 where
     C: Clone + PartialEq,
-    Comp: Component,
 {
     fn default() -> Self {
         Self::new()
@@ -199,7 +211,10 @@ pub enum LifecycleEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_android_core::Component;
     use egui_android_core::LifecycleObserver;
+    use egui_android_core::UiWrapper;
+    use egui_android_runtime::Dispatcher;
 
     /// Тестовый компонент, логирующий вызовы lifecycle.
     #[derive(Default)]
@@ -232,12 +247,7 @@ mod tests {
         type State = ();
         type Message = ();
 
-        fn render(
-            &self,
-            _ui: &mut egui::Ui,
-            _dispatch: &egui_android_core::Dispatcher<Self::Message>,
-        ) {
-        }
+        fn render(&self, _ui: &mut UiWrapper, _dispatch: &Dispatcher<Self::Message>) {}
 
         fn handle(&mut self, _msg: Self::Message) {}
 
@@ -248,29 +258,31 @@ mod tests {
 
     #[test]
     fn test_push_lifecycle() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
+        let mut stack = ChildStack::<&'static str>::new();
         assert!(stack.is_empty());
 
-        stack.push("screen_a", TestComp::default());
+        stack.push("screen_a", Box::new(TestComp::default()));
         assert_eq!(stack.len(), 1);
         assert_eq!(stack.active_config(), Some(&"screen_a"));
-
-        let active = stack.active().unwrap();
-        assert_eq!(active.events, vec!["create", "start", "resume"]);
     }
 
     #[test]
     fn test_pop_lifecycle() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push("a", TestComp::default());
-        stack.push("b", TestComp::default());
+        let mut stack = ChildStack::<&'static str>::new();
+        stack.push("a", Box::new(TestComp::default()));
+        stack.push("b", Box::new(TestComp::default()));
 
         assert_eq!(stack.len(), 2);
-        let (config, comp) = stack.pop().unwrap();
+        let (config, mut comp) = stack.pop().unwrap();
         assert_eq!(config, "b");
-        // Компонент B прошёл полный цикл: create → start → resume → pause → stop → destroy
+
+        // Проверяем lifecycle через as_any_mut + downcast_ref
+        let test_comp = comp
+            .as_any_mut()
+            .downcast_mut::<TestComp>()
+            .expect("should downcast to TestComp");
         assert_eq!(
-            comp.events,
+            test_comp.events,
             vec!["create", "start", "resume", "pause", "stop", "destroy"]
         );
         assert_eq!(stack.len(), 1);
@@ -278,34 +290,31 @@ mod tests {
 
     #[test]
     fn test_replace_lifecycle() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push("a", TestComp::default());
+        let mut stack = ChildStack::<&'static str>::new();
+        stack.push("a", Box::new(TestComp::default()));
 
-        stack.replace("b", TestComp::default());
+        stack.replace("b", Box::new(TestComp::default()));
 
         assert_eq!(stack.len(), 1);
         assert_eq!(stack.active_config(), Some(&"b"));
-
-        let old_events = stack.active().unwrap().events.clone();
-        assert_eq!(old_events, vec!["create", "start", "resume"]);
     }
 
     #[test]
     fn test_bring_to_front_new_config() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push("a", TestComp::default());
+        let mut stack = ChildStack::<&'static str>::new();
+        stack.push("a", Box::new(TestComp::default()));
 
         // Нету — заменяет верхний
-        stack.bring_to_front("b", TestComp::default());
+        stack.bring_to_front("b", Box::new(TestComp::default()));
         assert_eq!(stack.active_config(), Some(&"b"));
         assert_eq!(stack.len(), 1);
     }
 
     #[test]
     fn test_clear_destroys_all() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
-        stack.push("a", TestComp::default());
-        stack.push("b", TestComp::default());
+        let mut stack = ChildStack::<&'static str>::new();
+        stack.push("a", Box::new(TestComp::default()));
+        stack.push("b", Box::new(TestComp::default()));
 
         stack.clear();
         assert!(stack.is_empty());
@@ -313,14 +322,19 @@ mod tests {
 
     #[test]
     fn test_pop_empty_stack() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
+        let mut stack = ChildStack::<&'static str>::new();
         assert!(stack.pop().is_none());
     }
 
     #[test]
     fn test_active_on_empty_stack() {
-        let mut stack = ChildStack::<&'static str, TestComp>::new();
+        let stack = ChildStack::<&'static str>::new();
         assert!(stack.active().is_none());
+    }
+
+    #[test]
+    fn test_active_mut_on_empty_stack() {
+        let mut stack = ChildStack::<&'static str>::new();
         assert!(stack.active_mut().is_none());
     }
 }

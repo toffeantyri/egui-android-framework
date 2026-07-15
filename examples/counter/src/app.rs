@@ -13,7 +13,7 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver},
+    core::{Component, LifecycleObserver, UiWrapper},
     runtime::{AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier},
     ui::theme::MaterialTheme,
 };
@@ -151,7 +151,8 @@ impl Application for CounterApp {
                         .outer_margin(egui::Margin::ZERO),
                 )
                 .show(ctx, |ui| {
-                    self.root.render(ui, &dispatcher);
+                    let mut wrapper = UiWrapper::new_unconstrained(ui);
+                    self.root.render(&mut wrapper, &dispatcher);
                 });
         });
 

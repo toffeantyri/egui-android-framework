@@ -415,7 +415,7 @@ mod value {
         }
     }
 
-    impl<M: 'static + Clone> Modifier<M> {
+    impl<M: 'static + Clone + Send> Modifier<M> {
         /// Применить все модификаторы вокруг content-замыкания.
         ///
         /// Модификаторы применяются **в порядке добавления**:
@@ -832,7 +832,7 @@ pub struct Modified<W, M> {
     modifier: Modifier<M>,
 }
 
-impl<W: Widget<M>, M: 'static + Clone> Widget<M> for Modified<W, M> {
+impl<W: Widget<M>, M: 'static + Clone + Send> Widget<M> for Modified<W, M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         self.modifier.apply(ui, dispatch, |ui, dispatch| {
             self.inner.render(ui, dispatch);
@@ -843,14 +843,14 @@ impl<W: Widget<M>, M: 'static + Clone> Widget<M> for Modified<W, M> {
 /// Extension trait для применения [`Modifier`] к любому виджету.
 ///
 /// Заменяет старый `ModifierApply`.
-pub trait ModifierDsl<M>: Widget<M> + Sized {
+pub trait ModifierDsl<M: Send>: Widget<M> + Sized {
     /// Применить [`Modifier`] к виджету.
     fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone;
 }
 
-impl<T: Widget<M>, M> ModifierDsl<M> for T {
+impl<T: Widget<M>, M: Send> ModifierDsl<M> for T {
     fn modifier(self, modifier: Modifier<M>) -> Modified<Self, M>
     where
         M: 'static + Clone,

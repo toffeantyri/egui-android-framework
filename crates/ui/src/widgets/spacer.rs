@@ -45,7 +45,7 @@ impl Spacer {
     }
 }
 
-impl<M> Widget<M> for Spacer {
+impl<M: Send> Widget<M> for Spacer {
     fn render(&self, ui: &mut UiWrapper, _dispatch: &Dispatcher<M>) {
         // Spacer — только явные размеры.
         // allocate_space учитывает constraints (fill_max_width может растянуть).

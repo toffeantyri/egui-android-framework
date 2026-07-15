@@ -74,13 +74,13 @@ pub struct Stack<M> {
     children: Vec<StackEntry<M>>,
 }
 
-impl<M: 'static> Default for Stack<M> {
+impl<M: 'static + Send> Default for Stack<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<M: 'static> Stack<M> {
+impl<M: 'static + Send> Stack<M> {
     pub fn new() -> Self {
         Self {
             children: Vec::new(),

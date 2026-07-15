@@ -17,7 +17,7 @@ impl<W, M> Fade<W, M> {
     }
 }
 
-impl<W: Widget<M>, M> Widget<M> for Fade<W, M> {
+impl<W: Widget<M>, M: Send> Widget<M> for Fade<W, M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         ui.scope(|scope_ui| {
             scope_ui.multiply_opacity(self.opacity);

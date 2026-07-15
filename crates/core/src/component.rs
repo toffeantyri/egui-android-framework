@@ -15,6 +15,8 @@
 use crate::lifecycle::LifecycleObserver;
 use egui_android_runtime::Dispatcher;
 
+use crate::UiWrapper;
+
 /// Компонент — узел дерева навигации.
 ///
 /// Владеет состоянием (`State`), обрабатывает сообщения (`Message`),
@@ -24,9 +26,12 @@ pub trait Component: LifecycleObserver + Send + 'static {
     type State: 'static;
 
     /// Тип сообщения, возвращаемого View-функцией.
-    type Message: 'static;
+    type Message: 'static + Send;
 
     /// Отрисовать UI через View-функцию.
+    ///
+    /// Принимает `&mut UiWrapper` для совместимости с [`Widget<M>`] и [`ComponentNode`].
+    /// Внутри компонент может получить `&mut egui::Ui` через `DerefMut`.
     ///
     /// Вызывается фреймворком один раз за кадр.
     /// Сообщения отправляются через `dispatch` в момент события,
@@ -34,7 +39,7 @@ pub trait Component: LifecycleObserver + Send + 'static {
     ///
     /// Компонент не должен вызывать `egui_ctx.run()` сам —
     /// это делает `run.rs`.
-    fn render(&self, ui: &mut egui::Ui, dispatch: &Dispatcher<Self::Message>);
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>);
 
     /// Обработать сообщение от View-функции.
     fn handle(&mut self, msg: Self::Message);

@@ -214,7 +214,7 @@ impl<M: 'static> Button<M> {
     }
 }
 
-impl<M: Clone + 'static> Widget<M> for Button<M> {
+impl<M: Clone + 'static + Send> Widget<M> for Button<M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
         // Внутренний padding кнопки: 12px по горизонтали, 8px по вертикали
         const HPAD: f32 = 12.0;

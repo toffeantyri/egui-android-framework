@@ -14,7 +14,7 @@ use egui_android_runtime::Dispatcher;
 /// # Generic
 ///
 /// * `M` — тип сообщения, которое виджет может диспатчить.
-pub trait Widget<M> {
+pub trait Widget<M: Send> {
     /// Рендерит виджет в UI.
     ///
     /// Может диспатчить сообщения через `dispatch` в момент событий

@@ -1,66 +1,85 @@
 //! Диспетчер сообщений — абстракция, скрывающая канал от View.
 //!
-//! View не знает про `std::sync::mpsc::Sender`. View видит только метод
-//! [`Dispatcher::dispatch()`] — декларативное действие "отправить сообщение".
-//!
-//! Создаётся в [`Application::frame()`] и живёт один кадр.
-//! После рендера все накопившиеся сообщения drain'ятся из `Receiver`
-//! и передаются в [`Component::handle()`].
-//!
-//! # Пример
-//!
-//! ```ignore
-//! let (dispatcher, receiver) = Dispatcher::new();
-//! component.render(ui, &dispatcher);
-//! while let Ok(msg) = receiver.try_recv() {
-//!     component.handle(msg);
-//! }
-//! ```
+//! View вызывает [`Dispatcher::dispatch()`] в момент события (клик, переключение и т.д.),
+//! не заботясь о том, как сообщение будет доставлено до [`Component::handle()`].
 
 use std::sync::mpsc;
 
-/// Диспетчер сообщений для View.
-///
-/// View вызывает [`Dispatcher::dispatch()`] в момент события (клик, переключение и т.д.),
-/// не заботясь о том, как сообщение будет доставлено до [`Component::handle()`].
-///
-/// Внутри использует `std::sync::mpsc::Sender`. Канал — FIFO, порядок сообщений
-/// сохраняется.
-///
-/// # Generic
-///
-/// * `M` — тип сообщения приложения (например, `CounterMsg`).
-pub struct Dispatcher<M> {
+// Трейт для полиморфного dispatch + clone
+trait DispatcherImpl<M>: Send + Sync {
+    fn dispatch(&self, msg: M);
+    fn clone_box(&self) -> Box<dyn DispatcherImpl<M>>;
+}
+
+// Direct-реализация
+struct DirectImpl<M> {
     tx: mpsc::Sender<M>,
 }
 
-impl<M> Dispatcher<M> {
-    /// Создать пару `(Dispatcher, Receiver)`.
-    ///
-    /// `Dispatcher` отдаётся View для отправки сообщений.
-    /// `Receiver` используется в `frame()` для сбора сообщений после render.
-    pub fn new() -> (Self, mpsc::Receiver<M>) {
-        let (tx, rx) = mpsc::channel();
-        (Self { tx }, rx)
-    }
-
-    /// Отправить сообщение из View.
-    ///
-    /// Вызывается в момент события (клик, изменение текста и т.д.).
-    /// Сообщение попадает в FIFO-очередь, откуда будет прочитано
-    /// после завершения render.
-    ///
-    /// Ошибка отправки игнорируется — если Receiver дропнут,
-    /// приложение уже завершается.
-    pub fn dispatch(&self, msg: M) {
+impl<M: 'static + Send> DispatcherImpl<M> for DirectImpl<M> {
+    fn dispatch(&self, msg: M) {
         let _ = self.tx.send(msg);
+    }
+    fn clone_box(&self) -> Box<dyn DispatcherImpl<M>> {
+        Box::new(DirectImpl {
+            tx: self.tx.clone(),
+        })
     }
 }
 
-impl<M> Clone for Dispatcher<M> {
+// Wrapped-реализация
+struct WrappedImpl {
+    tx: mpsc::Sender<Box<dyn std::any::Any + Send>>,
+}
+
+impl<M: 'static + Send> DispatcherImpl<M> for WrappedImpl {
+    fn dispatch(&self, msg: M) {
+        let _ = self.tx.send(Box::new(msg));
+    }
+    fn clone_box(&self) -> Box<dyn DispatcherImpl<M>> {
+        Box::new(WrappedImpl {
+            tx: self.tx.clone(),
+        })
+    }
+}
+
+/// Диспетчер сообщений для View.
+pub struct Dispatcher<M> {
+    inner: Box<dyn DispatcherImpl<M>>,
+}
+
+impl<M: 'static + Send> Dispatcher<M> {
+    /// Создать пару `(Dispatcher, Receiver)` с прямым каналом.
+    pub fn new() -> (Self, mpsc::Receiver<M>) {
+        let (tx, rx) = mpsc::channel();
+        (
+            Self {
+                inner: Box::new(DirectImpl { tx }),
+            },
+            rx,
+        )
+    }
+
+    /// Отправить сообщение из View.
+    pub fn dispatch(&self, msg: M) {
+        self.inner.dispatch(msg);
+    }
+
+    /// Создать Dispatcher, упаковывающий M в DynDispatcher.
+    #[doc(hidden)]
+    pub fn wrap_from(dyn_dispatcher: &crate::DynDispatcher) -> Self {
+        Self {
+            inner: Box::new(WrappedImpl {
+                tx: dyn_dispatcher.tx.clone(),
+            }),
+        }
+    }
+}
+
+impl<M: 'static + Send> Clone for Dispatcher<M> {
     fn clone(&self) -> Self {
         Self {
-            tx: self.tx.clone(),
+            inner: self.inner.clone_box(),
         }
     }
 }

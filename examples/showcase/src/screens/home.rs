@@ -1,6 +1,7 @@
 //! HomeScreen — главный экран со списком демо-экранов, построенный на Compose-like API.
 
 use egui_android_framework::{
+    core::{Component as UiComponent, LifecycleObserver},
     runtime::Dispatcher,
     ui::{
         containers::Column,
@@ -11,7 +12,7 @@ use egui_android_framework::{
     },
 };
 
-use crate::navigation::Route;
+use crate::navigation::{NavigableRoute, Route};
 use crate::root_component::RootMsg;
 
 /// Главный экран.
@@ -21,8 +22,15 @@ impl HomeScreen {
     pub fn new() -> Self {
         Self
     }
+}
 
-    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+impl LifecycleObserver for HomeScreen {}
+
+impl UiComponent for HomeScreen {
+    type State = ();
+    type Message = RootMsg;
+
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
         let c = &Theme::current_from_ui(ui).colors;
         let routes = vec![
             Route::Widgets,
@@ -45,12 +53,18 @@ impl HomeScreen {
                 Text::new("Выберите демо:").render(ui, dispatch);
                 for route in routes {
                     Button::new(route.title())
-                        .on_click(RootMsg::Navigate(route))
+                        .on_click(RootMsg::Navigate(NavigableRoute::Main(route)))
                         .theme_colors(c.primary)
                         .text_color(c.on_primary)
                         .modifier(Modifier::new().fill_max_width().padding(8.0))
                         .render(ui, dispatch);
                 }
             });
+    }
+
+    fn handle(&mut self, _msg: Self::Message) {}
+
+    fn state(&self) -> &Self::State {
+        &()
     }
 }

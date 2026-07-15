@@ -1,6 +1,7 @@
 //! ContainersScreen — демонстрация контейнеров Column, Row, Stack, LazyColumn.
 
 use egui_android_framework::{
+    core::{Component as UiComponent, LifecycleObserver},
     runtime::Dispatcher,
     ui::{
         containers::{Align, Column, LazyColumn, Row, Stack},
@@ -21,8 +22,15 @@ impl ContainersScreen {
     pub fn new() -> Self {
         Self
     }
+}
 
-    pub fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<RootMsg>) {
+impl LifecycleObserver for ContainersScreen {}
+
+impl UiComponent for ContainersScreen {
+    type State = ();
+    type Message = RootMsg;
+
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
         let c = &Theme::current_from_ui(ui).colors;
 
         Column::new()
@@ -147,5 +155,11 @@ impl ContainersScreen {
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
             });
+    }
+
+    fn handle(&mut self, _msg: Self::Message) {}
+
+    fn state(&self) -> &Self::State {
+        &()
     }
 }
