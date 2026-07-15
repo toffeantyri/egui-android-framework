@@ -13,7 +13,7 @@ use egui_android_framework::{
     ui::theme::MaterialTheme,
 };
 
-use crate::root_component::{RootComponent, RootMsg};
+use crate::navigation_host::{NavigationHost, RootMsg};
 
 /// Корневое состояние приложения.
 #[derive(Clone, Debug, Default)]
@@ -23,7 +23,7 @@ pub struct AppState {
 
 /// Приложение-витрина.
 pub struct ShowcaseApplication {
-    root: RootComponent,
+    root: NavigationHost,
     config: AppConfig,
     state: StateStore<AppState>,
     _notify_rx: mpsc::Receiver<()>,
@@ -33,7 +33,7 @@ pub struct ShowcaseApplication {
 impl LifecycleObserver for ShowcaseApplication {}
 
 impl Application for ShowcaseApplication {
-    type RootComponent = RootComponent;
+    type RootComponent = NavigationHost;
 
     fn create() -> Self {
         let config = AppConfig {
@@ -46,7 +46,7 @@ impl Application for ShowcaseApplication {
         });
         let (_notify_tx, notify_rx) = mpsc::channel::<()>();
 
-        let root = RootComponent::new(store.clone_state());
+        let root = NavigationHost::new(store.clone_state());
 
         Self {
             root,
@@ -57,11 +57,11 @@ impl Application for ShowcaseApplication {
         }
     }
 
-    fn root(&mut self) -> &mut RootComponent {
+    fn root(&mut self) -> &mut NavigationHost {
         &mut self.root
     }
 
-    fn root_ref(&self) -> &RootComponent {
+    fn root_ref(&self) -> &NavigationHost {
         &self.root
     }
 
@@ -139,7 +139,7 @@ impl Application for ShowcaseApplication {
                 )
                 .show(ctx, |ui| {
                     let mut wrapper = UiWrapper::new_unconstrained(ui);
-                    RootComponent::render_dyn(&self.root, &mut wrapper, &dyn_dispatcher);
+                    NavigationHost::render_dyn(&self.root, &mut wrapper, &dyn_dispatcher);
                 });
         });
 

@@ -16,7 +16,7 @@ use egui_android_framework::{
     },
 };
 
-use crate::root_component::RootMsg;
+use crate::navigation_host::RootMsg;
 
 /// Экран демонстрации локального состояния.
 pub struct StateScreen;

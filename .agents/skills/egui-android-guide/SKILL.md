@@ -134,14 +134,31 @@ Message = и событие, и семантика
 - `dispatch(msg)` — отправляет сообщение в момент события (клик, переключение и т.д.).
 - `Clone` — можно передавать дочерним компонентам и в замыкания.
 - View не знает про канал внутри — только про `dispatch()`.
+- Имеет две внутренние реализации: `DirectImpl` (прямая отправка) и `WrappedImpl` (упаковка M в `Box<dyn Any + Send>` для совместимости с `DynDispatcher`).
+
+### `DynDispatcher` — `egui-android-runtime`
+- Type-erased диспетчер сообщений. Хранит `mpsc::Sender<Box<dyn Any + Send>>`.
+- `new() -> (Self, Receiver<Box<dyn Any + Send>>)` — создаёт пару.
+- `wrap::<M>() -> Dispatcher<M>` — создаёт типизированный `Dispatcher`, который упаковывает M без спавна потоков.
+- Используется в `ComponentNode::render()` для передачи `Dispatcher<M>` экранам.
 
 ### `Component` — `egui-android-core`
 - Узел дерева навигации. Хранит snapshot состояния + ссылку на Store.
-- `render(ui, &dispatcher)` — делегирует View-функции, сообщения диспатчатся через `Dispatcher`.
+- `render(ui: &mut UiWrapper, &dispatcher)` — делегирует View-функции. Принимает `UiWrapper` (не `egui::Ui`).
 - `handle(msg)` — обрабатывает сообщение (отправляет команду в data layer).
 - `sync_from_store()` — синхронизирует snapshot из Store (вызывается перед render).
 - `state() -> &State` — текущий snapshot для View.
+- `type Message: 'static + Send` — сообщение должно быть Send для передачи через каналы.
 - Наследует `LifecycleObserver`.
+
+### `ComponentNode` — `egui-android-core`
+- Object-safe трейт для хранения разнотипных компонентов в `Box<dyn ComponentNode>`.
+- Аналог `Component<*, *>` из Decompose (type erasure).
+- `render(ui: &mut UiWrapper, dispatch: &DynDispatcher)` — type-erased рендер.
+- `handle_dyn(msg: Box<dyn Any + Send>)` — type-erased handle (downcast внутри).
+- `handle_back() -> bool` — встроенная поддержка BackPressed (как в Decompose).
+- `as_any() / as_any_mut()` — downcast для тестирования и доступа к конкретному типу.
+- Blanket-impl: любой `Component<Message: 'static + Send>` автоматически становится `ComponentNode`.
 
 ### `StateStore<T>` — `egui-android-runtime`
 - Реактивное состояние на `tokio::sync::watch`.
@@ -217,12 +234,16 @@ Message = и событие, и семантика
 - `RememberState::set(value)` — устанавливает новое значение.
 - `RememberState::modify(|v| ...)` — изменяет значение через замыкание.
 
-### `ChildStack<C, Comp>` — `egui-android-navigation`
+### `ChildStack<C>` — `egui-android-navigation`
 - Стек дочерних компонентов с управлением жизненным циклом.
-- `push / pop / replace / bring_to_front / clear`.
-- `pop()` возвращает `Option<(C, Comp)>` — `None` если стек пуст.
+- Generic только по `C` (конфигурация/route). Внутри хранит `Vec<(C, Box<dyn ComponentNode>)>`.
+- `push(config, Box<dyn ComponentNode>)` — добавить компонент на вершину.
+- `pop() -> Option<(C, Box<dyn ComponentNode>)>` — убрать верхний элемент.
+- `active() -> Option<&dyn ComponentNode>` — ссылка на активный компонент.
+- `active_mut() -> Option<&mut dyn ComponentNode>` — мутабельная ссылка.
+- `replace / bring_to_front / clear` — управление стеком.
 - При push/pop/replace вызываются lifecycle-методы компонентов (on_create, on_destroy).
-- Аналог `ChildStack` из Decompose.
+- Аналог `ChildStack` из Decompose. Позволяет хранить компоненты разных типов.
 
 ### `BackDispatcher`, `BackCallback` — `egui-android-core`
 - Центральный менеджер обработки системной кнопки Back.
@@ -320,23 +341,34 @@ fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
 Dispatcher создаётся каждый кадр в `frame()` и живёт один кадр.
 Receiver drain'ится после render — все сообщения обрабатываются через `handle()`.
 
-## Типовой frame() в Application
+## Типовой frame() в Application (с DynDispatcher)
+
+В Decompose-like архитектуре RootComponent не реализует `Component`.
+Рендер идёт через `render_dyn()` с `DynDispatcher`.
+Сообщения от виджетов упаковываются в `Box<dyn Any + Send>` и читаются из `dyn_receiver`.
 
 ```rust,ignore
 fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
     self.root.sync_from_store();
 
-    let (dispatcher, receiver) = Dispatcher::new();
+    let (dyn_dispatcher, dyn_receiver) = DynDispatcher::new();
 
     let full_output = egui_ctx.run_ui(raw_input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let mut wrapper = UiWrapper::new_unconstrained(ui);
-            self.root.render(&mut wrapper, &dispatcher);
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new()
+                .fill(egui::Color32::TRANSPARENT)
+                .inner_margin(egui::Margin::ZERO)
+                .outer_margin(egui::Margin::ZERO))
+            .show(ctx, |ui| {
+                let mut wrapper = UiWrapper::new_unconstrained(ui);
+                self.root.render_dyn(&mut wrapper, &dyn_dispatcher);
+            });
     });
 
-    for msg in receiver.try_iter() {
-        self.root.handle(msg);
+    for msg in dyn_receiver.try_iter() {
+        if let Ok(root_msg) = msg.downcast::<RootMsg>() {
+            self.root.handle_msg(*root_msg);
+        }
     }
 
     full_output
@@ -396,10 +428,9 @@ RootComponent::on_back()
 
 ### Как добавить экран с кастомной обработкой Back
 
-1. В структуре экрана реализовать метод `handle_back(&mut self) -> bool`
-2. Добавить вариант в `ScreenComponent` enum
-3. Добавить метод `as_*_mut()` в `ScreenComponent`
-4. В `RootComponent::on_back()` проверить активный компонент через `as_*_mut()`
+1. В структуре экрана реализовать `handle_back(&mut self) -> bool`
+2. Экран должен реализовать `ComponentNode` (напрямую или через blanket-impl от `Component`)
+3. В `RootComponent::on_back()` проверить активный компонент через `as_any_mut().downcast_mut::<MyScreen>()`
 
 Пример — `BackCustomScreen` (переключает цвет фона при Back вместо pop):
 
@@ -416,7 +447,23 @@ impl BackCustomScreen {
         }
     }
 }
+
+// BackCustomScreen реализует Component — ComponentNode через blanket-impl
+impl Component for BackCustomScreen { ... }
 ```
+
+В `RootComponent::on_back()`:
+```rust,ignore
+if let Some(active) = self.stack.active_mut() {
+    if let Some(custom) = active.as_any_mut().downcast_mut::<BackCustomScreen>() {
+        if custom.handle_back() {
+            return;
+        }
+    }
+}
+```
+
+`ScreenComponent` (enum-агрегатор) больше не существует — удалён в пользу Decompose-like архитектуры.
 
 ### Правила
 
@@ -497,25 +544,28 @@ loop {
 │   │
 │   ├── runtime/            — egui-android-runtime
 │   │   └── src/
-│   │       ├── application.rs — trait Application + AppConfig + DataLayerHandle
-│   │       ├── dispatcher.rs  — Dispatcher<M>
-│   │       ├── store.rs       — StateStore<T>
-│   │       ├── ui_notifier.rs — UiNotifier + AndroidWakeHandle
-│   │       └── error.rs       — AppError
+│   │       ├── application.rs   — trait Application + AppConfig + DataLayerHandle
+│   │       ├── dispatcher.rs    — Dispatcher<M> (Direct/Wrapped)
+│   │       ├── dyn_dispatcher.rs — DynDispatcher (type-erased dispatcher)
+│   │       ├── store.rs         — StateStore<T>
+│   │       ├── ui_notifier.rs   — UiNotifier + AndroidWakeHandle
+│   │       └── error.rs         — AppError
 │   │
 │   ├── core/               — egui-android-core
 │   │   └── src/
 │   │       ├── component.rs        — trait Component
+│   │       ├── component_node.rs   — trait ComponentNode (object-safe, Box<dyn>)
 │   │       ├── component_context.rs — ComponentContext (+ BackDispatcher)
 │   │       ├── lifecycle.rs        — LifecycleState + LifecycleObserver
 │   │       ├── view.rs             — type ViewFn<S, M>
-│   │       ├── widget.rs           — trait Widget<M>
+│   │       ├── widget.rs           — trait Widget<M: Send>
 │   │       ├── ui_wrapper.rs       — UiWrapper (обёртка над egui::Ui с Constraints)
 │   │       ├── constraints.rs      — Constraints { min/max width/height }
 │   │       └── back_dispatcher.rs  — BackDispatcher + BackCallback
 │   │
-│   ├── ui/                 — egui-android-ui
+│   ├── navigation/         — egui-android-navigation
 │   │   └── src/
+│   │       └── child_stack.rs — ChildStack<C> (только C, хранит Box<dyn ComponentNode>)
 │   │       ├── lib.rs
 │   │       ├── remember.rs  — RememberState + remember()
 │   │       ├── modifier.rs  — Modifier value type, ModifierNode, ModifierDsl
@@ -642,12 +692,13 @@ loop {
 11. **Импорты — через umbrella или напрямую:**
     ```rust
     // Через umbrella (если подключен egui-android-framework)
-    use egui_android_framework::runtime::{Application, Dispatcher};
-    use egui_android_framework::core::{Component, LifecycleObserver};
+    use egui_android_framework::runtime::{Application, Dispatcher, DynDispatcher};
+    use egui_android_framework::core::{Component, ComponentNode, LifecycleObserver, UiWrapper};
+    use egui_android_framework::navigation::ChildStack;
 
     // Напрямую (если подключен только конкретный крейт)
     use egui_android_runtime::Application;
-    use egui_android_core::Component;
+    use egui_android_core::{Component, ComponentNode};
     ```
 
 12. **При изменении кода проверять изоляцию крейтов:**
@@ -655,6 +706,26 @@ loop {
     - `core` не импортирует `navigation`
     - `ui` не импортирует `navigation`
     - `platform` не импортирует `runtime`, `core`, `ui`, `navigation`
+
+13. **RootComponent не реализует Component** — в Decompose-like архитектуре `RootComponent`
+    не реализует `Component` трейт. Рендер через `render_dyn(ui, &DynDispatcher)`.
+    Сообщения обрабатываются через `handle_msg(msg)` (`downcast` из `dyn_receiver`).
+
+14. **`NavigableRoute` — sealed class паттерн для навигации:**
+    ```rust
+    pub enum NavigableRoute {
+        Main(Route),          // корневой стек
+        Nested(NestedRoute),  // вложенный стек
+    }
+    
+    pub enum RootMsg {
+        Navigate(NavigableRoute),  // единый вариант для любой навигации
+        Back,
+        ToggleTheme,
+    }
+    ```
+    Каждый стек имеет свой Route enum. `ChildStack<Route>` для корневого стека,
+    `ChildStack<NestedRoute>` для вложенного. Никаких `matches!(route, Route::NestedA...)`.
 
 13. **Compose-like UI строится через замыкания с UiWrapper:**
     ```rust

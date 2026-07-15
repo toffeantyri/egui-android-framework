@@ -18,7 +18,7 @@ use egui_android_framework::{
 };
 
 use crate::navigation::{NavigableRoute, NestedRoute};
-use crate::root_component::RootMsg;
+use crate::navigation_host::RootMsg;
 use crate::screens::nested_sub::NestedSubScreen;
 
 /// Экран с вложенной навигацией.

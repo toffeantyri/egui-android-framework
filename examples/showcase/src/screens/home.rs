@@ -13,7 +13,7 @@ use egui_android_framework::{
 };
 
 use crate::navigation::{NavigableRoute, Route};
-use crate::root_component::RootMsg;
+use crate::navigation_host::RootMsg;
 
 /// Главный экран.
 pub struct HomeScreen;

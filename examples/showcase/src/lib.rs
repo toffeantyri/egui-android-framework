@@ -4,7 +4,7 @@
 
 pub mod app;
 pub mod navigation;
-pub mod root_component;
+pub mod navigation_host;
 pub mod screens;
 
 #[cfg(target_os = "android")]

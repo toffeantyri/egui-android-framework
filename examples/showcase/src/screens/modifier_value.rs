@@ -24,7 +24,7 @@ use egui_android_framework::{
     },
 };
 
-use crate::root_component::RootMsg;
+use crate::navigation_host::RootMsg;
 
 /// Показать пример с рамкой и фоном. Цвет текста задаётся явно для контраста.
 fn show_example_bg(

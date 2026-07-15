@@ -15,7 +15,7 @@ use egui_android_framework::{
 };
 
 use crate::navigation::NestedRoute;
-use crate::root_component::RootMsg;
+use crate::navigation_host::RootMsg;
 
 /// Вложенный экран (Nested A, B, C).
 pub struct NestedSubScreen {

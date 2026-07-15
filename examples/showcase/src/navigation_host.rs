@@ -1,12 +1,18 @@
-//! RootComponent — корневой компонент с ChildStack и навигацией.
+//! NavigationHost — хост навигации с ChildStack.
+//!
+//! Координатор между Application и экранами.
+//! Владеет корневым ChildStack, создаёт экраны по маршруту,
+//! маршрутизирует сообщения, обрабатывает BackPressed.
+//!
+//! Не реализует Component трейт — рендер через render_dyn.
 //!
 //! Обработка Back:
-//! - Если активный компонент — BackCustomScreen, сначала пробуем его
-//!   `handle_back()` (кастомная логика — переключение цвета).
-//! - Если активный компонент — NestedScreen, затем пробуем его
-//!   `handle_back()` (pop из вложенного стека).
-//! - Затем `ComponentContext::on_back()` → `back_fallback` (pop из корневого
-//!   ChildStack или завершение).
+//! 1. BackCustomScreen::handle_back() — кастомная логика (переключение цвета).
+//! 2. NestedScreen::handle_back() — pop из вложенного стека.
+//! 3. ComponentContext::on_back() → back_fallback:
+//!    - стек > 1 → pop из корневого ChildStack
+//!    - стек = 1 (Home) → false (завершение приложения)
+//! 4. Если стек пуст или не изменился — завершение.
 //!
 //! Системный Back (platform-android) и UI Back (кнопка "← Назад")
 //! идут через один путь.
@@ -25,7 +31,7 @@ use crate::screens::{
     state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
 };
 
-/// Сообщения корневого компонента.
+/// Сообщения навигации.
 #[derive(Clone, Debug)]
 pub enum RootMsg {
     /// Перейти по маршруту (корневой стек или вложенный).
@@ -36,20 +42,19 @@ pub enum RootMsg {
     ToggleTheme,
 }
 
-/// Корневой компонент с навигацией.
+/// Хост навигации — координатор между Application и экранами.
 ///
-/// Хранит ChildStack в `Box`, чтобы указатель оставался стабильным
-/// при перемещении RootComponent (из `new()` в поле Application).
-/// `back_fallback` держит raw pointer на этот Box.
-pub struct RootComponent {
+/// Владеет корневым ChildStack, ComponentContext, Store.
+/// Не реализует Component — рендер через render_dyn().
+pub struct NavigationHost {
     /// Корневой стек навигации. Box для стабильности указателя в back_fallback.
     pub stack: Box<ChildStack<Route>>,
     store: StateStore<AppState>,
-    /// Контекст компонента — центр навигации и обработки Back.
+    /// Контекст — центр навигации и обработки Back.
     pub context: ComponentContext<RootMsg, (), AppState>,
 }
 
-impl RootComponent {
+impl NavigationHost {
     pub fn new(store: StateStore<AppState>) -> Self {
         let (nav_tx, _nav_rx) = std::sync::mpsc::channel();
         let ctx = ComponentContext::new(None, nav_tx, store.clone_state());
@@ -124,13 +129,10 @@ impl RootComponent {
 
     /// Обработать Back.
     ///
-    /// 1. BackCustomScreen::handle_back() — кастомная логика (переключение цвета).
+    /// 1. BackCustomScreen::handle_back() — кастомная логика.
     /// 2. NestedScreen::handle_back() — pop из вложенного стека.
-    /// 3. ComponentContext::on_back() → back_fallback:
-    ///    - если стек > 1 → pop (возврат на предыдущий экран)
-    ///    - если стек = 1 (Home) → false (завершаем приложение)
-    ///    - если стек = 0 → false (не должно быть)
-    /// 4. После on_back(): если стек пуст — завершаем приложение.
+    /// 3. ComponentContext::on_back() → back_fallback.
+    /// 4. Если стек не изменился — завершение.
     pub fn on_back(&mut self) {
         // Шаг 1: BackCustomScreen — кастомная логика (переключение цвета)
         if let Some(active) = self.stack.active_mut() {
@@ -149,7 +151,7 @@ impl RootComponent {
             }
         }
 
-        // Шаг 3: BackDispatcher + back_fallback (pop из корневого стека или завершение)
+        // Шаг 3: BackDispatcher + back_fallback
         let len_before = self.stack.len();
         let handled = self.context.on_back();
 
@@ -182,7 +184,7 @@ impl RootComponent {
         }
     }
 
-    /// Рендеринг с DynDispatcher для совместимости с ChildStack.
+    /// Рендеринг с DynDispatcher.
     pub fn render_dyn(&self, ui: &mut UiWrapper, dyn_dispatcher: &DynDispatcher) {
         if let Some(active) = self.stack.active() {
             active.render(ui, dyn_dispatcher);
@@ -190,4 +192,4 @@ impl RootComponent {
     }
 }
 
-impl LifecycleObserver for RootComponent {}
+impl LifecycleObserver for NavigationHost {}
