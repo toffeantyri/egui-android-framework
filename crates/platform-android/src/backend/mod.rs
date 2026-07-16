@@ -168,6 +168,9 @@ pub trait AndroidBackend {
 
     /// Получить указатель на Activity (JNI global reference).
     fn activity_ptr(&self) -> *mut std::ffi::c_void;
+
+    /// Получить content rect (область содержимого без системных баров).
+    fn content_rect(&self) -> (i32, i32, i32, i32);
 }
 
 /// Тип Android backend'а.
@@ -240,5 +243,9 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn activity_ptr(&self) -> *mut std::ffi::c_void {
         (**self).activity_ptr()
+    }
+
+    fn content_rect(&self) -> (i32, i32, i32, i32) {
+        (**self).content_rect()
     }
 }

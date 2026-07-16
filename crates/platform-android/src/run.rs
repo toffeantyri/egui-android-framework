@@ -130,6 +130,21 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         crate::system_bars::init_global_pointers(vm, activity);
                         crate::backend::init_ime_globals(vm, activity);
 
+                        // Получаем WindowInsets через JNI
+                        if !vm.is_null() && !activity.is_null() {
+                            if let Some(insets) = crate::insets::get_system_insets_jni(vm, activity)
+                            {
+                                crate::insets::store_insets(&insets);
+                                log::info!(
+                                    "JNI insets: left={}, top={}, right={}, bottom={}",
+                                    insets.left,
+                                    insets.top,
+                                    insets.right,
+                                    insets.bottom
+                                );
+                            }
+                        }
+
                         // Системные бары уже были установлены через run_on_java_main_thread до создания backend'а
 
                         // Обновляем DPI
@@ -161,27 +176,48 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                             crate::backend::TouchPhase::End
                             | crate::backend::TouchPhase::Cancel => egui::TouchPhase::End,
                         };
+                        // Для End/Cancel используем последнюю известную позицию,
+                        // так как backend шлёт Pos2::ZERO для этих фаз.
+                        let actual_pos = match phase {
+                            crate::backend::TouchPhase::End
+                            | crate::backend::TouchPhase::Cancel => {
+                                input_state.pointer_pos.unwrap_or(pos)
+                            }
+                            _ => pos,
+                        };
+                        let egui_touch_phase = match phase {
+                            crate::backend::TouchPhase::Start => egui::TouchPhase::Start,
+                            crate::backend::TouchPhase::Move => egui::TouchPhase::Move,
+                            crate::backend::TouchPhase::End
+                            | crate::backend::TouchPhase::Cancel => egui::TouchPhase::End,
+                        };
                         input_state.events.push(egui::Event::Touch {
                             device_id: egui::TouchDeviceId(0),
                             id: egui::TouchId(0),
-                            phase: egui_phase,
-                            pos,
+                            phase: egui_touch_phase,
+                            pos: actual_pos,
                             force: None,
                         });
                         match phase {
-                            crate::backend::TouchPhase::Start => {
+                            crate::backend::TouchPhase::Start
+                            | crate::backend::TouchPhase::Move => {
                                 input_state.pointer_pos = Some(pos);
                             }
                             crate::backend::TouchPhase::End
                             | crate::backend::TouchPhase::Cancel => {
-                                input_state.pointer_pos = None;
+                                // Не сбрасываем pointer_pos — он нужен для PointerButton UP ниже
                             }
-                            _ => {}
                         }
                     }
                     InputEvent::PointerButton { pos, pressed } => {
+                        // Для UP используем последнюю известную позицию
+                        let actual_pos = if pressed {
+                            pos
+                        } else {
+                            input_state.pointer_pos.unwrap_or(pos)
+                        };
                         input_state.events.push(egui::Event::PointerButton {
-                            pos,
+                            pos: actual_pos,
                             button: egui::PointerButton::Primary,
                             pressed,
                             modifiers: egui::Modifiers::default(),
@@ -189,6 +225,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         if pressed {
                             input_state.pointer_pos = Some(pos);
                         } else {
+                            // Сбрасываем pointer_pos только после UP
                             input_state.pointer_pos = None;
                         }
                     }
@@ -374,13 +411,17 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
 }
 
 /// Получить текущие insets для кадра.
+///
+/// Приоритет:
+/// 1. JNI (WindowInsets.Type.systemBars) — глобальные переменные из insets.rs
+/// 2. Fallback: content_rect из backend с clamp
 fn get_current_insets(
-    _backend: &Box<dyn AndroidBackend>,
+    backend: &Box<dyn AndroidBackend>,
     pp: f32,
-    _w: u32,
-    _h: u32,
+    w: u32,
+    h: u32,
 ) -> crate::backend::Insets {
-    // Пробуем загрузить insets из JNI (глобальные переменные)
+    // 1. Пробуем JNI insets
     let jni_insets = crate::insets::load_insets_px();
     if jni_insets.is_valid() {
         return crate::backend::Insets {
@@ -391,8 +432,25 @@ fn get_current_insets(
         };
     }
 
-    // Возвращаем insets из backend (если они были установлены)
-    crate::backend::Insets::default()
+    // 2. Fallback: content_rect из backend
+    let (left_px, top_px, right_px, bottom_px) = backend.content_rect();
+    let top_pt = (top_px as f32 / pp).clamp(0.0, 32.0);
+    let bottom_pt = ((h as i32 - bottom_px) as f32 / pp).clamp(0.0, 48.0);
+    let left_pt = (left_px as f32 / pp).clamp(0.0, 32.0);
+    let right_pt = ((w as i32 - right_px) as f32 / pp).clamp(0.0, 32.0);
+
+    log::info!(
+        "Insets fallback: content_rect=({},{},{},{}) px -> left={:.1} top={:.1} right={:.1} bottom={:.1} pt (pp={:.2})",
+        left_px, top_px, right_px, bottom_px,
+        left_pt, top_pt, bottom_pt, right_pt, pp
+    );
+
+    crate::backend::Insets {
+        left: left_pt,
+        top: top_pt,
+        right: right_pt,
+        bottom: bottom_pt,
+    }
 }
 
 /// Получить адрес OpenGL функции через dlsym.

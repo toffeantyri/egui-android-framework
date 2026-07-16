@@ -255,6 +255,11 @@ impl AndroidBackend for GlBackend {
     fn activity_ptr(&self) -> *mut std::ffi::c_void {
         self.app.activity_as_ptr()
     }
+
+    fn content_rect(&self) -> (i32, i32, i32, i32) {
+        let rect = self.app.content_rect();
+        (rect.left, rect.top, rect.right, rect.bottom)
+    }
 }
 
 // ─── JNI для управления IME (клавиатурой) через глобальные указатели ─────
