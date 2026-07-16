@@ -763,18 +763,93 @@ loop {
     });
     ```
 
-## Сборка и запуск
+## GL-режим (GameActivity)
+
+Проект использует **GameActivity** из Android Game Development Kit для
+полноценного GL-режима с IME, SurfaceView и InputConnection.
+
+### Архитектура Android-слоя
+
+```
+android/
+├── app/
+│   ├── src/main/
+│   │   ├── java/.../EguiActivity.kt   # GameActivity подкласс
+│   │   ├── res/values/styles.xml      # AppCompat.NoActionBar тема
+│   │   ├── AndroidManifest.xml        # Активность + lib_name
+│   │   └── jniLibs/arm64-v8a/
+│   │       └── libegui_gl_app.so      # Rust .so
+│   └── build.gradle                   # games-activity 4.4.0
+├── build.gradle
+├── settings.gradle
+└── local.properties
+```
+
+### Backend-абстракция
+
+Платформа имеет два backend'а:
+- **GlBackend** — основной, использует game-activity API
+- **NativeBackend** — fallback (без IME), использует native-activity
+
+```rust
+pub trait AndroidBackend {
+    fn init(&mut self) -> Result<(), String>;
+    fn poll_events(&mut self) -> Vec<BackendEvent>;
+    fn show_keyboard(&mut self);
+    fn hide_keyboard(&mut self);
+    // ...
+}
+```
+
+IME реализован без JNI через `app.show_soft_input()` / `app.hide_soft_input()`.
+Текстовый ввод принимается через `app.text_input_state()` (InputConnection).
+
+### Зависимости для сборки
+
+**Rust:**
+```bash
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+```
+
+**Android SDK (Ubuntu/Debian):**
+```bash
+sudo apt install android-sdk google-android-ndk-r27d-installer gradle openjdk-17-jdk
+```
+
+**SDK компоненты:**
+```bash
+/path/to/cmdline-tools/bin/sdkmanager --sdk_root=/usr/lib/android-sdk \
+  "platforms;android-34" "build-tools;33.0.0"
+```
+
+### Сборка и запуск
 
 ```bash
-# Все крейты workspace
+# 1. Сборка Rust .so
+ANDROID_NDK_HOME=/usr/lib/android-sdk/ndk/27.3.13750724 \
+  cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p egui-gl-app
+
+# 2. Сборка APK
+cd android
+./gradlew assembleDebug
+
+# 3. Установка и запуск
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.example.egui_android/.EguiActivity
+
+# Или одной командой:
+./scripts/build_android.sh --install
+```
+
+### Проверка кода
+
+```bash
+# Все крейты workspace (хост)
 cargo check --workspace
 cargo test --workspace
 
 # Только конкретный крейт
 cargo test -p egui-android-runtime
 cargo test -p egui-android-navigation
-
-# Пример counter (на хосте — только check, полный запуск — на Android)
-cd examples/counter
-x run --device adb:XXXXXXXX
 ```
