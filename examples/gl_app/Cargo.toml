@@ -1,0 +1,21 @@
+[package]
+name = "egui-gl-app"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Пример GL-приложения через GameActivity"
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+egui = { workspace = true }
+egui-android-platform-android = { path = "../../crates/platform-android" }
+egui-android-runtime = { path = "../../crates/runtime" }
+android-activity = { workspace = true }
+android_logger = { workspace = true }
+log = { workspace = true }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+egui = { workspace = true }
+log = { workspace = true }

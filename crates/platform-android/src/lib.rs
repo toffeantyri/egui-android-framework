@@ -24,3 +24,8 @@ pub mod theme;
 
 #[cfg(target_os = "android")]
 pub use run::run;
+
+// Точка входа для game-activity (используется android-activity glue).
+// android_main — функция, которую вызывает GameActivity/NativeActivity glue.
+// Она определена в каждом приложении (example/showcase, example/counter).
+// Здесь мы только ре-экспортируем функцию run.

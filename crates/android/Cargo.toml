@@ -1,0 +1,18 @@
+[package]
+name = "egui-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "cdylib-обёртка для Android-приложения. Точка входа android_main."
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+egui-android-platform-android = { path = "../platform-android" }
+egui-android-runtime = { path = "../runtime" }
+android-activity = { workspace = true }
+android_logger = { workspace = true }
+log = { workspace = true }

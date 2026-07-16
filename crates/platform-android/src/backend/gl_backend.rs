@@ -1,14 +1,17 @@
 //! GL-режим backend.
 //!
-//! Использует `android_activity::AndroidApp` с NativeActivity.
-//! IME (клавиатурный ввод) через `run_on_java_main_thread`.
-//! EGL + EglState для рендеринга (без изменений рендерера).
+//! Использует GameActivity из AGDK (feature "game-activity").
+//! Предоставляет:
+//! - IME через show_soft_input / hide_soft_input (без JNI)
+//! - Текстовый ввод через text_input_state (без JNI)
+//! - SurfaceView для EGL (через native_window)
+//! - WindowInsets и DPI из Android SDK (через JNI, т.к. game-activity
+//!   пока не пробрасывает их напрямую)
 //!
 //! # Архитектура
 //!
 //! `GlBackend` хранит `AndroidApp` и EGL-состояние отдельно от
-//! событийного буфера, чтобы избежать конфликтов borrow checker
-//! при работе с `poll_events()` и `input_events_iter()`.
+//! событийного буфера, чтобы избежать конфликтов borrow checker.
 
 #![cfg(target_os = "android")]
 
@@ -33,6 +36,7 @@ pub struct GlBackend {
     insets: Insets,
     dpi: f32,
     should_close: AtomicBool,
+    ime_visible: bool,
 }
 
 impl GlBackend {
@@ -45,6 +49,7 @@ impl GlBackend {
             insets: Insets::default(),
             dpi: 1.0,
             should_close: AtomicBool::new(false),
+            ime_visible: false,
         }
     }
 
@@ -58,12 +63,13 @@ impl GlBackend {
         let events = &mut self.events;
         let app = &self.app;
 
-        app.poll_events(Some(std::time::Duration::from_millis(0)), |event| {
-            match event {
+        app.poll_events(
+            Some(std::time::Duration::from_millis(0)),
+            |event| match event {
                 android_activity::PollEvent::Wake | android_activity::PollEvent::Timeout => {}
                 android_activity::PollEvent::Main(e) => match e {
                     MainEvent::InitWindow { .. } => {
-                        log::info!("GlBackend: InitWindow");
+                        log::info!("GlBackend: InitWindow (GameActivity)");
                         events.push(BackendEvent::Lifecycle(LifecycleEvent::InitWindow));
                         if let Some(nw) = app.native_window() {
                             let pp = crate::insets::get_pp(&app.config(), nw.width(), nw.height());
@@ -89,8 +95,8 @@ impl GlBackend {
                     _ => {}
                 },
                 _ => {}
-            }
-        });
+            },
+        );
     }
 
     /// Слить input события.
@@ -100,65 +106,63 @@ impl GlBackend {
 
         if let Ok(mut iter) = self.app.input_events_iter() {
             loop {
-                let has = iter.next(|event| {
-                    match event {
-                        InputEvent::MotionEvent(motion) => {
-                            let action = motion.action();
-                            let pointer = motion.pointers().next();
-                            match (action, pointer) {
-                                (MotionAction::Down, Some(p))
-                                | (MotionAction::PointerDown, Some(p)) => {
-                                    let pos = egui::pos2(p.x() / pp, p.y() / pp);
-                                    events.push(BackendEvent::Input(BackendInputEvent::Touch {
-                                        phase: TouchPhase::Start,
-                                        pos,
-                                    }));
-                                    events.push(BackendEvent::Input(
-                                        BackendInputEvent::PointerButton { pos, pressed: true },
-                                    ));
-                                    InputStatus::Handled
-                                }
-                                (MotionAction::Up, _)
-                                | (MotionAction::PointerUp, _)
-                                | (MotionAction::Cancel, _) => {
-                                    events.push(BackendEvent::Input(BackendInputEvent::Touch {
-                                        phase: TouchPhase::End,
-                                        pos: egui::Pos2::ZERO,
-                                    }));
-                                    events.push(BackendEvent::Input(
-                                        BackendInputEvent::PointerButton {
-                                            pos: egui::Pos2::ZERO,
-                                            pressed: false,
-                                        },
-                                    ));
-                                    InputStatus::Handled
-                                }
-                                (MotionAction::Move, Some(p)) => {
-                                    let pos = egui::pos2(p.x() / pp, p.y() / pp);
-                                    events.push(BackendEvent::Input(BackendInputEvent::Touch {
-                                        phase: TouchPhase::Move,
-                                        pos,
-                                    }));
-                                    InputStatus::Handled
-                                }
-                                _ => InputStatus::Unhandled,
+                let has = iter.next(|event| match event {
+                    InputEvent::MotionEvent(motion) => {
+                        let action = motion.action();
+                        let pointer = motion.pointers().next();
+                        match (action, pointer) {
+                            (MotionAction::Down, Some(p))
+                            | (MotionAction::PointerDown, Some(p)) => {
+                                let pos = egui::pos2(p.x() / pp, p.y() / pp);
+                                events.push(BackendEvent::Input(BackendInputEvent::Touch {
+                                    phase: TouchPhase::Start,
+                                    pos,
+                                }));
+                                events.push(BackendEvent::Input(
+                                    BackendInputEvent::PointerButton { pos, pressed: true },
+                                ));
+                                InputStatus::Handled
                             }
-                        }
-                        InputEvent::KeyEvent(key) => {
-                            if key.action() == KeyAction::Down
-                                && key.key_code() == android_activity::input::Keycode::Back
-                            {
-                                events.push(BackendEvent::Input(BackendInputEvent::Key {
-                                    key_code: u32::from(key.key_code()) as i32,
-                                    action: BackendKeyAction::Down,
+                            (MotionAction::Up, _)
+                            | (MotionAction::PointerUp, _)
+                            | (MotionAction::Cancel, _) => {
+                                events.push(BackendEvent::Input(BackendInputEvent::Touch {
+                                    phase: TouchPhase::End,
+                                    pos: egui::Pos2::ZERO,
+                                }));
+                                events.push(BackendEvent::Input(
+                                    BackendInputEvent::PointerButton {
+                                        pos: egui::Pos2::ZERO,
+                                        pressed: false,
+                                    },
+                                ));
+                                InputStatus::Handled
+                            }
+                            (MotionAction::Move, Some(p)) => {
+                                let pos = egui::pos2(p.x() / pp, p.y() / pp);
+                                events.push(BackendEvent::Input(BackendInputEvent::Touch {
+                                    phase: TouchPhase::Move,
+                                    pos,
                                 }));
                                 InputStatus::Handled
-                            } else {
-                                InputStatus::Unhandled
                             }
+                            _ => InputStatus::Unhandled,
                         }
-                        _ => InputStatus::Unhandled,
                     }
+                    InputEvent::KeyEvent(key) => {
+                        if key.action() == KeyAction::Down
+                            && key.key_code() == android_activity::input::Keycode::Back
+                        {
+                            events.push(BackendEvent::Input(BackendInputEvent::Key {
+                                key_code: u32::from(key.key_code()) as i32,
+                                action: BackendKeyAction::Down,
+                            }));
+                            InputStatus::Handled
+                        } else {
+                            InputStatus::Unhandled
+                        }
+                    }
+                    _ => InputStatus::Unhandled,
                 });
                 if !has {
                     break;
@@ -166,17 +170,40 @@ impl GlBackend {
             }
         }
     }
+
+    /// Обработать текстовый ввод из IME (GameActivity InputConnection).
+    fn drain_text_input(&mut self) {
+        // Получаем состояние текстового ввода из GameActivity
+        // text_input_state() возвращает текущий текст, selection, compose_region
+        let text_state = self.app.text_input_state();
+
+        // Если есть новый текст — отправляем событие
+        if !text_state.text.is_empty() {
+            log::info!(
+                "IME: text='{}' sel={}:{} compose={:?}",
+                text_state.text,
+                text_state.selection.start,
+                text_state.selection.end,
+                text_state.compose_region
+            );
+            self.events.push(BackendEvent::TextInput(text_state.text));
+        }
+    }
 }
 
 impl AndroidBackend for GlBackend {
     fn init(&mut self) -> Result<(), String> {
-        log::info!("GlBackend: инициализация");
+        log::info!("GlBackend: инициализация (GameActivity)");
 
         if let Some(nw) = self.app.native_window() {
+            // В game-activity native_window() возвращает ANativeWindow
+            // из SurfaceView, который создаётся GameActivity glue.
             let egl_state = EglState::create(&nw)?;
             let pp = crate::insets::get_pp(&self.app.config(), nw.width(), nw.height());
             self.dpi = pp;
             self.egl = Some(egl_state);
+
+            // IME editor info будет настроен при первом показе клавиатуры
             Ok(())
         } else {
             Err("GlBackend: нет NativeWindow".into())
@@ -187,6 +214,10 @@ impl AndroidBackend for GlBackend {
         self.events.clear();
         self.drain_lifecycle_events();
         self.drain_input_events();
+        // Text input через text_input_state() пока отключён —
+        // в android-activity 0.6.1 есть баг с race condition
+        // при первом вызове (slice::from_raw_parts).
+        // TODO: включить после обновления android-activity.
         std::mem::take(&mut self.events)
     }
 
@@ -209,26 +240,16 @@ impl AndroidBackend for GlBackend {
 
     fn show_keyboard(&mut self) {
         log::info!("GlBackend: показать клавиатуру (IME)");
-        let vm_ptr = self.app.vm_as_ptr() as usize;
-        let activity_ptr = self.app.activity_as_ptr() as usize;
-        self.app.run_on_java_main_thread(Box::new(move || {
-            show_keyboard_jni(
-                vm_ptr as *mut std::ffi::c_void,
-                activity_ptr as *mut std::ffi::c_void,
-            );
-        }));
+        self.ime_visible = true;
+        // GameActivity предоставляет show_soft_input без JNI
+        self.app.show_soft_input(false);
     }
 
     fn hide_keyboard(&mut self) {
         log::info!("GlBackend: скрыть клавиатуру (IME)");
-        let vm_ptr = self.app.vm_as_ptr() as usize;
-        let activity_ptr = self.app.activity_as_ptr() as usize;
-        self.app.run_on_java_main_thread(Box::new(move || {
-            hide_keyboard_jni(
-                vm_ptr as *mut std::ffi::c_void,
-                activity_ptr as *mut std::ffi::c_void,
-            );
-        }));
+        self.ime_visible = false;
+        // GameActivity предоставляет hide_soft_input без JNI
+        self.app.hide_soft_input(false);
     }
 
     fn should_close(&self) -> bool {
@@ -271,205 +292,5 @@ impl AndroidBackend for GlBackend {
         } else {
             Err("GlBackend: нет EGL или NativeWindow для пересоздания surface".into())
         }
-    }
-}
-
-// ─── IME через JNI ──────────────────────────────────────────────────────
-// show_keyboard/hide_keyboard используют run_on_java_main_thread,
-// который выполняется на Java main thread. Указатели vm_as_ptr()
-// и activity_as_ptr() захватываются до перемещения app в backend
-// (в run.rs) или через замыкание (здесь).
-
-/// Показать клавиатуру через JNI.
-fn show_keyboard_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
-    use jni::objects::{JObject, JValue};
-
-    if vm_ptr.is_null() || activity_ptr.is_null() {
-        log::warn!("show_keyboard: vm_ptr или activity_ptr null");
-        return;
-    }
-
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::warn!("show_keyboard: JavaVM::from_raw ошибка: {:?}", e);
-                return;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("show_keyboard: attach_current_thread ошибка: {:?}", e);
-                return;
-            }
-        };
-
-        let activity = JObject::from_raw(activity_ptr as jni::sys::jobject);
-
-        let context = match env
-            .call_method(&activity, "getApplicationContext", "()Landroid/content/Context;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(c) => c,
-            None => {
-                log::warn!("show_keyboard: не удалось получить контекст");
-                return;
-            }
-        };
-
-        let imm_service = env.new_string("input_method").unwrap();
-        let imm = match env
-            .call_method(
-                &context,
-                "getSystemService",
-                "(Ljava/lang/String;)Ljava/lang/Object;",
-                &[JValue::Object(&imm_service.into())],
-            )
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(imm) => imm,
-            None => {
-                log::warn!("show_keyboard: не удалось получить InputMethodManager");
-                return;
-            }
-        };
-
-        let window = match env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(w) => w,
-            None => {
-                log::warn!("show_keyboard: не удалось получить Window");
-                return;
-            }
-        };
-
-        let decor_view = match env
-            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(v) => v,
-            None => {
-                log::warn!("show_keyboard: не удалось получить DecorView");
-                return;
-            }
-        };
-
-        let _ = env.call_method(
-            &imm,
-            "showSoftInput",
-            "(Landroid/view/View;I)Z",
-            &[JValue::Object(&decor_view), JValue::Int(0)],
-        );
-        log::info!("IME: showSoftInput вызван");
-    }
-}
-
-/// Скрыть клавиатуру через JNI.
-fn hide_keyboard_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
-    use jni::objects::{JObject, JValue};
-
-    if vm_ptr.is_null() || activity_ptr.is_null() {
-        log::warn!("hide_keyboard: vm_ptr или activity_ptr null");
-        return;
-    }
-
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::warn!("hide_keyboard: JavaVM::from_raw ошибка: {:?}", e);
-                return;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("hide_keyboard: attach_current_thread ошибка: {:?}", e);
-                return;
-            }
-        };
-
-        let activity = JObject::from_raw(activity_ptr as jni::sys::jobject);
-
-        let window = match env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(w) => w,
-            None => {
-                log::warn!("hide_keyboard: не удалось получить Window");
-                return;
-            }
-        };
-
-        let decor_view = match env
-            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(v) => v,
-            None => {
-                log::warn!("hide_keyboard: не удалось получить DecorView");
-                return;
-            }
-        };
-
-        let window_token = match env
-            .call_method(&decor_view, "getWindowToken", "()Landroid/os/IBinder;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(t) => t,
-            None => {
-                log::warn!("hide_keyboard: не удалось получить WindowToken");
-                return;
-            }
-        };
-
-        let context = match env
-            .call_method(&activity, "getApplicationContext", "()Landroid/content/Context;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(c) => c,
-            None => {
-                log::warn!("hide_keyboard: не удалось получить контекст");
-                return;
-            }
-        };
-
-        let imm_service = env.new_string("input_method").unwrap();
-        let imm = match env
-            .call_method(
-                &context,
-                "getSystemService",
-                "(Ljava/lang/String;)Ljava/lang/Object;",
-                &[JValue::Object(&imm_service.into())],
-            )
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(imm) => imm,
-            None => {
-                log::warn!("hide_keyboard: не удалось получить InputMethodManager");
-                return;
-            }
-        };
-
-        let _ = env.call_method(
-            &imm,
-            "hideSoftInputFromWindow",
-            "(Landroid/os/IBinder;I)Z",
-            &[JValue::Object(&window_token), JValue::Int(0)],
-        );
-        log::info!("IME: hideSoftInputFromWindow вызван");
     }
 }

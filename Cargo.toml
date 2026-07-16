@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/platform",
     "crates/platform-android",
+    "crates/android",
     "crates/runtime",
     "crates/core",
     "crates/ui",
@@ -10,6 +11,7 @@ members = [
     "crates/framework",
     "examples/counter",
     "examples/showcase",
+    "examples/gl_app",
 ]
 
 [workspace.package]
@@ -25,7 +27,7 @@ egui = { version = "0.35" }
 egui_glow = { version = "0.35" }
 glow = { version = "0.17" }
 tokio = { version = "1", features = ["sync"] }
-android-activity = { version = "0.6", features = ["native-activity"] }
+android-activity = { version = "0.6", features = ["game-activity"] }
 android_logger = "0.14"
 ndk = "0.9"
 libc = "0.2"

@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.egui_android_counter">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
 
     <application
-        android:label="egui Counter"
-        android:hasCode="false">
+        android:label="Egui App"
+        android:hasCode="true">
 
         <activity
-            android:name="android.app.GameActivity"
+            android:name="com.example.egui_android.EguiActivity"
             android:exported="true"
+            android:label="Egui App"
             android:theme="@style/AppTheme">
             <meta-data
                 android:name="android.app.lib_name"
-                android:value="egui_android_counter" />
+                android:value="egui_gl_app" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
