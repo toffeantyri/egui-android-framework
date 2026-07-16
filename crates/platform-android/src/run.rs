@@ -219,6 +219,14 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                             pos: actual_pos,
                             force: None,
                         });
+                        // Для Move дополнительно шлём PointerMoved — без него egui
+                        // не отслеживает позицию указателя, и скролл не работает.
+                        if matches!(phase, crate::backend::TouchPhase::Move) {
+                            input_state
+                                .events
+                                .push(egui::Event::PointerMoved(actual_pos));
+                        }
+
                         match phase {
                             crate::backend::TouchPhase::Start
                             | crate::backend::TouchPhase::Move => {
