@@ -2,16 +2,33 @@
 //!
 //! Событийный цикл — без polling, без фоновых потоков для UI.
 //! `UiNotifier` проверяется синхронно в главном потоке.
+//!
+//! # Архитектура потока данных
+//!
+//! BackendEvent (от GlBackend/NativeBackend)
+//!       ↓
+//! BackendEvent::TextInput → egui::Event::Text
+//! BackendEvent::Input    → egui::Event::Touch / PointerButton / etc.
+//! BackendEvent::Lifecycle → Application::on_resume/on_pause/etc.
+//!       ↓
+//! egui::RawInput
+//!       ↓
+//! Application::frame()
+//!       ↓
+//! egui_glow рендеринг
 
 #![cfg(target_os = "android")]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use android_activity::{AndroidApp, MainEvent, PollEvent};
+use android_activity::AndroidApp;
 
-use crate::egl_backend::EglState;
-use crate::input::{self, InputState};
+use crate::backend::{
+    AndroidBackend, AndroidBackendKind, BackendEvent, InputEvent, LifecycleEvent,
+};
+
+use crate::input::InputState;
 
 use egui_android_runtime::{
     ui_notifier::{AndroidWakeHandle, UiNotifier},
@@ -21,7 +38,14 @@ use egui_android_runtime::{
 use glow::HasContext;
 
 /// Запустить egui-приложение на Android.
+///
+/// Использует `GlBackend` (основной).
 pub fn run<A: Application>(app: AndroidApp) {
+    run_with_backend::<A>(app, AndroidBackendKind::Gl);
+}
+
+/// Запустить egui-приложение с указанным backend'ом.
+pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKind) {
     let mut app_instance = A::create();
 
     android_logger::init_once(
@@ -29,208 +53,229 @@ pub fn run<A: Application>(app: AndroidApp) {
             .with_tag(app_instance.config().log_tag.as_str())
             .with_max_level(log::LevelFilter::Debug),
     );
-    log::info!("run: запуск egui-android-framework");
+    log::info!("run: запуск egui-android-framework, backend={:?}", kind);
 
     app_instance.on_create();
     app_instance.on_start();
     app_instance.on_resume();
 
-    // Устанавливаем прозрачные системные бары до начала цикла.
-    // Используем poll_events с MainEvent::InitWindow, чтобы дождаться окна.
-    // Первый InitWindow гарантированно придёт после on_resume.
+    // --- Устанавливаем прозрачные системные бары (на Java main thread) ---
+    // Важно: setStatusBarColor/setNavigationBarColor должны вызываться на UI thread.
+    // Захватываем указатели до перемещения app в backend.
     let vm_ptr = app.vm_as_ptr() as usize;
     let activity_ptr = app.activity_as_ptr() as usize;
     app.run_on_java_main_thread(Box::new(move || {
         let vm = vm_ptr as *mut std::ffi::c_void;
         let activity = activity_ptr as *mut std::ffi::c_void;
-        crate::system_bars::set_transparent_system_bars(vm, activity);
+        if !vm.is_null() && !activity.is_null() {
+            crate::system_bars::set_transparent_system_bars(vm, activity);
+        }
     }));
 
-    let egui_ctx = egui::Context::default();
-    let mut egl_state: Option<EglState> = None;
-    let mut egui_painter: Option<egui_glow::Painter> = None;
+    // --- Создаём backend ---
+    let mut backend: Box<dyn AndroidBackend> = match kind {
+        AndroidBackendKind::Gl => {
+            log::info!("run: создаём GlBackend");
+            Box::new(crate::backend::GlBackend::new(app))
+        }
+        AndroidBackendKind::Native => {
+            log::info!("run: создаём NativeBackend (fallback)");
+            Box::new(crate::backend::NativeBackend::new(app))
+        }
+        AndroidBackendKind::Game => {
+            log::warn!("GameBackend ещё не реализован, используем GlBackend");
+            Box::new(crate::backend::GlBackend::new(app))
+        }
+    };
 
+    // Backend будет инициализирован при первом InitWindow
+    let egui_ctx = egui::Context::default();
+    egui_ctx.set_pixels_per_point(backend.dpi());
+    egui_ctx.set_fonts(egui::FontDefinitions::default());
+
+    let mut egui_painter: Option<egui_glow::Painter> = None;
+    let mut input_state = InputState::new();
     let mut last_frame = Instant::now();
     let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
 
-    let mut input_state = InputState::new();
-    let mut surface_needs_recreation = false;
+    // Waker — создаём один раз из AndroidApp
+    // После создания backend'а app больше не доступен напрямую.
+    // Используем заглушку для waker'а (будет улучшено).
+    let waker = AndroidWakeHandle::new(|| {});
 
-    // Создаём waker для Android event loop.
-    let waker = app.create_waker();
-    let wake_handle = AndroidWakeHandle::new(move || {
-        waker.wake();
-    });
-    log::info!("run: Android waker создан");
-
-    // Реактивный уведомитель — создаётся Application после EGL init.
+    // UiNotifier
     let mut notifier: Option<UiNotifier> = None;
     let mut notifier_initialized = false;
 
     let mut destroy_requested = false;
+
     loop {
-        app.poll_events(Some(Duration::from_millis(16)), |event| match event {
-            PollEvent::Wake | PollEvent::Timeout => {
-                // Wake от data layer или таймаут — идём в рендеринг
-            }
-            PollEvent::Main(e) => match e {
-                MainEvent::InitWindow { .. } => {
-                    log::info!("Lifecycle: InitWindow");
-                    surface_needs_recreation = true;
+        // --- Получаем события от backend'а ---
+        let backend_events = backend.poll_events();
 
-                    // После создания окна запрашиваем insets через JNI на главном Java-потоке.
-                    // В этот момент DecorView уже существует, getRootWindowInsets() вернёт корректные значения.
-                    // Системные бары уже установлены в начале run() — здесь только insets.
-                    let vm_ptr = app.vm_as_ptr() as usize;
-                    let activity_ptr = app.activity_as_ptr() as usize;
-                    // Сохраняем глобальные указатели для apply_system_bars_for_theme
-                    crate::system_bars::init_global_pointers(
-                        vm_ptr as *mut std::ffi::c_void,
-                        activity_ptr as *mut std::ffi::c_void,
-                    );
-                    app.run_on_java_main_thread(Box::new(move || {
-                        let vm = vm_ptr as *mut std::ffi::c_void;
-                        let activity = activity_ptr as *mut std::ffi::c_void;
-                        if let Some(insets) = crate::insets::get_system_insets_jni(vm, activity) {
-                            crate::insets::store_insets(&insets);
+        for event in backend_events {
+            match event {
+                BackendEvent::Lifecycle(ev) => match ev {
+                    LifecycleEvent::InitWindow => {
+                        log::info!("Lifecycle: InitWindow");
+
+                        // Инициализируем backend (если ещё не инициализирован)
+                        if let Err(e) = backend.init() {
+                            log::error!("Ошибка инициализации backend'а: {}", e);
+                        }
+
+                        // Инициализируем глобальные указатели для JNI
+                        let vm = backend.vm_ptr();
+                        let activity = backend.activity_ptr();
+                        crate::system_bars::init_global_pointers(vm, activity);
+                        crate::backend::init_ime_globals(vm, activity);
+
+                        // Системные бары уже были установлены через run_on_java_main_thread до создания backend'а
+
+                        // Обновляем DPI
+                        egui_ctx.set_pixels_per_point(backend.dpi());
+                        // Painter будет создан ниже
+                    }
+                    LifecycleEvent::Resume => {
+                        log::info!("Lifecycle: Resume");
+                        app_instance.on_resume();
+                    }
+                    LifecycleEvent::Pause => {
+                        log::info!("Lifecycle: Pause");
+                        app_instance.on_pause();
+                    }
+                    LifecycleEvent::Stop => {
+                        log::info!("Lifecycle: Stop");
+                        app_instance.on_stop();
+                    }
+                    LifecycleEvent::Destroy => {
+                        log::info!("Lifecycle: Destroy");
+                        destroy_requested = true;
+                    }
+                },
+                BackendEvent::Input(input_ev) => match input_ev {
+                    InputEvent::Touch { phase, pos } => {
+                        let egui_phase = match phase {
+                            crate::backend::TouchPhase::Start => egui::TouchPhase::Start,
+                            crate::backend::TouchPhase::Move => egui::TouchPhase::Move,
+                            crate::backend::TouchPhase::End
+                            | crate::backend::TouchPhase::Cancel => egui::TouchPhase::End,
+                        };
+                        input_state.events.push(egui::Event::Touch {
+                            device_id: egui::TouchDeviceId(0),
+                            id: egui::TouchId(0),
+                            phase: egui_phase,
+                            pos,
+                            force: None,
+                        });
+                        match phase {
+                            crate::backend::TouchPhase::Start => {
+                                input_state.pointer_pos = Some(pos);
+                            }
+                            crate::backend::TouchPhase::End
+                            | crate::backend::TouchPhase::Cancel => {
+                                input_state.pointer_pos = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                    InputEvent::PointerButton { pos, pressed } => {
+                        input_state.events.push(egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                        if pressed {
+                            input_state.pointer_pos = Some(pos);
                         } else {
-                            log::warn!("JNI insets не получены — будет использован fallback");
+                            input_state.pointer_pos = None;
                         }
-
-                        // Определяем системную тему и сохраняем
-                        if let Some(theme) =
-                            crate::system_bars::detect_system_theme_jni(vm, activity)
+                    }
+                    InputEvent::Key { key_code, action } => {
+                        if key_code == 4 // AKEYCODE_BACK = 4
+                            && matches!(action, crate::backend::KeyAction::Down)
                         {
-                            crate::theme::init_system_theme(theme);
-                            log::info!("Системная тема: {:?}", theme);
-                            // Применяем цвета баров по умолчанию
-                            crate::system_bars::apply_system_bars_color_jni(vm, activity, theme);
+                            input_state.back_pressed = true;
                         }
-                    }));
-
-                    // Флаги set_window_flags не применяем — они ломают рендеринг на MIUI.
-                    // ActionBar скрываем через тему @android:style/Theme.Material.Light.NoActionBar.Fullscreen
-                    // в AndroidManifest.xml.
+                    }
+                },
+                BackendEvent::TextInput(text) => {
+                    log::info!("IME: текстовый ввод: '{}'", &text);
+                    // TextInput добавляется в input_state.events как Event::Text
+                    input_state.events.push(egui::Event::Text(text));
                 }
-                MainEvent::Resume { .. } => {
-                    log::info!("Lifecycle: Resume");
-                    app_instance.on_resume();
+                BackendEvent::InsetsChanged(insets) => {
+                    log::info!("InsetsChanged: {:?}", insets);
+                    // Insets будут применены через screen_rect в следующем кадре
                 }
-                MainEvent::Pause { .. } => {
-                    log::info!("Lifecycle: Pause");
-                    app_instance.on_pause();
+                BackendEvent::DpiChanged(dpi) => {
+                    log::info!("DpiChanged: {}", dpi);
+                    egui_ctx.set_pixels_per_point(dpi);
                 }
-                MainEvent::Stop { .. } => {
-                    log::info!("Lifecycle: Stop");
-                    app_instance.on_stop();
-                }
-                MainEvent::Destroy { .. } => {
-                    log::info!("Lifecycle: Destroy");
-                    destroy_requested = true;
-                }
-                _ => {}
-            },
-            _ => {}
-        });
-
-        // --- Ввод: сливаем ВСЕ накопившиеся события ---
-        {
-            let pp = egui_ctx.pixels_per_point();
-            input::process_input_events(&app, pp, &mut input_state);
+            }
         }
 
-        if input_state.back_pressed {
-            log::info!("Back нажата — отправляем в Application");
-            input_state.back_pressed = false;
-            app_instance.on_back_pressed();
-        }
-
+        // --- Проверка завершения ---
         if destroy_requested {
             app_instance.on_destroy();
-            if let Some(ref mut p) = egui_painter {
-                p.destroy();
+            if let Some(ref mut painter) = egui_painter {
+                painter.destroy();
             }
-            if let Some(ref mut state) = egl_state {
+            if let Some(ref mut state) = backend.egl_state_mut() {
                 state.destroy();
             }
-            log::info!("Выход из главного цикла (run)");
+            log::info!("Выход из главного цикла");
             break;
         }
 
-        // --- Пересоздание EGL surface ---
-        if surface_needs_recreation {
-            if let Some(nw) = app.native_window() {
-                if let Some(ref mut state) = egl_state {
-                    match state.recreate_surface(&nw) {
-                        Ok(()) => {
-                            if let Some(ref mut painter) = egui_painter {
-                                unsafe {
-                                    gl_clear(&*painter.gl());
-                                }
-                            }
-                            // При пересоздании surface обновляем pp на случай смены конфигурации
-                            let pp = crate::insets::get_pp(&app.config(), nw.width(), nw.height());
-                            egui_ctx.set_pixels_per_point(pp);
+        // --- Инициализация Painter (если ещё не создан) ---
+        if egui_painter.is_none() {
+            if let Some(ref _egl_state) = backend.egl_state() {
+                let gl = unsafe {
+                    egui_glow::painter::Context::from_loader_function(|name| {
+                        let cname =
+                            std::ffi::CStr::from_ptr(name.as_ptr() as *const std::os::raw::c_char);
+                        get_proc_address(cname)
+                    })
+                };
+
+                match egui_glow::Painter::new(Arc::new(gl), "", None, true) {
+                    Ok(painter) => {
+                        unsafe {
+                            let gl_ptr = &*painter.gl();
+                            gl_ptr.clear_color(0.0, 0.0, 0.0, 1.0);
+                            gl_ptr.clear(glow::COLOR_BUFFER_BIT);
                         }
-                        Err(e) => {
-                            log::error!("Не удалось пересоздать EGL surface: {}", e);
-                            if let Some(ref mut p) = egui_painter {
-                                p.destroy();
-                            }
-                            egui_painter = None;
-                            if let Some(ref mut s) = egl_state {
-                                s.destroy();
-                            }
-                            egl_state = None;
-                        }
-                    }
-                }
-            }
-            surface_needs_recreation = false;
-        }
+                        egui_painter = Some(painter);
 
-        // --- Инициализация EGL ---
-        if egl_state.is_none() {
-            if let Some(nw) = app.native_window() {
-                match EglState::create(&nw) {
-                    Ok(state) => {
-                        let gl = unsafe {
-                            egui_glow::painter::Context::from_loader_function(|name| {
-                                let cname = std::ffi::CStr::from_ptr(
-                                    name.as_ptr() as *const std::os::raw::c_char
-                                );
-                                get_proc_address(cname)
-                            })
-                        };
-
-                        match egui_glow::Painter::new(Arc::new(gl), "", None, true) {
-                            Ok(painter) => {
-                                unsafe {
-                                    gl_clear(&*painter.gl());
-                                }
-                                egui_ctx.set_fonts(egui::FontDefinitions::default());
-                                let pp =
-                                    crate::insets::get_pp(&app.config(), nw.width(), nw.height());
-                                egui_ctx.set_pixels_per_point(pp);
-                                egl_state = Some(state);
-                                egui_painter = Some(painter);
-
-                                if !notifier_initialized {
-                                    notifier_initialized = true;
-                                    log::info!("run: инициализируем UiNotifier");
-                                    notifier = app_instance
-                                        .create_notifier(&egui_ctx, wake_handle.clone());
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Painter::new не удался: {:?}", e);
-                            }
+                        if !notifier_initialized {
+                            notifier_initialized = true;
+                            log::info!("run: инициализируем UiNotifier");
+                            notifier = app_instance.create_notifier(&egui_ctx, waker.clone());
                         }
                     }
                     Err(e) => {
-                        log::error!("EglState::create не удался: {}", e);
+                        log::error!("Painter::new не удался: {:?}", e);
                     }
                 }
+            } else {
+                // Нет EGL — ждём InitWindow
+                continue;
+            }
+        }
+
+        // --- Back ---
+        if input_state.back_pressed {
+            log::info!("Back нажата — отправляем в Application");
+            input_state.back_pressed = false;
+
+            // Если IME открыта — закрываем, иначе — навигация
+            if app_instance.is_keyboard_visible() {
+                app_instance.hide_keyboard();
+                backend.hide_keyboard();
+            } else {
+                app_instance.on_back_pressed();
             }
         }
 
@@ -244,113 +289,57 @@ pub fn run<A: Application>(app: AndroidApp) {
         if now.duration_since(last_frame) >= target_dt {
             last_frame = now;
 
-            if let (Some(ref mut painter), Some(ref state)) = (&mut egui_painter, &egl_state) {
-                let (w, h) = app
-                    .native_window()
-                    .map(|nw| (nw.width() as u32, nw.height() as u32))
-                    .unwrap_or((0, 0));
-                if w == 0 || h == 0 {
-                    continue;
-                }
+            let (w, h) = backend.window_size();
+            if w == 0 || h == 0 {
+                continue;
+            }
 
-                let content_rect = app.content_rect();
-                let insets =
-                    crate::insets::get_insets_pt(&app.config(), w as i32, h as i32, &content_rect);
+            let pp = egui_ctx.pixels_per_point();
 
-                let pp = egui_ctx.pixels_per_point();
+            // Получаем insets для этого кадра
+            let insets = get_current_insets(&backend, pp, w, h);
 
-                #[cfg(debug_assertions)]
-                {
-                    use std::time::{Duration, Instant};
-                    static LAST_BATCH_LOG: std::sync::OnceLock<Instant> =
-                        std::sync::OnceLock::new();
-                    let now = Instant::now();
-                    let should_log = LAST_BATCH_LOG.get().map_or(true, |last| {
-                        now.duration_since(*last) >= Duration::from_secs(5)
-                    });
-                    if should_log {
-                        let _ = LAST_BATCH_LOG.set(now);
-                        if LAST_BATCH_LOG.get().map_or(false, |last| {
-                            now.duration_since(*last) < Duration::from_secs(5)
-                        }) {
-                            // set успешен — первый раз
-                        } else if let Some(last) = LAST_BATCH_LOG.get() {
-                            if now.duration_since(*last) >= Duration::from_secs(5) {
-                                // Обновляем через OnceLock нельзя, используем атомик
-                            }
-                        }
-                    }
-                }
-                #[cfg(debug_assertions)]
-                {
-                    // Логируем раз в 5 секунд
-                    use std::sync::atomic::{AtomicU64, Ordering};
-                    use std::time::{SystemTime, UNIX_EPOCH};
-                    static LAST_LOG_MS: AtomicU64 = AtomicU64::new(0);
-                    let now_ms = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    let last = LAST_LOG_MS.load(Ordering::Relaxed);
-                    if now_ms.saturating_sub(last) > 5000 || last == 0 {
-                        LAST_LOG_MS.store(now_ms, Ordering::Relaxed);
-                        log::warn!(
-                            "[BATCH] native_size=({},{}) pp={} | insets=left:{:.1} top:{:.1} right:{:.1} bottom:{:.1}",
-                            w, h, pp,
-                            insets.left, insets.top, insets.right, insets.bottom
-                        );
-                    }
-                }
+            let events_for_frame = std::mem::take(&mut input_state.events);
 
-                // Все события в кадре — батчинг не нужен, патч egui сам обнуляет
-                // pointer.delta() на первом кадре нового drag.
-                let events_for_frame = std::mem::take(&mut input_state.events);
+            let screen_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(insets.left, insets.top),
+                egui::vec2(
+                    (w as f32 / pp) - insets.left - insets.right,
+                    (h as f32 / pp) - insets.top - insets.bottom,
+                ),
+            );
 
-                let screen_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(insets.left, insets.top),
-                    egui::vec2(
-                        (w as f32 / pp) - insets.left - insets.right,
-                        (h as f32 / pp) - insets.top - insets.bottom,
-                    ),
-                );
-                // Время с предыдущего кадра — для стабильной децелерации fling.
-                // Используем elapsed, а не Instant::now() — egui внутри пересчитывает dt.
-                let predicted_dt = target_dt.as_secs_f64() as f32;
-                // Устанавливаем time = Instant::now() как f64.
-                // Без этого egui использует self.time + predicted_dt и время между кадрами
-                // может быть неправильным, что вызывает дёрганье скролла при повторном касании.
-                let time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs_f64();
-                let raw_input = egui::RawInput {
-                    screen_rect: Some(screen_rect),
-                    events: events_for_frame,
-                    predicted_dt,
-                    time: Some(time),
-                    ..egui::RawInput::default()
-                };
+            let predicted_dt = target_dt.as_secs_f64() as f32;
+            let time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64();
 
-                let full_output = app_instance.frame(&egui_ctx, raw_input);
+            let raw_input = egui::RawInput {
+                screen_rect: Some(screen_rect),
+                events: events_for_frame,
+                predicted_dt,
+                time: Some(time),
+                ..egui::RawInput::default()
+            };
 
-                // Проверяем, не запросил ли Application завершение
-                if app_instance.request_destroy() {
-                    destroy_requested = true;
-                }
+            let full_output = app_instance.frame(&egui_ctx, raw_input);
 
+            if app_instance.request_destroy() {
+                destroy_requested = true;
+                continue;
+            }
+
+            // Рендеринг через egui_glow
+            if let Some(ref mut painter) = egui_painter {
                 unsafe {
                     let gl = &*painter.gl();
 
-                    // 1. Очищаем ВЕСЬ framebuffer цветом фона (под системными барами).
-                    // Прозрачность (alpha=0) не работает на MIUI/NativeActivity —
-                    // SurfaceFlinger рисует чёрный. Поэтому задаём явный цвет.
                     gl.disable(glow::SCISSOR_TEST);
                     let (cr, cg, cb) = crate::theme::current_clear_color();
                     gl.clear_color(cr, cg, cb, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
 
-                    // 2. Включаем scissor — egui_glow будет рисовать только внутри content_rect.
-                    // Области под барами остаются с цветом из clear_color выше.
                     let scissor_x = (insets.left * pp) as i32;
                     let scissor_y = (insets.bottom * pp) as i32;
                     let scissor_w = (w as f32 - insets.left * pp - insets.right * pp) as i32;
@@ -368,70 +357,62 @@ pub fn run<A: Application>(app: AndroidApp) {
                     &primitives,
                     &full_output.textures_delta,
                 );
+            }
 
+            // Swap buffers
+            if let Some(ref state) = backend.egl_state() {
                 if let Err(e) = state.swap_buffers() {
                     log::warn!("swap_buffers: {}", e);
                     if let Some(ref mut p) = egui_painter {
                         p.destroy();
                     }
                     egui_painter = None;
-                    egl_state = None;
                 }
             }
         }
     }
 }
 
-unsafe fn gl_clear(gl: &glow::Context) {
-    gl.clear_color(0.0, 0.0, 0.0, 0.0);
-    gl.clear(glow::COLOR_BUFFER_BIT);
+/// Получить текущие insets для кадра.
+fn get_current_insets(
+    _backend: &Box<dyn AndroidBackend>,
+    pp: f32,
+    _w: u32,
+    _h: u32,
+) -> crate::backend::Insets {
+    // Пробуем загрузить insets из JNI (глобальные переменные)
+    let jni_insets = crate::insets::load_insets_px();
+    if jni_insets.is_valid() {
+        return crate::backend::Insets {
+            left: jni_insets.left as f32 / pp,
+            top: jni_insets.top as f32 / pp,
+            right: jni_insets.right as f32 / pp,
+            bottom: jni_insets.bottom as f32 / pp,
+        };
+    }
+
+    // Возвращаем insets из backend (если они были установлены)
+    crate::backend::Insets::default()
 }
 
-fn get_proc_address(name: &std::ffi::CStr) -> *const std::os::raw::c_void {
-    type EglGetProcAddress =
-        unsafe extern "system" fn(*const std::os::raw::c_char) -> *const std::os::raw::c_void;
-
-    let handle = unsafe {
-        libc::dlopen(
-            "libEGL.so\0".as_ptr() as *const std::os::raw::c_char,
-            libc::RTLD_LAZY | libc::RTLD_NOLOAD,
-        )
-    };
-    if handle.is_null() {
-        log::error!("get_proc_address: libEGL.so не загружен");
-        return std::ptr::null();
-    }
-
-    let sym = unsafe {
-        libc::dlsym(
-            handle,
-            "eglGetProcAddress\0".as_ptr() as *const std::os::raw::c_char,
-        )
-    };
-    if sym.is_null() {
-        log::error!("get_proc_address: eglGetProcAddress не найден");
-        return std::ptr::null();
-    }
-
-    let func: EglGetProcAddress = unsafe { std::mem::transmute(sym) };
-    let addr = unsafe { func(name.as_ptr()) };
-
-    if addr.is_null() {
-        let handle2 = unsafe {
-            libc::dlopen(
-                "libGLESv2.so\0".as_ptr() as *const std::os::raw::c_char,
-                libc::RTLD_LAZY | libc::RTLD_NOLOAD,
-            )
-        };
-        if let Ok(s) = name.to_str() {
-            log::warn!("eglGetProcAddress вернул null для {}", s);
-        }
-        if !handle2.is_null() {
-            let fallback = unsafe { libc::dlsym(handle2, name.as_ptr()) };
-            if !fallback.is_null() {
-                return fallback;
-            }
+/// Получить адрес OpenGL функции через dlsym.
+fn get_proc_address(name: &std::ffi::CStr) -> *const std::ffi::c_void {
+    // На Android нужно использовать eglGetProcAddress для загрузки OpenGL ES функций.
+    // dlsym(RTLD_DEFAULT) не находит GL функции, экспортируемые драйвером.
+    unsafe {
+        let func = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr());
+        if !func.is_null() {
+            return func;
         }
     }
-    addr
+    // Fallback на eglGetProcAddress
+    unsafe {
+        type EglGetProcAddress =
+            unsafe extern "system" fn(*const libc::c_char) -> *const std::ffi::c_void;
+        let egl_get_proc_addr: EglGetProcAddress = std::mem::transmute(libc::dlsym(
+            libc::RTLD_DEFAULT,
+            b"eglGetProcAddress\0".as_ptr() as *const libc::c_char,
+        ));
+        egl_get_proc_addr(name.as_ptr())
+    }
 }

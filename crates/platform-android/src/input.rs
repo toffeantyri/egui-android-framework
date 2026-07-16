@@ -1,5 +1,10 @@
 //! Обработка Android-ввода: трансляция событий из `android-activity`
 //! в события `egui` (touch, клавиатура, кнопки).
+//!
+//! Поддерживает:
+//! - Touch (MotionEvent)
+//! - Back (KeyEvent)
+//! - Текстовый ввод (через JNI, не через InputEvent::TextEvent)
 
 #![cfg(target_os = "android")]
 

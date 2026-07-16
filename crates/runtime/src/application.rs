@@ -82,6 +82,29 @@ pub trait Application: Sized + 'static {
         egui_ctx.run_ui(raw_input, |_ctx| {})
     }
 
+    /// Показать клавиатуру (IME).
+    ///
+    /// Вызывается из Runtime, когда компонент запрашивает текстовый ввод.
+    /// Реализация по умолчанию — заглушка.
+    fn show_keyboard(&mut self) {}
+
+    /// Скрыть клавиатуру (IME).
+    ///
+    /// Вызывается из Runtime, когда компонент завершает текстовый ввод
+    /// или при нажатии Back при открытой IME.
+    /// Реализация по умолчанию — заглушка.
+    fn hide_keyboard(&mut self) {}
+
+    /// Проверить, открыта ли сейчас клавиатура (IME).
+    ///
+    /// Используется Runtime для принятия решения:
+    /// - Back + IME открыта → hide_keyboard()
+    /// - Back + IME закрыта → on_back_pressed()
+    /// Реализация по умолчанию возвращает false.
+    fn is_keyboard_visible(&self) -> bool {
+        false
+    }
+
     /// Обработать нажатие системной кнопки Back.
     ///
     /// Вызывается из platform-android при перехвате AKEYCODE_BACK.

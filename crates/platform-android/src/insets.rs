@@ -57,7 +57,7 @@ fn store_insets_px(insets: &InsetsPx) {
     INSET_BOTTOM.store(insets.bottom, Ordering::Relaxed);
 }
 
-fn load_insets_px() -> InsetsPx {
+pub fn load_insets_px() -> InsetsPx {
     InsetsPx {
         left: INSET_LEFT.load(Ordering::Relaxed),
         top: INSET_TOP.load(Ordering::Relaxed),

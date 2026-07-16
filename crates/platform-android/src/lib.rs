@@ -5,13 +5,16 @@
 //! - EGL инициализацию и управление поверхностью
 //! - NDK input (касания, клавиатура, кнопка Back)
 //! - Главный цикл событий с рендерингом через egui_glow
+//! - Backend-абстракцию (AndroidBackend, GlBackend, NativeBackend)
 //!
 //! Этот крейт НЕ знает про бизнес-логику, State, Reducer, Components.
 //!
 //! # Безопасность
 //!
 //! EGL и OpenGL вызовы — unsafe. Весь unsafe-код изолирован в `egl_backend`.
+//! IME JNI-вызовы — unsafe, изолированы в backend/gl_backend.rs.
 
+pub mod backend;
 pub mod egl_backend;
 pub mod input;
 pub mod insets;

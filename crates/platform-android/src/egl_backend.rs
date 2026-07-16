@@ -134,16 +134,16 @@ pub(crate) mod egl {
 // EGL состояние
 // ---------------------------------------------------------------------------
 
-pub(crate) struct EglState {
-    pub(crate) display: egl::EGLDisplay,
-    pub(crate) surface: egl::EGLSurface,
-    pub(crate) context: egl::EGLContext,
-    pub(crate) config: egl::EGLConfig,
+pub struct EglState {
+    pub display: egl::EGLDisplay,
+    pub surface: egl::EGLSurface,
+    pub context: egl::EGLContext,
+    pub config: egl::EGLConfig,
 }
 
 impl EglState {
     /// Создать EGL display, surface для данного native window и контекст GLES 2.
-    pub(crate) fn create(native_window: &NativeWindow) -> Result<Self, String> {
+    pub fn create(native_window: &NativeWindow) -> Result<Self, String> {
         let display = unsafe { egl::eglGetDisplay(egl::EGL_DEFAULT_DISPLAY) };
         if display.is_null() {
             return Err("eglGetDisplay вернул null".into());
@@ -273,7 +273,7 @@ impl EglState {
         })
     }
 
-    pub(crate) fn destroy(&mut self) {
+    pub fn destroy(&mut self) {
         unsafe {
             egl::eglMakeCurrent(
                 self.display,
@@ -299,7 +299,7 @@ impl EglState {
     /// Уничтожить старую оконную поверхность и создать новую для данного native window.
     /// Дисплей, конфиг и контекст сохраняются — заменяется только surface.
     /// Возвращает ошибку, если создание surface или make_current не удались.
-    pub(crate) fn recreate_surface(&mut self, native_window: &NativeWindow) -> Result<(), String> {
+    pub fn recreate_surface(&mut self, native_window: &NativeWindow) -> Result<(), String> {
         // Уничтожаем старую поверхность
         unsafe {
             // Сначала отвязываем текущую поверхность
@@ -350,7 +350,7 @@ impl EglState {
         Ok(())
     }
 
-    pub(crate) fn swap_buffers(&self) -> Result<(), String> {
+    pub fn swap_buffers(&self) -> Result<(), String> {
         if unsafe { egl::eglSwapBuffers(self.display, self.surface) } == egl::EGL_FALSE {
             let err = unsafe { egl::eglGetError() };
             return Err(format!(
