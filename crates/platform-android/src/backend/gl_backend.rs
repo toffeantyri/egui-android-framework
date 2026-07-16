@@ -1,7 +1,8 @@
-//! GL-режим backend с IME-поддержкой.
+//! GL-режим backend.
 //!
 //! Использует `android_activity::AndroidApp` с NativeActivity.
-//! IME (клавиатурный ввод) реализован через JNI.
+//! IME (клавиатурный ввод) через `run_on_java_main_thread`.
+//! EGL + EglState для рендеринга (без изменений рендерера).
 //!
 //! # Архитектура
 //!
@@ -11,7 +12,7 @@
 
 #![cfg(target_os = "android")]
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use android_activity::{
     input::{InputEvent, KeyAction, MotionAction},
@@ -28,7 +29,6 @@ use crate::egl_backend::EglState;
 pub struct GlBackend {
     app: AndroidApp,
     egl: Option<EglState>,
-    /// Накопленные события (заполняются в poll_events)
     events: Vec<BackendEvent>,
     insets: Insets,
     dpi: f32,
@@ -53,15 +53,13 @@ impl GlBackend {
         &self.app
     }
 
-    /// Слить lifecycle события из MainEvent в events.
-    /// Вызывается до input_events_iter, берёт только `events` и `app` мутабельно.
+    /// Слить lifecycle события.
     fn drain_lifecycle_events(&mut self) {
         let events = &mut self.events;
         let app = &self.app;
 
-        app.poll_events(
-            Some(std::time::Duration::from_millis(0)),
-            |event| match event {
+        app.poll_events(Some(std::time::Duration::from_millis(0)), |event| {
+            match event {
                 android_activity::PollEvent::Wake | android_activity::PollEvent::Timeout => {}
                 android_activity::PollEvent::Main(e) => match e {
                     MainEvent::InitWindow { .. } => {
@@ -91,21 +89,18 @@ impl GlBackend {
                     _ => {}
                 },
                 _ => {}
-            },
-        );
+            }
+        });
     }
 
-    /// Слить input события в events.
-    /// Вызывается после drain_lifecycle_events.
+    /// Слить input события.
     fn drain_input_events(&mut self) {
         let events = &mut self.events;
         let pp = self.dpi;
 
         if let Ok(mut iter) = self.app.input_events_iter() {
             loop {
-                let mut handled = false;
                 let has = iter.next(|event| {
-                    handled = true;
                     match event {
                         InputEvent::MotionEvent(motion) => {
                             let action = motion.action();
@@ -179,10 +174,8 @@ impl AndroidBackend for GlBackend {
 
         if let Some(nw) = self.app.native_window() {
             let egl_state = EglState::create(&nw)?;
-
             let pp = crate::insets::get_pp(&self.app.config(), nw.width(), nw.height());
             self.dpi = pp;
-
             self.egl = Some(egl_state);
             Ok(())
         } else {
@@ -192,13 +185,8 @@ impl AndroidBackend for GlBackend {
 
     fn poll_events(&mut self) -> Vec<BackendEvent> {
         self.events.clear();
-
-        // 1. Сливаем lifecycle события
         self.drain_lifecycle_events();
-
-        // 2. Сливаем input события
         self.drain_input_events();
-
         std::mem::take(&mut self.events)
     }
 
@@ -221,12 +209,26 @@ impl AndroidBackend for GlBackend {
 
     fn show_keyboard(&mut self) {
         log::info!("GlBackend: показать клавиатуру (IME)");
-        show_keyboard_global();
+        let vm_ptr = self.app.vm_as_ptr() as usize;
+        let activity_ptr = self.app.activity_as_ptr() as usize;
+        self.app.run_on_java_main_thread(Box::new(move || {
+            show_keyboard_jni(
+                vm_ptr as *mut std::ffi::c_void,
+                activity_ptr as *mut std::ffi::c_void,
+            );
+        }));
     }
 
     fn hide_keyboard(&mut self) {
         log::info!("GlBackend: скрыть клавиатуру (IME)");
-        hide_keyboard_global();
+        let vm_ptr = self.app.vm_as_ptr() as usize;
+        let activity_ptr = self.app.activity_as_ptr() as usize;
+        self.app.run_on_java_main_thread(Box::new(move || {
+            hide_keyboard_jni(
+                vm_ptr as *mut std::ffi::c_void,
+                activity_ptr as *mut std::ffi::c_void,
+            );
+        }));
     }
 
     fn should_close(&self) -> bool {
@@ -272,79 +274,47 @@ impl AndroidBackend for GlBackend {
     }
 }
 
-// ─── JNI для управления IME (клавиатурой) через глобальные указатели ─────
+// ─── IME через JNI ──────────────────────────────────────────────────────
+// show_keyboard/hide_keyboard используют run_on_java_main_thread,
+// который выполняется на Java main thread. Указатели vm_as_ptr()
+// и activity_as_ptr() захватываются до перемещения app в backend
+// (в run.rs) или через замыкание (здесь).
 
-// Глобальные указатели на JavaVM и Activity.
-// Инициализируются в run.rs после InitWindow через system_bars::init_global_pointers.
-
-static GLOBAL_VM: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-static GLOBAL_ACTIVITY: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Инициализировать глобальные указатели для JNI.
-pub fn init_ime_globals(vm: *mut std::ffi::c_void, activity: *mut std::ffi::c_void) {
-    GLOBAL_VM.store(vm, Ordering::Release);
-    GLOBAL_ACTIVITY.store(activity, Ordering::Release);
-}
-
-/// Показать клавиатуру через JNI, используя глобальные указатели.
-fn show_keyboard_global() {
-    let vm = GLOBAL_VM.load(Ordering::Acquire);
-    let activity = GLOBAL_ACTIVITY.load(Ordering::Acquire);
-    if vm.is_null() || activity.is_null() {
-        log::warn!("show_keyboard: глобальные указатели не инициализированы");
-        return;
-    }
-    ime_show_soft_input(vm, activity);
-}
-
-/// Скрыть клавиатуру через JNI, используя глобальные указатели.
-fn hide_keyboard_global() {
-    let vm = GLOBAL_VM.load(Ordering::Acquire);
-    let activity = GLOBAL_ACTIVITY.load(Ordering::Acquire);
-    if vm.is_null() || activity.is_null() {
-        log::warn!("hide_keyboard: глобальные указатели не инициализированы");
-        return;
-    }
-    ime_hide_soft_input(vm, activity);
-}
-
-/// Внутренняя JNI-функция: показать клавиатуру.
-fn ime_show_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
+/// Показать клавиатуру через JNI.
+fn show_keyboard_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
     use jni::objects::{JObject, JValue};
+
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        log::warn!("show_keyboard: vm_ptr или activity_ptr null");
+        return;
+    }
 
     unsafe {
         let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
             Ok(jvm) => jvm,
             Err(e) => {
-                log::warn!("ime_show_soft_input: JavaVM::from_raw ошибка: {:?}", e);
+                log::warn!("show_keyboard: JavaVM::from_raw ошибка: {:?}", e);
                 return;
             }
         };
         let mut env = match jvm.attach_current_thread() {
             Ok(env) => env,
             Err(e) => {
-                log::warn!("ime_show_soft_input: attach_current_thread ошибка: {:?}", e);
+                log::warn!("show_keyboard: attach_current_thread ошибка: {:?}", e);
                 return;
             }
         };
 
-        // Используем JObject::from_raw, так как activity_ptr — это глобальный reference,
-        // созданный через NewGlobalRef. Он гарантированно живёт всё время жизни приложения.
         let activity = JObject::from_raw(activity_ptr as jni::sys::jobject);
 
         let context = match env
-            .call_method(
-                &activity,
-                "getApplicationContext",
-                "()Landroid/content/Context;",
-                &[],
-            )
+            .call_method(&activity, "getApplicationContext", "()Landroid/content/Context;", &[])
             .ok()
             .and_then(|v| v.l().ok())
         {
             Some(c) => c,
             None => {
-                log::warn!("ime_show_soft_input: не удалось получить контекст");
+                log::warn!("show_keyboard: не удалось получить контекст");
                 return;
             }
         };
@@ -362,7 +332,7 @@ fn ime_show_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(imm) => imm,
             None => {
-                log::warn!("ime_show_soft_input: не удалось получить InputMethodManager");
+                log::warn!("show_keyboard: не удалось получить InputMethodManager");
                 return;
             }
         };
@@ -374,7 +344,7 @@ fn ime_show_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(w) => w,
             None => {
-                log::warn!("ime_show_soft_input: не удалось получить Window");
+                log::warn!("show_keyboard: не удалось получить Window");
                 return;
             }
         };
@@ -386,7 +356,7 @@ fn ime_show_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(v) => v,
             None => {
-                log::warn!("ime_show_soft_input: не удалось получить DecorView");
+                log::warn!("show_keyboard: не удалось получить DecorView");
                 return;
             }
         };
@@ -397,27 +367,31 @@ fn ime_show_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
             "(Landroid/view/View;I)Z",
             &[JValue::Object(&decor_view), JValue::Int(0)],
         );
-
         log::info!("IME: showSoftInput вызван");
     }
 }
 
-/// Внутренняя JNI-функция: скрыть клавиатуру.
-fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
+/// Скрыть клавиатуру через JNI.
+fn hide_keyboard_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
     use jni::objects::{JObject, JValue};
+
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        log::warn!("hide_keyboard: vm_ptr или activity_ptr null");
+        return;
+    }
 
     unsafe {
         let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
             Ok(jvm) => jvm,
             Err(e) => {
-                log::warn!("ime_hide_soft_input: JavaVM::from_raw ошибка: {:?}", e);
+                log::warn!("hide_keyboard: JavaVM::from_raw ошибка: {:?}", e);
                 return;
             }
         };
         let mut env = match jvm.attach_current_thread() {
             Ok(env) => env,
             Err(e) => {
-                log::warn!("ime_hide_soft_input: attach_current_thread ошибка: {:?}", e);
+                log::warn!("hide_keyboard: attach_current_thread ошибка: {:?}", e);
                 return;
             }
         };
@@ -431,7 +405,7 @@ fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(w) => w,
             None => {
-                log::warn!("ime_hide_soft_input: не удалось получить Window");
+                log::warn!("hide_keyboard: не удалось получить Window");
                 return;
             }
         };
@@ -443,7 +417,7 @@ fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(v) => v,
             None => {
-                log::warn!("ime_hide_soft_input: не удалось получить DecorView");
+                log::warn!("hide_keyboard: не удалось получить DecorView");
                 return;
             }
         };
@@ -455,24 +429,19 @@ fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(t) => t,
             None => {
-                log::warn!("ime_hide_soft_input: не удалось получить WindowToken");
+                log::warn!("hide_keyboard: не удалось получить WindowToken");
                 return;
             }
         };
 
         let context = match env
-            .call_method(
-                &activity,
-                "getApplicationContext",
-                "()Landroid/content/Context;",
-                &[],
-            )
+            .call_method(&activity, "getApplicationContext", "()Landroid/content/Context;", &[])
             .ok()
             .and_then(|v| v.l().ok())
         {
             Some(c) => c,
             None => {
-                log::warn!("ime_hide_soft_input: не удалось получить контекст");
+                log::warn!("hide_keyboard: не удалось получить контекст");
                 return;
             }
         };
@@ -490,7 +459,7 @@ fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
         {
             Some(imm) => imm,
             None => {
-                log::warn!("ime_hide_soft_input: не удалось получить InputMethodManager");
+                log::warn!("hide_keyboard: не удалось получить InputMethodManager");
                 return;
             }
         };
@@ -501,7 +470,6 @@ fn ime_hide_soft_input(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ff
             "(Landroid/os/IBinder;I)Z",
             &[JValue::Object(&window_token), JValue::Int(0)],
         );
-
         log::info!("IME: hideSoftInputFromWindow вызван");
     }
 }

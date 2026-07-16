@@ -188,8 +188,6 @@ pub enum AndroidBackendKind {
 }
 
 #[cfg(target_os = "android")]
-pub use gl_backend::init_ime_globals;
-#[cfg(target_os = "android")]
 pub use gl_backend::GlBackend;
 #[cfg(target_os = "android")]
 pub use native_backend::NativeBackend;

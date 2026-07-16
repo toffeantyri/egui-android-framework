@@ -148,11 +148,21 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                             }
                         }
 
-                        // Инициализируем глобальные указатели для JNI
+                        // Точка интеграции: IME, Insets, DPI
+                        //
+                        // IME: клавиатура управляется через
+                        // GlBackend::show_keyboard()/hide_keyboard(), которые вызывают
+                        // run_on_java_main_thread → JNI InputMethodManager.
+                        //
+                        // WindowInsets: получаем через JNI get_system_insets_jni().
+                        // В GL-режиме android-activity может пробрасывать InsetsChanged
+                        // через MainEvent — для этого добавлен BackendEvent::InsetsChanged.
+                        //
+                        // DPI: получаем из конфигурации Android через get_pp().
+                        // GlBackend шлёт BackendEvent::DpiChanged при InitWindow.
                         let vm = backend.vm_ptr();
                         let activity = backend.activity_ptr();
                         crate::system_bars::init_global_pointers(vm, activity);
-                        crate::backend::init_ime_globals(vm, activity);
 
                         // Получаем WindowInsets через JNI
                         if !vm.is_null() && !activity.is_null() {
