@@ -171,6 +171,9 @@ pub trait AndroidBackend {
 
     /// Получить content rect (область содержимого без системных баров).
     fn content_rect(&self) -> (i32, i32, i32, i32);
+
+    /// Пересоздать EGL surface при новом NativeWindow (после Pause/Resume).
+    fn recreate_surface(&mut self) -> Result<(), String>;
 }
 
 /// Тип Android backend'а.
@@ -247,5 +250,9 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn content_rect(&self) -> (i32, i32, i32, i32) {
         (**self).content_rect()
+    }
+
+    fn recreate_surface(&mut self) -> Result<(), String> {
+        (**self).recreate_surface()
     }
 }

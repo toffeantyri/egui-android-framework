@@ -247,4 +247,14 @@ impl AndroidBackend for NativeBackend {
         let rect = self.app.content_rect();
         (rect.left, rect.top, rect.right, rect.bottom)
     }
+
+    fn recreate_surface(&mut self) -> Result<(), String> {
+        if let (Some(ref mut egl), Some(nw)) = (self.egl.as_mut(), self.app.native_window()) {
+            egl.recreate_surface(&nw)?;
+            log::info!("NativeBackend: EGL surface пересоздан");
+            Ok(())
+        } else {
+            Err("NativeBackend: нет EGL или NativeWindow для пересоздания surface".into())
+        }
+    }
 }

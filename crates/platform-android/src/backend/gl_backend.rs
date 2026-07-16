@@ -260,6 +260,16 @@ impl AndroidBackend for GlBackend {
         let rect = self.app.content_rect();
         (rect.left, rect.top, rect.right, rect.bottom)
     }
+
+    fn recreate_surface(&mut self) -> Result<(), String> {
+        if let (Some(ref mut egl), Some(nw)) = (self.egl.as_mut(), self.app.native_window()) {
+            egl.recreate_surface(&nw)?;
+            log::info!("GlBackend: EGL surface пересоздан");
+            Ok(())
+        } else {
+            Err("GlBackend: нет EGL или NativeWindow для пересоздания surface".into())
+        }
+    }
 }
 
 // ─── JNI для управления IME (клавиатурой) через глобальные указатели ─────

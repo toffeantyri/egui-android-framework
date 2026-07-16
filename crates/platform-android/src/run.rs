@@ -119,9 +119,33 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     LifecycleEvent::InitWindow => {
                         log::info!("Lifecycle: InitWindow");
 
-                        // Инициализируем backend (если ещё не инициализирован)
-                        if let Err(e) = backend.init() {
-                            log::error!("Ошибка инициализации backend'а: {}", e);
+                        // Если EGL уже инициализирован — пересоздаём surface (Pause/Resume)
+                        if backend.egl_state().is_some() {
+                            if let Err(e) = backend.recreate_surface() {
+                                log::error!("Ошибка пересоздания EGL surface: {}", e);
+                                // Уничтожаем painter — будет создан заново
+                                if let Some(ref mut p) = egui_painter {
+                                    p.destroy();
+                                }
+                                egui_painter = None;
+                                if let Some(ref mut s) = backend.egl_state_mut() {
+                                    s.destroy();
+                                }
+                            } else {
+                                // Повторно инициализируем painter с новым surface
+                                if let Some(ref mut p) = egui_painter {
+                                    unsafe {
+                                        let gl = &*p.gl();
+                                        gl.clear_color(0.0, 0.0, 0.0, 1.0);
+                                        gl.clear(glow::COLOR_BUFFER_BIT);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Первый InitWindow — инициализируем backend
+                            if let Err(e) = backend.init() {
+                                log::error!("Ошибка инициализации backend'а: {}", e);
+                            }
                         }
 
                         // Инициализируем глобальные указатели для JNI
@@ -145,11 +169,8 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                             }
                         }
 
-                        // Системные бары уже были установлены через run_on_java_main_thread до создания backend'а
-
                         // Обновляем DPI
                         egui_ctx.set_pixels_per_point(backend.dpi());
-                        // Painter будет создан ниже
                     }
                     LifecycleEvent::Resume => {
                         log::info!("Lifecycle: Resume");
