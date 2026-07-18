@@ -1,10 +1,10 @@
 //! Showcase-приложение — точка входа для Android.
 //!
 //! Сборка:
-//!   ./scripts/build_android.sh --example showcase
+//!   cd examples/showcase && ./run_android.sh
 //!
 //! Запуск:
-//!   ./scripts/build_android.sh --run --example showcase
+//!   cd examples/showcase && ./run_android.sh --run
 
 #![allow(clippy::new_without_default)]
 
@@ -14,7 +14,7 @@ pub mod navigation_host;
 pub mod screens;
 
 #[cfg(target_os = "android")]
-use egui_android_platform_android::run;
+use egui_android_framework::platform_android::run;
 
 #[cfg(target_os = "android")]
 #[no_mangle]

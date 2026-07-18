@@ -2,9 +2,9 @@
 //!
 //! Использует отдельный enum NestedRoute — не зависит от корневого Route.
 
-use egui_android_core::{Component, LifecycleObserver, UiWrapper};
-use egui_android_runtime::Dispatcher;
-use egui_android_ui::{
+use egui_android_framework::core::{Component, LifecycleObserver, UiWrapper};
+use egui_android_framework::runtime::Dispatcher;
+use egui_android_framework::ui::{
     containers::Column,
     modifier::{Modifier, ModifierDsl},
     theme::Theme,

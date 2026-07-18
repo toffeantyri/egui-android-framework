@@ -9,10 +9,10 @@
 //! - Material Design 3 тема (светлая/тёмная) с корректными цветами текста на фоне
 //!
 //! Сборка:
-//!   ./scripts/build_android.sh --example counter
+//!   cd examples/counter && ./run_android.sh
 //!
 //! Запуск:
-//!   ./scripts/build_android.sh --run --example counter
+//!   cd examples/counter && ./run_android.sh --run
 
 pub mod app;
 pub mod component;
@@ -21,7 +21,7 @@ pub mod msg;
 pub mod view;
 
 #[cfg(target_os = "android")]
-use egui_android_platform_android::run;
+use egui_android_framework::platform_android::run;
 
 #[cfg(target_os = "android")]
 #[no_mangle]

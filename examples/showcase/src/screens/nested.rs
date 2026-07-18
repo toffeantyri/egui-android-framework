@@ -5,10 +5,10 @@
 //! `RootComponent::on_back()`, а не через BackDispatcher, чтобы избежать
 //! проблем с временем жизни raw pointer.
 
-use egui_android_core::{ComponentNode, LifecycleObserver, UiWrapper};
-use egui_android_navigation::ChildStack;
-use egui_android_runtime::{Dispatcher, DynDispatcher};
-use egui_android_ui::{
+use egui_android_framework::core::{ComponentNode, LifecycleObserver, UiWrapper};
+use egui_android_framework::navigation::ChildStack;
+use egui_android_framework::runtime::{Dispatcher, DynDispatcher};
+use egui_android_framework::ui::{
     containers::Column,
     modifier::{Modifier, ModifierDsl},
     theme::Theme,

@@ -4,9 +4,9 @@
 //! цвет фона между синим и зелёным. Back не делает pop — RootComponent
 //! возвращается на Home только при повторном Back (через back_fallback).
 
-use egui_android_core::{Component as UiComponent, LifecycleObserver, UiWrapper};
-use egui_android_runtime::Dispatcher;
-use egui_android_ui::{
+use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::runtime::Dispatcher;
+use egui_android_framework::ui::{
     containers::Column,
     modifier::{Modifier, ModifierDsl},
     theme::Theme,

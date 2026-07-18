@@ -9,17 +9,10 @@ description = "Пример счётчика на GameActivity"
 crate-type = ["cdylib"]
 
 [dependencies]
+egui-android-framework = { path = "../../crates/framework" }
 egui = { workspace = true }
-egui-android-core = { path = "../../crates/core" }
-egui-android-ui = { path = "../../crates/ui" }
-egui-android-navigation = { path = "../../crates/navigation" }
-egui-android-runtime = { path = "../../crates/runtime" }
-android-activity = { workspace = true }
-android_logger = { workspace = true }
 log = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-egui-android-platform-android = { path = "../../crates/platform-android" }
-
-[target.'cfg(not(target_os = "android"))'.dependencies]
-egui-android-platform = { path = "../../crates/platform" }
+android-activity = { workspace = true }
+android_logger = { workspace = true }
