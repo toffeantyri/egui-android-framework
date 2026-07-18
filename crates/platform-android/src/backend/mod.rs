@@ -24,6 +24,8 @@ mod native_backend;
 
 #[cfg(target_os = "android")]
 use crate::egl_backend::EglState;
+use crate::platform_state::PlatformState;
+use egui_android_platform::SystemTheme;
 
 /// Поверхность (surface) для рендеринга.
 #[derive(Debug, Clone)]
@@ -163,17 +165,40 @@ pub trait AndroidBackend {
     /// Получить размер окна (ширина, высота).
     fn window_size(&self) -> (u32, u32);
 
-    /// Получить указатель на JavaVM.
-    fn vm_ptr(&self) -> *mut std::ffi::c_void;
-
-    /// Получить указатель на Activity (JNI global reference).
-    fn activity_ptr(&self) -> *mut std::ffi::c_void;
-
     /// Получить content rect (область содержимого без системных баров).
     fn content_rect(&self) -> (i32, i32, i32, i32);
 
     /// Пересоздать EGL surface при новом NativeWindow (после Pause/Resume).
     fn recreate_surface(&mut self) -> Result<(), String>;
+
+    // ─── PlatformState (insets, theme, clear_color, JNI) ──────────
+
+    /// Получить доступ к PlatformState.
+    fn platform_state(&self) -> &PlatformState;
+
+    /// Получить системные отступы в точках.
+    fn system_insets(&self) -> Insets;
+
+    /// Обновить системные отступы через JNI (вызывается при InitWindow).
+    fn update_system_insets(&mut self);
+
+    /// Получить текущую тему (с учётом override).
+    fn system_theme(&self) -> SystemTheme;
+
+    /// Установить override темы.
+    fn set_theme_override(&mut self, theme: Option<SystemTheme>);
+
+    /// Получить clear color для glClear.
+    fn clear_color(&self) -> (f32, f32, f32);
+
+    /// Установить clear color из Color32.
+    fn set_clear_color(&self, color: egui::Color32);
+
+    /// Настроить цвета системных баров в соответствии с темой.
+    fn apply_system_bars_style(&mut self);
+
+    /// Установить цвета системных баров для светлой и тёмной темы.
+    fn set_system_bars_colors(&mut self, light: u32, dark: u32);
 }
 
 /// Тип Android backend'а.
@@ -252,5 +277,41 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn recreate_surface(&mut self) -> Result<(), String> {
         (**self).recreate_surface()
+    }
+
+    fn platform_state(&self) -> &PlatformState {
+        (**self).platform_state()
+    }
+
+    fn system_insets(&self) -> Insets {
+        (**self).system_insets()
+    }
+
+    fn update_system_insets(&mut self) {
+        (**self).update_system_insets()
+    }
+
+    fn system_theme(&self) -> SystemTheme {
+        (**self).system_theme()
+    }
+
+    fn set_theme_override(&mut self, theme: Option<SystemTheme>) {
+        (**self).set_theme_override(theme)
+    }
+
+    fn clear_color(&self) -> (f32, f32, f32) {
+        (**self).clear_color()
+    }
+
+    fn set_clear_color(&self, color: egui::Color32) {
+        (**self).set_clear_color(color)
+    }
+
+    fn apply_system_bars_style(&mut self) {
+        (**self).apply_system_bars_style()
+    }
+
+    fn set_system_bars_colors(&mut self, light: u32, dark: u32) {
+        (**self).set_system_bars_colors(light, dark)
     }
 }

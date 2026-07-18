@@ -1,7 +1,7 @@
 //! Управление системными барами Android: прозрачность, blur, цвета.
 //!
 //! Вызовы JNI на главном Java-потоке для настройки Window.
-//! Используется в `run.rs` при инициализации окна (InitWindow).
+//! Все функции принимают vm_ptr и activity_ptr явно — глобальные статики отсутствуют.
 //!
 //! # Порядок проверки прозрачности
 //!
@@ -14,571 +14,396 @@
 
 #![cfg(target_os = "android")]
 
-use jni::objects::JObject;
-use jni::sys::jobject;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use egui_android_platform::SystemTheme;
 
-/// Глобальные указатели на JavaVM и Activity (устанавливаются один раз при init).
-static GLOBAL_VM: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-static GLOBAL_ACTIVITY: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+pub use self::inner::*;
 
-/// Сохранить указатели на JVM и Activity для последующего вызова apply_system_bars.
-pub fn init_global_pointers(vm: *mut std::ffi::c_void, activity: *mut std::ffi::c_void) {
-    GLOBAL_VM.store(vm, Ordering::Relaxed);
-    GLOBAL_ACTIVITY.store(activity, Ordering::Relaxed);
-}
-
-/// Применить цвета системных баров для текущей темы, используя глобальные указатели.
-/// Безопасно вызвать из любого потока (JNI attach делается внутри).
-pub fn apply_system_bars_for_theme(theme: SystemTheme) {
-    let vm = GLOBAL_VM.load(Ordering::Relaxed);
-    let activity = GLOBAL_ACTIVITY.load(Ordering::Relaxed);
-    if vm.is_null() || activity.is_null() {
-        log::warn!("apply_system_bars_for_theme: глобальные указатели не инициализированы");
-        return;
-    }
-    apply_system_bars_color_jni(vm, activity, theme);
-}
-
-/// Настроить системные бары: прозрачный статус-бар и навбар.
+/// Применить цвета системных баров для текущей темы через PlatformState в egui::Context.
 ///
-/// Логирует каждый шаг для диагностики.
-pub fn set_transparent_system_bars(
-    vm_ptr: *mut std::ffi::c_void,
-    activity_ptr: *mut std::ffi::c_void,
-) {
-    log::info!("set_transparent_system_bars: начало");
-
-    if vm_ptr.is_null() {
-        log::error!("set_transparent_system_bars: vm_ptr is null");
-        return;
+/// Вызывается из `Application::frame()`.
+pub fn apply_system_bars_for_theme(ctx: &egui::Context) {
+    use crate::platform_state::PlatformState;
+    if let Some(state) = PlatformState::from_ctx(ctx) {
+        let vm = state.vm_ptr();
+        let activity = state.activity_ptr();
+        if !vm.is_null() && !activity.is_null() {
+            let theme = state.current_theme();
+            inner::apply_system_bars_color_jni(vm, activity, theme);
+        }
     }
-    if activity_ptr.is_null() {
-        log::error!("set_transparent_system_bars: activity_ptr is null");
-        return;
-    }
+}
 
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::error!("set_transparent_system_bars: JavaVM::from_raw: {:?}", e);
-                return;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::error!(
-                    "set_transparent_system_bars: attach_current_thread: {:?}",
-                    e
-                );
-                return;
-            }
-        };
+mod inner {
+    use egui_android_platform::SystemTheme;
 
-        let activity = JObject::from_raw(activity_ptr as jobject);
+    /// Настроить системные бары: прозрачный статус-бар и навбар.
+    ///
+    /// Логирует каждый шаг для диагностики.
+    pub fn set_transparent_system_bars(
+        vm_ptr: *mut std::ffi::c_void,
+        activity_ptr: *mut std::ffi::c_void,
+    ) {
+        log::info!("set_transparent_system_bars: начало");
 
-        // --- Шаг 1: getWindow ---
-        log::info!("set_transparent_system_bars: вызываем activity.getWindow()");
-        let window = match env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(w) => {
-                log::info!("set_transparent_system_bars: getWindow OK");
-                w
-            }
-            None => {
-                log::error!("set_transparent_system_bars: getWindow вернул null");
-                return;
-            }
-        };
-
-        // --- Шаг 2: setStatusBarColor(Color.TRANSPARENT) ---
-        log::info!("set_transparent_system_bars: вызываем setStatusBarColor(0)");
-        match env.call_method(
-            &window,
-            "setStatusBarColor",
-            "(I)V",
-            &[jni::objects::JValue::Int(0)],
-        ) {
-            Ok(_) => log::info!("set_transparent_system_bars: setStatusBarColor OK"),
-            Err(e) => log::error!(
-                "set_transparent_system_bars: setStatusBarColor ошибка: {:?}",
-                e
-            ),
+        if vm_ptr.is_null() || activity_ptr.is_null() {
+            log::error!("set_transparent_system_bars: null pointer");
+            return;
         }
 
-        // --- Шаг 3: setNavigationBarColor(Color.TRANSPARENT) ---
-        log::info!("set_transparent_system_bars: вызываем setNavigationBarColor(0)");
-        match env.call_method(
-            &window,
-            "setNavigationBarColor",
-            "(I)V",
-            &[jni::objects::JValue::Int(0)],
-        ) {
-            Ok(_) => log::info!("set_transparent_system_bars: setNavigationBarColor OK"),
-            Err(e) => log::error!(
-                "set_transparent_system_bars: setNavigationBarColor ошибка: {:?}",
-                e
-            ),
-        }
+        unsafe {
+            let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+                Ok(jvm) => jvm,
+                Err(e) => {
+                    log::error!("set_transparent_system_bars: JavaVM::from_raw: {:?}", e);
+                    return;
+                }
+            };
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    log::error!("set_transparent_system_bars: attach_current_thread: {:?}", e);
+                    return;
+                }
+            };
 
-        // --- Шаг 4: getDecorView ---
-        log::info!("set_transparent_system_bars: вызываем window.getDecorView()");
-        let decor_view = match env
-            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(dv) => {
-                log::info!("set_transparent_system_bars: getDecorView OK");
-                dv
+            let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
+
+            // --- Шаг 1: getWindow ---
+            let window = match env
+                .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error!("set_transparent_system_bars: getWindow: {:?}", e);
+                    return;
+                }
+            };
+
+            // --- Шаг 2: setStatusBarColor(0) ---
+            match env.call_method(
+                &window,
+                "setStatusBarColor",
+                "(I)V",
+                &[jni::objects::JValue::Int(0)],
+            ) {
+                Ok(_) => log::info!("set_transparent_system_bars: StatusBar → TRANSPARENT"),
+                Err(e) => {
+                    log::warn!("setStatusBarColor: {:?}", e);
+                }
             }
-            None => {
-                log::error!("set_transparent_system_bars: getDecorView вернул null");
-                return;
+
+            // --- Шаг 3: setNavigationBarColor(0) ---
+            match env.call_method(
+                &window,
+                "setNavigationBarColor",
+                "(I)V",
+                &[jni::objects::JValue::Int(0)],
+            ) {
+                Ok(_) => log::info!("set_transparent_system_bars: NavigationBar → TRANSPARENT"),
+                Err(e) => {
+                    log::warn!("setNavigationBarColor: {:?}", e);
+                }
             }
-        };
 
-        // --- Шаг 5: setSystemUiVisibility с флагами LAYOUT_* ---
-        // SYSTEM_UI_FLAG_LAYOUT_STABLE = 0x0100
-        // SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN = 0x0400
-        // SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION = 0x0200
-        let flags = 0x0100 | 0x0400 | 0x0200;
-        log::info!(
-            "set_transparent_system_bars: вызываем setSystemUiVisibility(flags=0x{:x})",
-            flags
-        );
-        match env.call_method(
-            &decor_view,
-            "setSystemUiVisibility",
-            "(I)V",
-            &[jni::objects::JValue::Int(flags)],
-        ) {
-            Ok(_) => log::info!("set_transparent_system_bars: setSystemUiVisibility OK"),
-            Err(e) => log::error!(
-                "set_transparent_system_bars: setSystemUiVisibility ошибка: {:?}",
-                e
-            ),
-        }
+            // --- Шаг 4: DecorView.setSystemUiVisibility ---
+            let decor_view = match env
+                .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("set_transparent_system_bars: getDecorView: {:?}", e);
+                    return;
+                }
+            };
 
-        // --- Шаг 6: убираем фон Window (если Android рисует свой фон под барами) ---
-        // window.setBackgroundDrawable(null)
-        log::info!("set_transparent_system_bars: вызываем setBackgroundDrawable(null)");
-        match env.call_method(
-            &window,
-            "setBackgroundDrawable",
-            "(Landroid/graphics/drawable/Drawable;)V",
-            &[jni::objects::JValue::Object(&jni::objects::JObject::null())],
-        ) {
-            Ok(_) => log::info!("set_transparent_system_bars: setBackgroundDrawable OK"),
-            Err(e) => log::error!(
-                "set_transparent_system_bars: setBackgroundDrawable ошибка: {:?}",
-                e
-            ),
-        }
+            // Флаги: SYSTEM_UI_FLAG_LAYOUT_STABLE | SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            // | SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            let layout_stable = 0x0000_0100;
+            let layout_hide_nav = 0x0000_0200;
+            let layout_fullscreen = 0x0000_0400;
+            let flags = layout_stable | layout_hide_nav | layout_fullscreen;
 
-        // --- Шаг 7: проверяем, какой цвет установился (опционально) ---
-        // Пробуем прочитать statusBarColor, чтобы убедиться что он стал 0
-        match env.call_method(&window, "getStatusBarColor", "()I", &[]) {
-            Ok(val) => {
-                let color = val.i().unwrap_or(-1);
-                log::info!(
-                    "set_transparent_system_bars: getStatusBarColor после установки = 0x{:x}",
-                    color
-                );
+            match env.call_method(
+                &decor_view,
+                "setSystemUiVisibility",
+                "(I)V",
+                &[jni::objects::JValue::Int(flags)],
+            ) {
+                Ok(_) => log::info!("set_transparent_system_bars: setSystemUiVisibility OK"),
+                Err(e) => {
+                    log::warn!("setSystemUiVisibility: {:?}", e);
+                }
             }
-            Err(e) => log::error!(
-                "set_transparent_system_bars: getStatusBarColor ошибка: {:?}",
-                e
-            ),
-        }
 
-        match env.call_method(&window, "getNavigationBarColor", "()I", &[]) {
-            Ok(val) => {
-                let color = val.i().unwrap_or(-1);
-                log::info!(
-                    "set_transparent_system_bars: getNavigationBarColor после установки = 0x{:x}",
-                    color
-                );
+            // --- Шаг 5: Убираем фон Window (setBackgroundDrawable(null)) ---
+            match env.call_method(
+                &window,
+                "setBackgroundDrawable",
+                "(Landroid/graphics/drawable/Drawable;)V",
+                &[jni::objects::JValue::Object(&jni::objects::JObject::null())],
+            ) {
+                Ok(_) => log::info!("set_transparent_system_bars: BackgroundDrawable → null"),
+                Err(e) => {
+                    log::warn!("setBackgroundDrawable(null): {:?}", e);
+                }
             }
-            Err(e) => log::error!(
-                "set_transparent_system_bars: getNavigationBarColor ошибка: {:?}",
-                e
-            ),
         }
 
         log::info!("set_transparent_system_bars: завершено");
     }
-}
 
-/// Установить blur для системных баров (Android 12+).
-pub fn set_blur_for_system_bars(
-    vm_ptr: *mut std::ffi::c_void,
-    activity_ptr: *mut std::ffi::c_void,
-    blur_radius: i32,
-) {
-    log::info!("set_blur_for_system_bars: начало, radius={}", blur_radius);
-
-    if vm_ptr.is_null() || activity_ptr.is_null() {
-        log::warn!("set_blur_for_system_bars: vm_ptr или activity_ptr null");
-        return;
-    }
-
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::warn!("set_blur_for_system_bars: JavaVM::from_raw: {:?}", e);
-                return;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("set_blur_for_system_bars: attach_current_thread: {:?}", e);
-                return;
-            }
-        };
-
-        let activity = JObject::from_raw(activity_ptr as jobject);
-
-        let window = match env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(w) => w,
-            None => {
-                log::warn!("set_blur_for_system_bars: getWindow вернул null");
-                return;
-            }
-        };
-
-        log::info!(
-            "set_blur_for_system_bars: вызываем setBackgroundBlurRadius({})",
-            blur_radius
-        );
-        match env.call_method(
-            &window,
-            "setBackgroundBlurRadius",
-            "(I)V",
-            &[jni::objects::JValue::Int(blur_radius)],
-        ) {
-            Ok(_) => log::info!("set_blur_for_system_bars: setBackgroundBlurRadius OK"),
-            Err(e) => log::error!(
-                "set_blur_for_system_bars: setBackgroundBlurRadius ошибка: {:?}",
-                e
-            ),
+    /// Включить blur под системными барами (Android 12+).
+    pub fn set_blur_for_system_bars(
+        vm_ptr: *mut std::ffi::c_void,
+        activity_ptr: *mut std::ffi::c_void,
+        blur_radius: i32,
+    ) {
+        if vm_ptr.is_null() || activity_ptr.is_null() {
+            log::warn!("set_blur_for_system_bars: null pointer");
+            return;
         }
 
-        log::info!("set_blur_for_system_bars: завершено");
-    }
-}
+        unsafe {
+            let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+                Ok(jvm) => jvm,
+                Err(e) => {
+                    log::warn!("set_blur_for_system_bars: JavaVM::from_raw: {:?}", e);
+                    return;
+                }
+            };
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    log::warn!("set_blur_for_system_bars: attach_current_thread: {:?}", e);
+                    return;
+                }
+            };
 
-// ─── Определение системной темы ────────────────────────────────────────────────
+            let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
 
-use egui_android_platform::SystemTheme;
+            let window = match env
+                .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    log::warn!("set_blur_for_system_bars: getWindow: {:?}", e);
+                    return;
+                }
+            };
 
-/// Цвета для системных баров (status bar, navigation bar).
-///
-/// Приложение может установить свои цвета через `set_system_bars_colors()`.
-#[derive(Clone, Copy, Debug)]
-pub struct SystemBarsColors {
-    /// Цвет для светлой темы (например, 0xFF_FF_FF = белый).
-    pub light: u32,
-    /// Цвет для тёмной темы (например, 0x00_00_00 = чёрный).
-    pub dark: u32,
-}
-
-static SYSTEM_BARS_COLORS: std::sync::OnceLock<SystemBarsColors> = std::sync::OnceLock::new();
-
-/// Установить цвета системных баров для светлой и тёмной темы.
-pub fn set_system_bars_colors(colors: SystemBarsColors) {
-    let _ = SYSTEM_BARS_COLORS.set(colors);
-}
-
-fn get_system_bars_colors() -> SystemBarsColors {
-    SYSTEM_BARS_COLORS
-        .get()
-        .copied()
-        .unwrap_or(SystemBarsColors {
-            light: 0x00_00_00, // чёрный (по умолчанию)
-            dark: 0x00_00_00,  // чёрный
-        })
-}
-
-/// Определить системную тему Android через JNI.
-///
-/// Java-эквивалент:
-/// ```java
-/// int uiMode = activity.getResources().getConfiguration().uiMode;
-/// int nightMode = uiMode & Configuration.UI_MODE_NIGHT_MASK;
-/// if (nightMode == Configuration.UI_MODE_NIGHT_YES) return DARK;
-/// else return LIGHT;
-/// ```
-pub fn detect_system_theme_jni(
-    vm_ptr: *mut std::ffi::c_void,
-    activity_ptr: *mut std::ffi::c_void,
-) -> Option<SystemTheme> {
-    if vm_ptr.is_null() || activity_ptr.is_null() {
-        log::warn!("detect_system_theme_jni: vm_ptr или activity_ptr null");
-        return None;
-    }
-
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::warn!("detect_system_theme_jni: JavaVM::from_raw: {:?}", e);
-                return None;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("detect_system_theme_jni: attach_current_thread: {:?}", e);
-                return None;
-            }
-        };
-
-        let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
-
-        // resources = activity.getResources()
-        let resources = match env
-            .call_method(
-                &activity,
-                "getResources",
-                "()Landroid/content/res/Resources;",
-                &[],
-            )
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(r) => r,
-            None => {
-                log::warn!("detect_system_theme_jni: getResources вернул null");
-                return None;
-            }
-        };
-
-        // configuration = resources.getConfiguration()
-        let configuration = match env
-            .call_method(
-                &resources,
-                "getConfiguration",
-                "()Landroid/content/res/Configuration;",
-                &[],
-            )
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(c) => c,
-            None => {
-                log::warn!("detect_system_theme_jni: getConfiguration вернул null");
-                return None;
-            }
-        };
-
-        // uiMode = configuration.uiMode
-        let ui_mode = match env
-            .get_field(&configuration, "uiMode", "I")
-            .ok()
-            .and_then(|v| v.i().ok())
-        {
-            Some(m) => m,
-            None => {
-                log::warn!("detect_system_theme_jni: uiMode поле не найдено");
-                return None;
-            }
-        };
-
-        // UI_MODE_NIGHT_MASK = 0x30
-        // UI_MODE_NIGHT_YES = 0x20
-        let night_mode = ui_mode & 0x30;
-        let theme = if night_mode == 0x20 {
-            SystemTheme::Dark
-        } else {
-            SystemTheme::Light
-        };
-
-        log::info!(
-            "detect_system_theme_jni: uiMode={:#x}, night_mode={:#x}, theme={:?}",
-            ui_mode,
-            night_mode,
-            theme
-        );
-
-        Some(theme)
-    }
-}
-
-/// Применить цвет системных баров в соответствии с темой.
-///
-/// Вызывается после определения темы или после смены override.
-pub fn apply_system_bars_color_jni(
-    vm_ptr: *mut std::ffi::c_void,
-    activity_ptr: *mut std::ffi::c_void,
-    theme: SystemTheme,
-) {
-    if vm_ptr.is_null() || activity_ptr.is_null() {
-        log::warn!("apply_system_bars_color_jni: vm_ptr или activity_ptr null");
-        return;
-    }
-
-    unsafe {
-        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
-            Ok(jvm) => jvm,
-            Err(e) => {
-                log::warn!("apply_system_bars_color_jni: JavaVM::from_raw: {:?}", e);
-                return;
-            }
-        };
-        let mut env = match jvm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!(
-                    "apply_system_bars_color_jni: attach_current_thread: {:?}",
-                    e
-                );
-                return;
-            }
-        };
-
-        let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
-
-        // window = activity.getWindow()
-        let window = match env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(w) => w,
-            None => {
-                log::warn!("apply_system_bars_color_jni: getWindow вернул null");
-                return;
-            }
-        };
-
-        let colors = get_system_bars_colors();
-        let color = match theme {
-            SystemTheme::Light => colors.light as i32,
-            SystemTheme::Dark => colors.dark as i32,
-        };
-
-        // window.setStatusBarColor(color)
-        let _ = env.call_method(
-            &window,
-            "setStatusBarColor",
-            "(I)V",
-            &[jni::objects::JValue::Int(color)],
-        );
-
-        // window.setNavigationBarColor(color)
-        let _ = env.call_method(
-            &window,
-            "setNavigationBarColor",
-            "(I)V",
-            &[jni::objects::JValue::Int(color)],
-        );
-
-        // ─── Переключаем цвет иконок (светлые/тёмные) ─────────────────
-        // Для светлой темы — тёмные иконки (APPEARANCE_LIGHT_STATUS_BARS),
-        // для тёмной — светлые (без флага).
-        //
-        // Android 11+ (API 30): WindowInsetsController.setSystemBarsAppearance
-        // Android 6-10 (API 23-29): View.setSystemUiVisibility(SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
-
-        let decor_view = match env
-            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-            .ok()
-            .and_then(|v| v.l().ok())
-        {
-            Some(dv) => dv,
-            None => {
-                log::warn!("apply_system_bars_color_jni: getDecorView вернул null");
-                return;
-            }
-        };
-
-        // Проверяем API level: пытаемся найти WindowInsetsController (API 30+)
-        let insets_controller = env.call_method(
-            &window,
-            "getInsetsController",
-            "()Landroid/view/WindowInsetsController;",
-            &[],
-        );
-
-        match insets_controller {
-            Ok(val) => {
-                // API 30+ — используем WindowInsetsController
-                if let Ok(controller) = val.l() {
-                    if !controller.is_null() {
-                        // APPEARANCE_LIGHT_STATUS_BARS    = 8  (бит 3)
-                        // APPEARANCE_LIGHT_NAVIGATION_BARS = 16 (бит 4)
-                        let mask = 8i32 | 16i32; // статус-бар + навбар
-                        let appearance = match theme {
-                            SystemTheme::Light => mask,
-                            SystemTheme::Dark => 0i32,
-                        };
-                        let _ = env.call_method(
-                            &controller,
-                            "setSystemBarsAppearance",
-                            "(II)V",
-                            &[
-                                jni::objects::JValue::Int(appearance),
-                                jni::objects::JValue::Int(mask),
-                            ],
-                        );
-                        log::info!(
-                            "apply_system_bars_color_jni: setSystemBarsAppearance(appearance={}, mask={}), theme={:?}",
-                            appearance, mask, theme
-                        );
-                    }
+            // setBackgroundBlurRadius(int) — Android 12+ (API 31+)
+            match env.call_method(
+                &window,
+                "setBackgroundBlurRadius",
+                "(I)V",
+                &[jni::objects::JValue::Int(blur_radius)],
+            ) {
+                Ok(_) => {
+                    log::info!("set_blur_for_system_bars: blur radius={}", blur_radius);
+                }
+                Err(e) => {
+                    log::warn!("setBackgroundBlurRadius: {:?}", e);
                 }
             }
-            Err(_) => {
-                // API 23-29 — фолбэк на SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                let flag_light_status_bar = 0x00002000i32; // SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                let flag_light_nav_bar = 0x00000010i32; // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+    }
 
-                // Получаем текущие флаги
-                let current_flags = env
-                    .call_method(&decor_view, "getSystemUiVisibility", "()I", &[])
-                    .ok()
-                    .and_then(|v| Some(v.i().ok()?))
-                    .unwrap_or(0);
-
-                let new_flags = match theme {
-                    SystemTheme::Light => {
-                        current_flags | flag_light_status_bar | flag_light_nav_bar
-                    }
-                    SystemTheme::Dark => {
-                        current_flags & !flag_light_status_bar & !flag_light_nav_bar
-                    }
-                };
-
-                let _ = env.call_method(
-                    &decor_view,
-                    "setSystemUiVisibility",
-                    "(I)V",
-                    &[jni::objects::JValue::Int(new_flags)],
-                );
-                log::info!(
-                    "apply_system_bars_color_jni: setSystemUiVisibility(0x{:x}), theme={:?}",
-                    new_flags,
-                    theme
-                );
-            }
+    /// Определить системную тему (Light/Dark) через JNI.
+    ///
+    /// Использует `Resources.getConfiguration().uiMode & UI_MODE_NIGHT_MASK`.
+    pub fn detect_system_theme_jni(
+        vm_ptr: *mut std::ffi::c_void,
+        activity_ptr: *mut std::ffi::c_void,
+    ) -> Option<SystemTheme> {
+        if vm_ptr.is_null() || activity_ptr.is_null() {
+            log::warn!("detect_system_theme_jni: null pointer");
+            return None;
         }
 
-        log::info!(
-            "apply_system_bars_color_jni: theme={:?}, color=0x{:08x}",
-            theme,
-            color as u32
-        );
+        unsafe {
+            let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+                Ok(jvm) => jvm,
+                Err(e) => {
+                    log::warn!("detect_system_theme_jni: JavaVM::from_raw: {:?}", e);
+                    return None;
+                }
+            };
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    log::warn!("detect_system_theme_jni: attach_current_thread: {:?}", e);
+                    return None;
+                }
+            };
+
+            let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
+
+            // resources = activity.getResources()
+            let resources = match env
+                .call_method(&activity, "getResources", "()Landroid/content/res/Resources;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("detect_system_theme: getResources: {:?}", e);
+                    return None;
+                }
+            };
+
+            // config = resources.getConfiguration()
+            let config = match env
+                .call_method(
+                    &resources,
+                    "getConfiguration",
+                    "()Landroid/content/res/Configuration;",
+                    &[],
+                )
+                .and_then(|v| v.l())
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("detect_system_theme: getConfiguration: {:?}", e);
+                    return None;
+                }
+            };
+
+            // uiMode = config.uiMode (int)
+            let ui_mode = match env.get_field(&config, "uiMode", "I").and_then(|v| v.i()) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::warn!("detect_system_theme: uiMode field: {:?}", e);
+                    return None;
+                }
+            };
+
+            const UI_MODE_NIGHT_MASK: i32 = 0x20;
+            const UI_MODE_NIGHT_YES: i32 = 0x20;
+
+            let theme = if ui_mode & UI_MODE_NIGHT_MASK == UI_MODE_NIGHT_YES {
+                SystemTheme::Dark
+            } else {
+                SystemTheme::Light
+            };
+
+            log::info!("detect_system_theme_jni: uiMode={:#x} → {:?}", ui_mode, theme);
+
+            Some(theme)
+        }
+    }
+
+    /// Применить цвета системных баров через JNI (статус-бар + навбар).
+    pub fn apply_system_bars_color_jni(
+        vm_ptr: *mut std::ffi::c_void,
+        activity_ptr: *mut std::ffi::c_void,
+        theme: SystemTheme,
+    ) {
+        if vm_ptr.is_null() || activity_ptr.is_null() {
+            log::warn!("apply_system_bars_color_jni: null pointer");
+            return;
+        }
+
+        unsafe {
+            let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+                Ok(jvm) => jvm,
+                Err(e) => {
+                    log::warn!("apply_system_bars_color_jni: JavaVM::from_raw: {:?}", e);
+                    return;
+                }
+            };
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    log::warn!("apply_system_bars_color_jni: attach_current_thread: {:?}", e);
+                    return;
+                }
+            };
+
+            let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
+
+            // window = activity.getWindow()
+            let window = match env
+                .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    log::warn!("apply_system_bars_color_jni: getWindow: {:?}", e);
+                    return;
+                }
+            };
+
+            // Цвет баров: чёрный для светлой темы, белый для тёмной
+            let color: i32 = match theme {
+                SystemTheme::Light => 0x00_00_00, // чёрный статус-бар
+                SystemTheme::Dark => 0xFF_FF_FF,  // белый статус-бар
+            };
+
+            // setStatusBarColor
+            let _ = env.call_method(
+                &window,
+                "setStatusBarColor",
+                "(I)V",
+                &[jni::objects::JValue::Int(color)],
+            );
+
+            // setNavigationBarColor
+            let _ = env.call_method(
+                &window,
+                "setNavigationBarColor",
+                "(I)V",
+                &[jni::objects::JValue::Int(color)],
+            );
+
+            // DecorView.setSystemUiVisibility для светлых/тёмных иконок
+            let decor_view = match env
+                .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("apply_system_bars_color_jni: getDecorView: {:?}", e);
+                    return;
+                }
+            };
+
+            // SYSTEM_UI_FLAG_LIGHT_STATUS_BAR = 0x00002000
+            // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR = 0x00000010
+            let light_status_bar = 0x0000_2000i32;
+            let light_nav_bar = 0x0000_0010i32;
+
+            // Для светлой темы — тёмные иконки, для тёмной — светлые
+            let (appearance, mask) = match theme {
+                SystemTheme::Light => (light_status_bar | light_nav_bar, light_status_bar | light_nav_bar),
+                SystemTheme::Dark => (0, light_status_bar | light_nav_bar),
+            };
+
+            // setSystemUiVisibility для совместимости
+            let current_visibility = env
+                .call_method(&decor_view, "getSystemUiVisibility", "()I", &[])
+                .and_then(|v| v.i())
+                .unwrap_or(0);
+
+            // Для тёмной темы убираем флаги LIGHT
+            let new_flags = match theme {
+                SystemTheme::Light => current_visibility | appearance,
+                SystemTheme::Dark => current_visibility & !(light_status_bar | light_nav_bar),
+            };
+
+            let _ = env.call_method(
+                &decor_view,
+                "setSystemUiVisibility",
+                "(I)V",
+                &[jni::objects::JValue::Int(new_flags)],
+            );
+
+            log::info!(
+                "apply_system_bars_color_jni: theme={:?} color=#{:06x}",
+                theme,
+                color,
+            );
+        }
     }
 }

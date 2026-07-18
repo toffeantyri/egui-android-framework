@@ -27,6 +27,7 @@ use crate::backend::{
     KeyAction as BackendKeyAction, LifecycleEvent, SurfaceHandle, TouchPhase,
 };
 use crate::egl_backend::EglState;
+use crate::platform_state::PlatformState;
 
 /// GL-режим backend.
 pub struct GlBackend {
@@ -37,6 +38,8 @@ pub struct GlBackend {
     dpi: f32,
     should_close: AtomicBool,
     ime_visible: bool,
+    /// Состояние платформы (insets, theme, clear_color, JNI).
+    platform_state: PlatformState,
 }
 
 impl GlBackend {
@@ -50,6 +53,7 @@ impl GlBackend {
             dpi: 1.0,
             should_close: AtomicBool::new(false),
             ime_visible: false,
+            platform_state: PlatformState::new(),
         }
     }
 
@@ -292,5 +296,71 @@ impl AndroidBackend for GlBackend {
         } else {
             Err("GlBackend: нет EGL или NativeWindow для пересоздания surface".into())
         }
+    }
+
+    // ─── PlatformState ──────────────────────────────────────────────
+
+    fn platform_state(&self) -> &PlatformState {
+        &self.platform_state
+    }
+
+    fn system_insets(&self) -> Insets {
+        let pp = self.dpi;
+        let state = &self.platform_state;
+        if state.insets_are_valid() {
+            let px = state.insets_px();
+            Insets {
+                left: px.left as f32 / pp,
+                top: px.top as f32 / pp,
+                right: px.right as f32 / pp,
+                bottom: px.bottom as f32 / pp,
+            }
+        } else {
+            self.insets
+        }
+    }
+
+    fn update_system_insets(&mut self) {
+        let vm = self.app.vm_as_ptr();
+        let activity = self.app.activity_as_ptr();
+        if vm.is_null() || activity.is_null() {
+            return;
+        }
+        if let Some(insets_px) = crate::insets::get_system_insets_jni(vm, activity) {
+            self.platform_state.set_insets_px(insets_px);
+        }
+    }
+
+    fn system_theme(&self) -> SystemTheme {
+        self.platform_state.current_theme()
+    }
+
+    fn set_theme_override(&mut self, theme: Option<SystemTheme>) {
+        self.platform_state.set_theme_override(theme);
+    }
+
+    fn clear_color(&self) -> (f32, f32, f32) {
+        self.platform_state.current_clear_color()
+    }
+
+    fn set_clear_color(&self, color: egui::Color32) {
+        self.platform_state.set_clear_color_from(color);
+    }
+
+    fn apply_system_bars_style(&mut self) {
+        let vm = self.app.vm_as_ptr();
+        let activity = self.app.activity_as_ptr();
+        if !vm.is_null() && !activity.is_null() {
+            crate::system_bars::apply_system_bars_color_jni(
+                vm,
+                activity,
+                self.platform_state.current_theme(),
+            );
+        }
+    }
+
+    fn set_system_bars_colors(&mut self, _light: u32, _dark: u32) {
+        // System bars colors will be stored in PlatformState
+        // when the feature is needed
     }
 }

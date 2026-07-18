@@ -3,36 +3,17 @@
 //! Архитектурные требования:
 //! - Работает в контексте NativeActivity.
 //! - Не трогает UI/Runtime/Reducer/Store.
-//! - Источник истины: WindowInsets через JNI.
+//! - Источник истины: WindowInsets через JNI — хранятся в PlatformState.
 //! - Fallback: content_rect + clamped insets.
 //! - pp (pixels-per-point) считается из density_dpi.
+//!
+//! Глобальные статики отсутствуют. Insets хранятся в PlatformState внутри backend.
 
 #![cfg(target_os = "android")]
 
-use jni::objects::{JObject, JValue};
-use jni::sys::jobject;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Once;
 
 static LOG_ONCE: Once = Once::new();
-
-// ─── Структуры данных ────────────────────────────────────────────────────────
-
-/// Insets в пикселях.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct InsetsPx {
-    pub left: i32,
-    pub top: i32,
-    pub right: i32,
-    pub bottom: i32,
-}
-
-impl InsetsPx {
-    /// Все значения ≥ 0 (установлены через JNI).
-    pub fn is_valid(&self) -> bool {
-        self.left >= 0 && self.top >= 0 && self.right >= 0 && self.bottom >= 0
-    }
-}
 
 /// Insets в точках (points = пиксели / pp).
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,29 +22,6 @@ pub struct InsetsPt {
     pub top: f32,
     pub right: f32,
     pub bottom: f32,
-}
-
-// ─── Глобальные insets в пикселях (заполняются из JNI) ──────────────────────
-
-static INSET_LEFT: AtomicI32 = AtomicI32::new(-1);
-static INSET_TOP: AtomicI32 = AtomicI32::new(-1);
-static INSET_RIGHT: AtomicI32 = AtomicI32::new(-1);
-static INSET_BOTTOM: AtomicI32 = AtomicI32::new(-1);
-
-fn store_insets_px(insets: &InsetsPx) {
-    INSET_LEFT.store(insets.left, Ordering::Relaxed);
-    INSET_TOP.store(insets.top, Ordering::Relaxed);
-    INSET_RIGHT.store(insets.right, Ordering::Relaxed);
-    INSET_BOTTOM.store(insets.bottom, Ordering::Relaxed);
-}
-
-pub fn load_insets_px() -> InsetsPx {
-    InsetsPx {
-        left: INSET_LEFT.load(Ordering::Relaxed),
-        top: INSET_TOP.load(Ordering::Relaxed),
-        right: INSET_RIGHT.load(Ordering::Relaxed),
-        bottom: INSET_BOTTOM.load(Ordering::Relaxed),
-    }
 }
 
 // ─── JNI вызов через WindowInsets.Type.systemBars() ───────────────────────────
@@ -78,12 +36,15 @@ pub fn load_insets_px() -> InsetsPx {
 /// // systemBars.left, .top, .right, .bottom
 /// ```
 ///
-/// Возвращает `Some(InsetsPx)` если JNI успешен.
+/// Возвращает `Some(crate::platform_state::InsetsPx)` если JNI успешен.
 /// Вызов должен происходить на Java main thread.
 pub fn get_system_insets_jni(
     vm_ptr: *mut std::ffi::c_void,
     activity_ptr: *mut std::ffi::c_void,
-) -> Option<InsetsPx> {
+) -> Option<crate::platform_state::InsetsPx> {
+    use jni::objects::{JObject, JValue};
+    use jni::sys::jobject;
+
     if vm_ptr.is_null() || activity_ptr.is_null() {
         log::warn!("get_system_insets_jni: vm_ptr или activity_ptr null");
         return None;
@@ -148,7 +109,7 @@ pub fn get_system_insets_jni(
         let right = env.get_field(&insets_obj, "right", "I").ok()?.i().ok()?;
         let bottom = env.get_field(&insets_obj, "bottom", "I").ok()?.i().ok()?;
 
-        let insets = InsetsPx {
+        let insets = crate::platform_state::InsetsPx {
             left,
             top,
             right,
@@ -166,95 +127,6 @@ pub fn get_system_insets_jni(
         });
 
         Some(insets)
-    }
-}
-
-/// Сохранить insets в глобальные переменные (вызывается из Java main thread).
-pub fn store_insets(insets: &InsetsPx) {
-    store_insets_px(insets);
-    log::info!(
-        "Insets сохранены: left={}, top={}, right={}, bottom={}",
-        insets.left,
-        insets.top,
-        insets.right,
-        insets.bottom
-    );
-}
-
-// ─── Публичный API для платформенного слоя ────────────────────────────────────
-
-/// Получить insets в точках (points) с приоритетом:
-/// 1. JNI (WindowInsets.Type.systemBars)
-/// 2. Fallback: content_rect с clamp (top ≤ 32dp, bottom ≤ 48dp, left/right ≤ 32dp)
-///
-/// density берётся из конфигурации: pp = density_dpi / 160.
-pub fn get_insets_pt(
-    config: &android_activity::ConfigurationRef,
-    native_width: i32,
-    native_height: i32,
-    content_rect: &android_activity::Rect,
-) -> InsetsPt {
-    let pp = get_pp(config, native_width, native_height);
-    let jni_insets = load_insets_px();
-
-    if jni_insets.is_valid() {
-        LOG_ONCE.call_once(|| {
-            log::info!(
-                "Insets (JNI): left={:.1}, top={:.1}, right={:.1}, bottom={:.1} pt (pp={:.2})",
-                jni_insets.left as f32 / pp,
-                jni_insets.top as f32 / pp,
-                jni_insets.right as f32 / pp,
-                jni_insets.bottom as f32 / pp,
-                pp
-            );
-        });
-
-        return InsetsPt {
-            left: jni_insets.left as f32 / pp,
-            top: jni_insets.top as f32 / pp,
-            right: jni_insets.right as f32 / pp,
-            bottom: jni_insets.bottom as f32 / pp,
-        };
-    }
-
-    // Fallback: content_rect + clamp
-    let top_px = content_rect.top;
-    let bottom_px = native_height - content_rect.bottom;
-    let left_px = content_rect.left;
-    let right_px = native_width - content_rect.right;
-
-    let mut top_pt = top_px as f32 / pp;
-    let mut bottom_pt = bottom_px as f32 / pp;
-    let mut left_pt = left_px as f32 / pp;
-    let mut right_pt = right_px as f32 / pp;
-
-    // Ограничения: статус-бар ~24-32dp, навбар/жесты ~48dp
-    top_pt = top_pt.clamp(0.0, 32.0);
-    bottom_pt = bottom_pt.clamp(0.0, 48.0);
-    left_pt = left_pt.clamp(0.0, 32.0);
-    right_pt = right_pt.clamp(0.0, 32.0);
-
-    LOG_ONCE.call_once(|| {
-        log::info!(
-            "Insets (fallback content_rect): left={:.1}, top={:.1}, right={:.1}, bottom={:.1} pt \
-             (raw px: left={}, top={}, right={}, bottom={}, pp={:.2})",
-            left_pt,
-            top_pt,
-            right_pt,
-            bottom_pt,
-            left_px,
-            top_px,
-            right_px,
-            bottom_px,
-            pp
-        );
-    });
-
-    InsetsPt {
-        left: left_pt,
-        top: top_pt,
-        right: right_pt,
-        bottom: bottom_pt,
     }
 }
 

@@ -106,7 +106,6 @@ impl Application for ShowcaseApplication {
             self.prev_dark_mode = Some(new_dark);
             #[cfg(target_os = "android")]
             {
-                use egui_android_framework::platform::SystemTheme;
                 use egui_android_framework::platform_android::system_bars;
                 use egui_android_framework::platform_android::theme::set_clear_color_from;
 
@@ -116,12 +115,8 @@ impl Application for ShowcaseApplication {
                     MaterialTheme::light().colors.background
                 };
 
-                set_clear_color_from(bg_color);
-                system_bars::apply_system_bars_for_theme(if new_dark {
-                    SystemTheme::Dark
-                } else {
-                    SystemTheme::Light
-                });
+                set_clear_color_from(egui_ctx, bg_color);
+                system_bars::apply_system_bars_for_theme(egui_ctx);
             }
         }
 

@@ -154,30 +154,16 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         // GlBackend::show_keyboard()/hide_keyboard(), которые вызывают
                         // run_on_java_main_thread → JNI InputMethodManager.
                         //
-                        // WindowInsets: получаем через JNI get_system_insets_jni().
+                        // WindowInsets: получаем через JNI, хранятся в PlatformState.
                         // В GL-режиме android-activity может пробрасывать InsetsChanged
                         // через MainEvent — для этого добавлен BackendEvent::InsetsChanged.
                         //
                         // DPI: получаем из конфигурации Android через get_pp().
                         // GlBackend шлёт BackendEvent::DpiChanged при InitWindow.
-                        let vm = backend.vm_ptr();
-                        let activity = backend.activity_ptr();
-                        crate::system_bars::init_global_pointers(vm, activity);
+                        backend.update_system_insets();
 
-                        // Получаем WindowInsets через JNI
-                        if !vm.is_null() && !activity.is_null() {
-                            if let Some(insets) = crate::insets::get_system_insets_jni(vm, activity)
-                            {
-                                crate::insets::store_insets(&insets);
-                                log::info!(
-                                    "JNI insets: left={}, top={}, right={}, bottom={}",
-                                    insets.left,
-                                    insets.top,
-                                    insets.right,
-                                    insets.bottom
-                                );
-                            }
-                        }
+                        // Сохраняем PlatformState в egui::Context для Application
+                        backend.platform_state().store_in_ctx(&egui_ctx);
 
                         // Обновляем DPI
                         egui_ctx.set_pixels_per_point(backend.dpi());
@@ -412,7 +398,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     let gl = &*painter.gl();
 
                     gl.disable(glow::SCISSOR_TEST);
-                    let (cr, cg, cb) = crate::theme::current_clear_color();
+                    let (cr, cg, cb) = backend.clear_color();
                     gl.clear_color(cr, cg, cb, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
 
@@ -452,7 +438,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
 /// Получить текущие insets для кадра.
 ///
 /// Приоритет:
-/// 1. JNI (WindowInsets.Type.systemBars) — глобальные переменные из insets.rs
+/// 1. JNI (WindowInsets.Type.systemBars) — через PlatformState в backend
 /// 2. Fallback: content_rect из backend с clamp
 fn get_current_insets(
     backend: &Box<dyn AndroidBackend>,
@@ -460,14 +446,15 @@ fn get_current_insets(
     w: u32,
     h: u32,
 ) -> crate::backend::Insets {
-    // 1. Пробуем JNI insets
-    let jni_insets = crate::insets::load_insets_px();
-    if jni_insets.is_valid() {
+    // 1. Пробуем JNI insets через PlatformState
+    let state = backend.platform_state();
+    if state.insets_are_valid() {
+        let px = state.insets_px();
         return crate::backend::Insets {
-            left: jni_insets.left as f32 / pp,
-            top: jni_insets.top as f32 / pp,
-            right: jni_insets.right as f32 / pp,
-            bottom: jni_insets.bottom as f32 / pp,
+            left: px.left as f32 / pp,
+            top: px.top as f32 / pp,
+            right: px.right as f32 / pp,
+            bottom: px.bottom as f32 / pp,
         };
     }
 
