@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = true
-description = "Android platform implementation for egui-android-framework"
+description = "Android platform: EGL, input, lifecycle, и главный цикл для egui. Включает run() для GameActivity."
+
+[[bin]]
+name = "cargo-android-init"
+path = "src/bin/cargo-android-init.rs"
 
 [target.'cfg(target_os = "android")'.dependencies]
 egui = { workspace = true }
