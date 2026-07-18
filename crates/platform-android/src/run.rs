@@ -141,6 +141,8 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                             if let Err(e) = backend.init_graphics() {
                                 log::error!("Ошибка инициализации EGL: {}", e);
                             }
+                            // Восстанавливаем состояние навигации после пересоздания
+                            app_instance.on_restore_state();
                         }
 
                         // Системные бары уже настроены при старте через run_on_java_main_thread
@@ -179,6 +181,8 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     }
                     LifecycleEvent::Destroy => {
                         log::info!("Lifecycle: Destroy");
+                        // Сохраняем состояние навигации перед уничтожением
+                        app_instance.on_save_state();
                         destroy_requested = true;
                     }
                 },

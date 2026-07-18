@@ -66,12 +66,12 @@ Data Layer никогда не взаимодействует с UI.
 | Platform | `egui-android-platform` | Абстрактный контракт платформы |
 | Platform (Android impl) | `egui-android-platform-android` | Android lifecycle, EGL, input, event loop |
 | Runtime | `egui-android-runtime` | Application, Dispatcher, StateStore, UiNotifier |
-| Application | `egui-android-runtime` | Application trait, frame(), DI корень |
+| Application | `egui-android-runtime` | Application trait, frame(), DI корень, on_save_state/on_restore_state |
 | Component | `egui-android-core` | Component trait, ComponentContext, lifecycle |
 | UI | `egui-android-core` + `egui-android-ui` | ViewFn, Widget, remember, builders, modifier, widgets, containers, animation, theme |
 | State | `egui-android-runtime` | StateStore (tokio::sync::watch) |
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
-| Navigation | `egui-android-navigation` | ChildStack |
+| Navigation | `egui-android-navigation` | ChildStack, save/restore состояния |
 | Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, каналы |
 | Umbrella | `egui-android-framework` | Re-export всех крейтов |
 
@@ -115,6 +115,7 @@ Data Layer никогда не взаимодействует с UI.
 - передача FullOutput платформе
 - Application trait
 - Dispatcher, StateStore, UiNotifier
+- **Waker** — платформенная абстракция для пробуждения event loop (определён в `egui-android-platform`, используется UiNotifier)
 
 Не знает:
 
@@ -179,6 +180,10 @@ Component преобразует Intent в Message.
 Он не обращается к Data Layer напрямую.
 
 Component ничего не рисует — делегирует View-функции.
+
+Component может сохранять/восстанавливать своё состояние через
+`save_state() -> Option<Box<dyn Any + Send>>` и `restore_state(Box<dyn Any + Send>)`
+для поддержки пересоздания Activity (поворот экрана, kill/restore).
 
 **Направление зависимости:** Component → StateStore (потребитель).
 Component использует Store как источник состояния (читает snapshot через `sync_from_store()`).
@@ -310,7 +315,7 @@ UI
 
 ```
 platform-android → platform, runtime
-runtime          → egui, tokio, thiserror, log
+runtime          → platform (Waker), egui, tokio, thiserror, log
 core             → runtime
 ui               → core
 navigation       → core, ui
@@ -329,7 +334,8 @@ framework        → core, ui, navigation, runtime, platform, platform-android
 | Reducer | UI, Runtime, Android, Context |
 | Store | Android, egui, Components |
 | Effect | UI |
-| Platform | Domain, State, Reducer, runtime, core, ui |
+| Platform (абстракция) | Domain, State, Reducer, runtime, core, ui |
+| Platform-android (реализация) | runtime — **знает** (это ок: runtime ниже по потоку), Application, StateStore |
 | Runtime | core, ui, navigation |
 | Core | navigation, ui (builders), platform |
 
@@ -434,8 +440,10 @@ Android не знает про Components.
 
 ```
 ✔ Проверка изоляции:
-  * platform не видит runtime/core/ui/navigation — [да/нет]
+  * platform (абстракция) не видит runtime/core/ui/navigation — [да/нет]
+  * platform-android (реализация) видит runtime — [да] (ок, runtime ниже по потоку)
   * runtime не видит core/ui/navigation — [да/нет]
+  * runtime видит platform (Waker) — [да] (ок, платформенная абстракция)
   * core не видит navigation — [да/нет]
   * ui не видит navigation — [да/нет]
 ```

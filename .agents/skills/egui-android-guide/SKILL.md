@@ -60,7 +60,7 @@ description: Архитектура, правила и идиомы проект
 **Граф зависимостей (DAG, без циклов):**
 ```
 platform-android → platform, runtime
-runtime          → egui, tokio
+runtime          → platform (Waker), egui, tokio
 core             → runtime
 ui               → core
 navigation       → core, ui
@@ -80,7 +80,7 @@ UI (нажатие кнопки)
               → notify_tx.send(())               ← сигнал в Runtime
                 → UiNotifier::check()
                   → ctx.request_repaint()
-                  → waker.wake()
+                  → waker.wake()                    ← Waker из platform (app.run_on_java_main_thread)
                     → poll_events() получает Wake
                       → frame() → render(state, &dispatcher) → новый UI
 ```
@@ -124,8 +124,11 @@ Message = и событие, и семантика
 - `create()` — создаёт приложение, каналы, запускает data layer.
 - `root() / root_ref()` — доступ к корневому компоненту.
 - `config() / config_mut()` — настройки (log_tag, target_fps).
-- `create_notifier(ctx, wake) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
+- `create_notifier(ctx, wake: Waker) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
+  `Waker` — из `egui-android-platform`, создаётся в backend через `app.run_on_java_main_thread(||{})`.
 - `frame(ctx, raw_input) -> FullOutput` — один кадр: создаёт `Dispatcher`, вызывает `sync → render`, drain'ит receiver, обрабатывает сообщения через `handle()`.
+- `on_save_state()` — вызывается платформой при Lifecycle::Destroy. Сохранить ChildStack.
+- `on_restore_state()` — вызывается платформой при InitWindow. Восстановить ChildStack.
 - **Не наследует** `LifecycleObserver` (планируется, сейчас методы объявлены прямо в трейте).
 
 ### `Dispatcher<M>` — `egui-android-runtime`
@@ -157,6 +160,9 @@ Message = и событие, и семантика
 - `render(ui: &mut UiWrapper, dispatch: &DynDispatcher)` — type-erased рендер.
 - `handle_dyn(msg: Box<dyn Any + Send>)` — type-erased handle (downcast внутри).
 - `handle_back() -> bool` — встроенная поддержка BackPressed (как в Decompose).
+- `save_state() -> Option<Box<dyn Any + Send>>` — сохранить состояние компонента
+  для восстановления после пересоздания (по умолч. None).
+- `restore_state(Box<dyn Any + Send>)` — восстановить ранее сохранённое состояние.
 - `as_any() / as_any_mut()` — downcast для тестирования и доступа к конкретному типу.
 - Blanket-impl: любой `Component<Message: 'static + Send>` автоматически становится `ComponentNode`.
 
@@ -170,7 +176,8 @@ Message = и событие, и семантика
 
 ### `UiNotifier` — `egui-android-runtime`
 - Инфраструктурный уведомитель. Вызывается в главном потоке.
-- `check()` — проверяет `mpsc::Receiver<()>` и при сигнале вызывает `repaint + wake`.
+- `check()` — проверяет `mpsc::Receiver<()>` и при сигнале вызывает `repaint + wake()`.
+- Принимает `Option<Waker>` — waker из `egui-android-platform` (создаётся в backend).
 - Не знает про Domain, Components, Reducer.
 
 ### `Widget<M>` — `egui-android-core`
@@ -244,6 +251,9 @@ Message = и событие, и семантика
 - `replace / bring_to_front / clear` — управление стеком.
 - При push/pop/replace вызываются lifecycle-методы компонентов (on_create, on_destroy).
 - Аналог `ChildStack` из Decompose. Позволяет хранить компоненты разных типов.
+- `save() -> Vec<(C, Option<Box<dyn Any + Send>>)>` — сохранить состояние всех компонентов
+  для восстановления после пересоздания Activity.
+- `restore(saved)` — передать сохранённое состояние компонентам через `restore_state()`.
 
 ### `BackDispatcher`, `BackCallback` — `egui-android-core`
 - Центральный менеджер обработки системной кнопки Back.
@@ -263,6 +273,15 @@ Message = и событие, и семантика
 - `Deref<Target = egui::Ui>` — полная совместимость с egui-кодом.
 - Вариант `Owned` — для child_ui, решает проблему borrow checker.
 - Constraints хранятся гибридно: в поле (type-safe) + `Context::data()` (переживают `Frame::show`).
+
+### `ComponentContext<NavEvent, DataCmd, State>` — `egui-android-core`
+- Контекст компонента, передаётся при создании.
+- `back_dispatcher` — обработка системной кнопки Back.
+- `back_fallback` — fallback при pop из ChildStack.
+- `finish_requested` — флаг завершения приложения.
+- `saved_state: Option<Box<dyn Any + Send>>` — сохранённое состояние для восстановления
+  после пересоздания Activity. Устанавливается из `ComponentNode::save_state()`,
+  передаётся в `restore_state()`.
 
 ### `LifecycleObserver` — `egui-android-core`
 - Трейт с методами `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`.
@@ -490,13 +509,12 @@ if let Some(active) = self.stack.active_mut() {
 
 | Событие | Действие |
 |---|---|
-| `InitWindow` | Пересоздать EGL surface, не трогать display/context/painter |
+| `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()` |
+| `InitWindow` (повторный) | `recreate_surface()`, не трогать display/context/painter |
 | `Resume` | `app_instance.on_resume()` |
 | `Pause` | `app_instance.on_pause()` |
 | `Stop` | `app_instance.on_stop()` — не чистить EGL |
-| `Destroy` | `app_instance.on_destroy()`, destroy painter/EGL, `break` из цикла |
-
-Lifecycle вызывается методами `Application` (пока не через `LifecycleObserver`).
+| `Destroy` | `on_save_state()`, `app_instance.on_destroy()`, destroy painter/EGL, `break` |
 
 ### Завершение приложения
 
@@ -514,6 +532,7 @@ loop {
     }
 
     if destroy_requested {
+        app_instance.on_save_state();  // ← сохраняем навигацию
         app_instance.on_destroy();
         // destroy EGL
         break;
@@ -540,7 +559,9 @@ loop {
 │   │   └── src/
 │   │       ├── run.rs       — run<A: Application>() — главный цикл
 │   │       ├── egl_backend.rs — EGL FFI + EglState
-│   │       └── input.rs     — InputState + process_input_events()
+│   │       ├── input.rs     — InputState + process_input_events()
+│   │       ├── waker.rs     — Waker (реэкспорт из egui-android-platform)
+│   │       └── ...
 │   │
 │   ├── runtime/            — egui-android-runtime
 │   │   └── src/
@@ -693,12 +714,14 @@ loop {
     ```rust
     // Через umbrella (если подключен egui-android-framework)
     use egui_android_framework::runtime::{Application, Dispatcher, DynDispatcher};
+    use egui_android_framework::platform::Waker;
     use egui_android_framework::core::{Component, ComponentNode, LifecycleObserver, UiWrapper};
     use egui_android_framework::navigation::ChildStack;
 
     // Напрямую (если подключен только конкретный крейт)
     use egui_android_runtime::Application;
     use egui_android_core::{Component, ComponentNode};
+    use egui_android_platform::Waker;
     ```
 
 12. **При изменении кода проверять изоляцию крейтов:**
@@ -826,21 +849,24 @@ sudo apt install android-sdk google-android-ndk-r27d-installer gradle openjdk-17
 ### Сборка и запуск
 
 ```bash
-# 1. Сборка Rust .so
+# 1. Сгенерировать android/ (Gradle-проект)
+APP_LABEL="My App" APP_PACKAGE=com.example.myapp APP_LIB_NAME=my_app \
+  cargo run --bin cargo-android-init
+
+# 2. Собрать Rust .so
 ANDROID_NDK_HOME=/usr/lib/android-sdk/ndk/27.3.13750724 \
-  cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p egui-gl-app
+  cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p my-app
 
-# 2. Сборка APK
+# 3. Собрать APK
 cd android
-./gradlew assembleDebug
+APP_LIB_NAME=my_app APP_PACKAGE=com.example.myapp ./gradlew assembleDebug
 
-# 3. Установка и запуск
+# 4. Установка и запуск
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.example.egui_android/.EguiActivity
-
-# Или одной командой:
-./scripts/build_android.sh --install
+adb shell am start -n com.example.myapp/com.example.egui_android.EguiActivity
 ```
+
+Или одной командой через `run_android.sh` из примеров.
 
 ### Проверка кода
 

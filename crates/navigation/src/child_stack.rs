@@ -1,4 +1,5 @@
-//! ChildStack — стек дочерних компонентов с управлением жизненным циклом.
+//! ChildStack — стек дочерних компонентов с управлением жизненным циклом
+//! и сохранением/восстановлением состояния.
 //!
 //! Аналог `ChildStack` из Decompose. Хранит стек `(Config, ComponentNode)` пар,
 //! где верхний элемент — активный (отображаемый) компонент.
@@ -12,12 +13,32 @@
 //! * `C` — конфигурация экрана (аналог Route/Config в Decompose).
 //!   Должна быть `Clone + PartialEq` для идентификации.
 //!
+//! # Сохранение/восстановление состояния
+//!
+//! `ChildStack::save()` сохраняет конфигурацию и состояние всех компонентов
+//! в виде `Vec<(C, Option<Box<dyn Any + Send>>)>`. Каждый компонент возвращает
+//! своё состояние через `ComponentNode::save_state()`.
+//!
+//! `ChildStack::restore()` передаёт сохранённое состояние обратно компонентам
+//! через `ComponentNode::restore_state()`.
+//!
+//! Вызовы save/restore привязаны к Android lifecycle в `Application::on_save_state()`
+//! и `Application::on_restore_state()`.
+//!
 //! # Пример
 //!
 //! ```ignore
+//! use egui_android_framework::navigation::ChildStack;
+//!
 //! let mut stack = ChildStack::<Route>::new();
 //! stack.push(Route::Home, Box::new(HomeScreen::new()));
 //! stack.push(Route::Widgets, Box::new(WidgetsScreen::new()));
+//!
+//! // Сохранить состояние
+//! let saved = stack.save();
+//!
+//! // Восстановить после пересоздания
+//! stack.restore(saved);
 //!
 //! if let Some(active) = stack.active() {
 //!     active.render(ui, &dyn_dispatcher);
@@ -169,6 +190,31 @@ where
             comp.on_pause();
             comp.on_stop();
             comp.on_destroy();
+        }
+    }
+
+    /// Сохранить состояние стека для восстановления после пересоздания.
+    ///
+    /// Возвращает вектор `(конфигурация, сохранённое состояние)` для каждого
+    /// компонента в стеке. Состояние — то, что вернул `ComponentNode::save_state()`.
+    pub fn save(&self) -> Vec<(C, Option<Box<dyn std::any::Any + Send>>)> {
+        self.items
+            .iter()
+            .map(|item| (item.config.clone(), item.component.save_state()))
+            .collect()
+    }
+
+    /// Восстановить состояние стека после пересоздания.
+    ///
+    /// Передаёт сохранённое состояние каждому компоненту через `restore_state()`.
+    /// Количество и порядок элементов должен совпадать с текущим стеком.
+    pub fn restore(&mut self, saved: Vec<(C, Option<Box<dyn std::any::Any + Send>>)>) {
+        for (i, (_config, state)) in saved.into_iter().enumerate() {
+            if let Some(state) = state {
+                if let Some(item) = self.items.get_mut(i) {
+                    item.component.restore_state(state);
+                }
+            }
         }
     }
 

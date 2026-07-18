@@ -5,6 +5,7 @@
 //! - Fallback-callback (on_back_fallback) для pop из ChildStack или завершения.
 //! - Data layer handle (для отправки команд).
 //! - Доступ к [`StateStore`] для реактивного получения состояния.
+//! - `saved_state` — сохранённое состояние для восстановления после пересоздания.
 //!
 //! Каналы реализованы через стандартный `std::sync::mpsc`.
 //!
@@ -17,6 +18,13 @@
 //!
 //! Системный Back (из platform-android) и UI Back (кнопка "← Назад")
 //! идут через один и тот же путь — `on_back()`.
+//!
+//! # Сохранение состояния
+//!
+//! `saved_state` хранит `Option<Box<dyn Any + Send>>` — произвольное состояние,
+//! которое компонент может сохранить перед уничтожением (через `ComponentNode::save_state()`)
+//! и восстановить после пересоздания (через `ComponentNode::restore_state()`).
+//! Используется платформой при Lifecycle::Destroy / InitWindow.
 
 use crate::back_dispatcher::BackDispatcher;
 use egui_android_runtime::StateStore;
@@ -61,6 +69,11 @@ where
     /// Устанавливается `back_fallback-ом` когда ChildStack пуст.
     /// Читается `Application::request_destroy()`.
     pub finish_requested: bool,
+    /// Сохранённое состояние для восстановления после пересоздания.
+    ///
+    /// Устанавливается из `ComponentNode::save_state()` при уничтожении,
+    /// передаётся в `restore_state()` при создании.
+    pub saved_state: Option<Box<dyn std::any::Any + Send>>,
 }
 
 impl<NavEvent, DataCmd, State> ComponentContext<NavEvent, DataCmd, State>
@@ -86,6 +99,7 @@ where
             back_dispatcher: BackDispatcher::new(),
             back_fallback: None,
             finish_requested: false,
+            saved_state: None,
         }
     }
 

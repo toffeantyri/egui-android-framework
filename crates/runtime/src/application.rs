@@ -1,4 +1,4 @@
-//! Новый Decompose-style Application — корень DI и владелец RootComponent.
+//! Decompose-style Application — корень DI и владелец RootComponent.
 //!
 //! В отличие от старого MVVM `Application`, новый не знает про Activity
 //! и ViewModel. Вместо этого он:
@@ -22,6 +22,13 @@
 //!
 //! `on_resume()` / `on_pause()` / `on_destroy()` пробрасываются
 //! в RootComponent, который делегирует активному компоненту.
+//!
+//! # Сохранение состояния навигации
+//!
+//! `on_save_state()` и `on_restore_state()` вызываются платформой
+//! при Lifecycle::Destroy / InitWindow. Приложение может сохранить
+//! и восстановить `ChildStack` через `ChildStack::save()` / `restore()`.
+//! Состояние каждого компонента определяется его `save_state()`.
 
 use crate::ui_notifier::UiNotifier;
 use egui_android_platform::Waker;
@@ -137,6 +144,22 @@ pub trait Application: Sized + 'static {
     fn on_stop(&mut self) {}
     /// Компонент уничтожен.
     fn on_destroy(&mut self) {}
+
+    // ─── Сохранение/восстановление состояния ───────────────────────────
+
+    /// Сохранить состояние навигации перед уничтожением Activity.
+    ///
+    /// Вызывается из platform-android при Lifecycle::Destroy.
+    /// Приложение может вызвать `ChildStack::save()` для сохранения стека.
+    /// Реализация по умолчанию — заглушка.
+    fn on_save_state(&mut self) {}
+
+    /// Восстановить состояние навигации после пересоздания Activity.
+    ///
+    /// Вызывается из platform-android при первом InitWindow после Resume.
+    /// Приложение может вызвать `ChildStack::restore()` для восстановления стека.
+    /// Реализация по умолчанию — заглушка.
+    fn on_restore_state(&mut self) {}
 }
 
 // ─── AppConfig ─────────────────────────────────────────────────────────────────

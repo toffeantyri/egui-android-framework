@@ -13,6 +13,7 @@
 //! - `render` через [`DynDispatcher`]
 //! - `handle_dyn` через `Box<dyn Any + Send>`
 //! - `handle_back` — встроенная поддержка BackPressed (как в Decompose)
+//! - `save_state` / `restore_state` — сохранение состояния для пересоздания Activity
 //!
 //! # Blanket-impl
 //!
@@ -53,6 +54,20 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
         false
     }
 
+    /// Сохранить состояние компонента для восстановления после пересоздания.
+    ///
+    /// По умолчанию — `None` (состояние не сохраняется).
+    /// Экран может вернуть любое `Send + 'static` значение (например, счётчик).
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        None
+    }
+
+    /// Восстановить ранее сохранённое состояние.
+    ///
+    /// Вызывается после создания компонента, если есть сохранённое состояние.
+    /// Экран должен downcast'ить `state` в свой тип и восстановить поля.
+    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
+
     /// Даункаст до `&dyn Any` для тестирования и отладки.
     fn as_any(&self) -> &dyn std::any::Any;
 
@@ -80,6 +95,12 @@ where
     fn handle_back(&mut self) -> bool {
         false
     }
+
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        None
+    }
+
+    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
