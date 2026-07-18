@@ -77,12 +77,12 @@ impl Application for ShowcaseApplication {
     }
 
     fn on_back_pressed(&mut self) {
-        log::info!("ShowcaseApplication: on_back_pressed (через ComponentContext)");
         self.root.on_back();
     }
 
     fn request_destroy(&mut self) -> bool {
-        self.root.context.finish_requested
+        // Завершаем приложение только если стек пуст или finish_requested выставлен
+        self.root.context.finish_requested || self.root.stack.is_empty()
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {

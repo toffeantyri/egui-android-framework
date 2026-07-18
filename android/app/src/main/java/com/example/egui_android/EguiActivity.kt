@@ -1,26 +1,34 @@
 package com.example.egui_android
 
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
 import com.google.androidgamesdk.GameActivity
 
 /**
- * Минимальная Activity для GL-режима.
+ * Activity для GL-режима (GameActivity).
  *
- * Наследует GameActivity из Android Game Development Kit.
- * GameActivity предоставляет:
- * - SurfaceView для EGL-рендеринга
- * - InputConnection для IME (клавиатурный ввод без JNI)
- * - WindowInsets API
- * - DisplayMetrics для DPI
- *
- * Rust-код подключается через android-activity (feature "game-activity").
- * Имя .so библиотеки указывается в AndroidManifest.xml через meta-data
- * android.app.lib_name.
+ * Перехватывает системную кнопку Back — решение о завершении
+ * принимается в Rust-коде (Application::on_back_pressed).
+ * Без этого перехвата GameActivity сама завершает Activity
+ * при получении системного Back (жест/кнопка).
  */
 class EguiActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // SurfaceView создаётся автоматически GameActivity glue
-        // Весь жизненный цикл и рендеринг управляются из Rust через android_main()
+
+        // Перехватываем системный Back — не даём GameActivity
+        // завершить Activity. Rust-код сам решит, когда выйти.
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    // Back будет обработан в Rust через input events
+                    // (AKEYCODE_BACK → InputStatus::Handled).
+                    // Если Rust решит завершить — он сам вызовет finish()
+                    // через JNI или дождётся Destroy от системы.
+                    // Главное — не вызывать super / finish() здесь.
+                }
+            }
+        )
     }
 }
