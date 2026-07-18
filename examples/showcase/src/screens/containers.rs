@@ -1,16 +1,13 @@
 //! ContainersScreen — демонстрация контейнеров Column, Row, Stack, LazyColumn.
 
-use egui_android_framework::{
-    core::{Component as UiComponent, LifecycleObserver},
-    runtime::Dispatcher,
-    ui::{
-        containers::{Align, Column, LazyColumn, Row, Stack},
-        modifier::{Modifier, ModifierDsl},
-        remember,
-        theme::Theme,
-        widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
-    },
+use egui_android_core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    containers::{Align, Column, LazyColumn, Row, Stack},
+    modifier::{Modifier, ModifierDsl},
+    remember,
+    theme::Theme,
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::navigation_host::RootMsg;

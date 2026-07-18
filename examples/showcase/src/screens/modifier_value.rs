@@ -11,17 +11,14 @@
 //! Все цвета берутся из текущей Material Design 3 темы.
 
 use egui::Color32;
-use egui_android_framework::{
-    core::{Component as UiComponent, LifecycleObserver},
-    runtime::Dispatcher,
-    ui::{
-        containers::Column,
-        modifier::{Modifier, ModifierDsl},
-        remember,
-        theme::{Colors, Theme},
-        widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
-    },
+use egui_android_core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    containers::Column,
+    modifier::{Modifier, ModifierDsl},
+    remember,
+    theme::{Colors, Theme},
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::navigation_host::RootMsg;

@@ -12,11 +12,11 @@
 
 use std::sync::mpsc;
 
-use egui_android_framework::{
-    core::{Component, LifecycleObserver, UiWrapper},
-    runtime::{AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier},
-    ui::theme::MaterialTheme,
+use egui_android_core::{Component, LifecycleObserver, UiWrapper};
+use egui_android_runtime::{
+    AndroidWakeHandle, AppConfig, Application, Dispatcher, StateStore, UiNotifier,
 };
+use egui_android_ui::theme::MaterialTheme;
 
 use crate::component::CounterComponent;
 use crate::data_layer::data_layer_worker;
@@ -122,9 +122,9 @@ impl Application for CounterApp {
             self.prev_dark_mode = Some(self.theme_state.is_dark_mode);
             #[cfg(target_os = "android")]
             {
-                use egui_android_framework::platform_android::system_bars;
-                use egui_android_framework::platform_android::theme::set_clear_color_from;
-                use egui_android_framework::ui::theme::Theme;
+                use egui_android_platform_android::system_bars;
+                use egui_android_platform_android::theme::set_clear_color_from;
+                use egui_android_ui::theme::Theme;
 
                 let theme = Theme::current(egui_ctx);
                 set_clear_color_from(egui_ctx, theme.colors.background);

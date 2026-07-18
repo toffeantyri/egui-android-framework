@@ -11,17 +11,15 @@
 //! - secondary / on_secondary — для карточек и поверхностей.
 //! - primary / on_primary — для акцентных кнопок.
 
-use egui_android_framework::{
-    core::UiWrapper,
-    runtime::Dispatcher,
-    ui::{
-        animation::{AnimatedVisibility, AnimationExt},
-        containers::Column,
-        modifier::{Modifier, ModifierDsl},
-        remember,
-        theme::Theme,
-        widgets::{Button, Spacer, Text, Widget},
-    },
+use egui_android_core::UiWrapper;
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    animation::{AnimatedVisibility, AnimationExt},
+    containers::Column,
+    modifier::{Modifier, ModifierDsl},
+    remember,
+    theme::Theme,
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::msg::Msg;

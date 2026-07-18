@@ -4,16 +4,13 @@
 //! цвет фона между синим и зелёным. Back не делает pop — RootComponent
 //! возвращается на Home только при повторном Back (через back_fallback).
 
-use egui_android_framework::{
-    core::{Component as UiComponent, LifecycleObserver},
-    runtime::Dispatcher,
-    ui::{
-        containers::Column,
-        modifier::{Modifier, ModifierDsl},
-        theme::Theme,
-        widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
-    },
+use egui_android_core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    containers::Column,
+    modifier::{Modifier, ModifierDsl},
+    theme::Theme,
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::navigation_host::RootMsg;

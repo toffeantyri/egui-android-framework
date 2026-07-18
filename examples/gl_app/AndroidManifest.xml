@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
-
     <application
         android:label="Egui App"
         android:hasCode="true">
@@ -12,9 +10,7 @@
             android:exported="true"
             android:label="Egui App"
             android:theme="@style/AppTheme">
-            <meta-data
-                android:name="android.app.lib_name"
-                android:value="egui_gl_app" />
+            <meta-data android:name="android.app.lib_name" android:value="egui_gl_app" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

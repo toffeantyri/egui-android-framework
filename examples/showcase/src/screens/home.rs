@@ -1,15 +1,12 @@
 //! HomeScreen — главный экран со списком демо-экранов, построенный на Compose-like API.
 
-use egui_android_framework::{
-    core::{Component as UiComponent, LifecycleObserver},
-    runtime::Dispatcher,
-    ui::{
-        containers::Column,
-        modifier::{Modifier, ModifierDsl},
-        theme::Theme,
-        widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
-    },
+use egui_android_core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    containers::Column,
+    modifier::{Modifier, ModifierDsl},
+    theme::Theme,
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::navigation::{NavigableRoute, Route};

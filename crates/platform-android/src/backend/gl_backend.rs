@@ -28,6 +28,7 @@ use crate::backend::{
 };
 use crate::egl_backend::EglState;
 use crate::platform_state::PlatformState;
+use egui_android_platform::SystemTheme;
 
 /// GL-режим backend.
 pub struct GlBackend {

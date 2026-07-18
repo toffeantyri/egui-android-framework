@@ -2,14 +2,18 @@
 set -euo pipefail
 
 # ============================================================
-# build_android.sh — сборка .so + APK одной командой
+# build_android.sh — сборка .so + APK одной командой (egui-gl-app)
 #
 # Использование:
 #   ./scripts/build_android.sh                           # сборка + APK
 #   ./scripts/build_android.sh --install                 # сборка + APK + установка
 #   ./scripts/build_android.sh --install --log           # установка + логи в реальном времени
-#   ./scripts/build_android.sh --run                     # сборка + установка + логи (как x run)
+#   ./scripts/build_android.sh --run                     # сборка + установка + логи
 #   ./scripts/build_android.sh --release                 # release-сборка
+#
+# Для counter/showcase используй:
+#   cd examples/counter && ./run_android.sh
+#   cd examples/showcase && ./run_android.sh
 #
 # Зависимости:
 #   - cargo-ndk (cargo install cargo-ndk)
@@ -26,12 +30,12 @@ CARGO_PROFILE="debug"
 GRADLE_TASK="assembleDebug"
 # Крейт с android_main (cdylib)
 CRATE="egui-gl-app"
-# Куда класть .so
-JNI_DIR="$PROJECT_ROOT/android/app/src/main/jniLibs/arm64-v8a"
+# Куда класть .so — cargo ndk сам создаст arm64-v8a/ внутри
+JNI_DIR="$PROJECT_ROOT/android/app/src/main/jniLibs"
 LIB_NAME="lib${CRATE//-/_}.so"
 # NDK
 NDK_HOME="${ANDROID_NDK_HOME:-/usr/lib/android-sdk/ndk/27.3.13750724}"
-# Фильтр логов egui-gl-app
+# Фильтр логов
 LOG_TAG="egui-gl-app"
 
 # Разбор аргументов
@@ -50,12 +54,19 @@ for arg in "$@"; do
     esac
 done
 
+# Устанавливаем переменную для build.gradle
+export APP_LIB_NAME="${CRATE//-/_}"
+
 echo "=== 1/3: Сборка Rust .so ($CARGO_PROFILE) ==="
 cd "$PROJECT_ROOT"
+
+# Чистим jniLibs перед сборкой — в APK попадёт только нужная .so
+rm -rf "$JNI_DIR"
 mkdir -p "$JNI_DIR"
+
 ANDROID_NDK_HOME="$NDK_HOME" \
     cargo ndk -t arm64-v8a -o "$JNI_DIR" build $([ "$CARGO_PROFILE" = "release" ] && echo "--release") -p "$CRATE"
-echo "  $JNI_DIR/$LIB_NAME"
+echo "  $JNI_DIR/arm64-v8a/$LIB_NAME"
 
 echo ""
 echo "=== 2/3: Сборка APK ($CARGO_PROFILE) ==="

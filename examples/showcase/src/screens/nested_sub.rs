@@ -2,16 +2,13 @@
 //!
 //! Использует отдельный enum NestedRoute — не зависит от корневого Route.
 
-use egui_android_framework::{
-    core::{Component, LifecycleObserver},
-    runtime::Dispatcher,
-    ui::{
-        containers::Column,
-        modifier::{Modifier, ModifierDsl},
-        theme::Theme,
-        widgets::{Button, Spacer, Text, Widget},
-        UiWrapper,
-    },
+use egui_android_core::{Component, LifecycleObserver, UiWrapper};
+use egui_android_runtime::Dispatcher;
+use egui_android_ui::{
+    containers::Column,
+    modifier::{Modifier, ModifierDsl},
+    theme::Theme,
+    widgets::{Button, Spacer, Text, Widget},
 };
 
 use crate::navigation::NestedRoute;

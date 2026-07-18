@@ -2,16 +2,11 @@
 
 use std::sync::mpsc;
 
-use egui_android_framework::{
-    core::{LifecycleObserver, UiWrapper},
-    runtime::AndroidWakeHandle,
-    runtime::AppConfig,
-    runtime::Application,
-    runtime::DynDispatcher,
-    runtime::StateStore,
-    runtime::UiNotifier,
-    ui::theme::MaterialTheme,
+use egui_android_core::{LifecycleObserver, UiWrapper};
+use egui_android_runtime::{
+    AndroidWakeHandle, AppConfig, Application, DynDispatcher, StateStore, UiNotifier,
 };
+use egui_android_ui::theme::MaterialTheme;
 
 use crate::navigation_host::{NavigationHost, RootMsg};
 
@@ -106,8 +101,8 @@ impl Application for ShowcaseApplication {
             self.prev_dark_mode = Some(new_dark);
             #[cfg(target_os = "android")]
             {
-                use egui_android_framework::platform_android::system_bars;
-                use egui_android_framework::platform_android::theme::set_clear_color_from;
+                use egui_android_platform_android::system_bars;
+                use egui_android_platform_android::theme::set_clear_color_from;
 
                 let bg_color = if new_dark {
                     MaterialTheme::dark().colors.background

@@ -4,7 +4,7 @@
 //! После каждого изменения отправляет () в notify_tx —
 //! UiNotifier в главном цикле подхватит и вызовет wake.
 
-use egui_android_framework::runtime::StateStore;
+use egui_android_runtime::StateStore;
 
 use crate::msg::{CounterState, Msg};
 use std::sync::mpsc;

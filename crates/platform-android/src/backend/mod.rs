@@ -199,6 +199,12 @@ pub trait AndroidBackend {
 
     /// Установить цвета системных баров для светлой и тёмной темы.
     fn set_system_bars_colors(&mut self, light: u32, dark: u32);
+
+    /// Получить указатель на Java VM.
+    fn vm_ptr(&self) -> *mut std::ffi::c_void;
+
+    /// Получить указатель на Activity.
+    fn activity_ptr(&self) -> *mut std::ffi::c_void;
 }
 
 /// Тип Android backend'а.

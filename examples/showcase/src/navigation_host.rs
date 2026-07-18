@@ -17,11 +17,9 @@
 //! Системный Back (platform-android) и UI Back (кнопка "← Назад")
 //! идут через один путь.
 
-use egui_android_framework::{
-    core::{ComponentContext, ComponentNode, LifecycleObserver, UiWrapper},
-    navigation::ChildStack,
-    runtime::{DynDispatcher, StateStore},
-};
+use egui_android_core::{ComponentContext, ComponentNode, LifecycleObserver, UiWrapper};
+use egui_android_navigation::ChildStack;
+use egui_android_runtime::{DynDispatcher, StateStore};
 
 use crate::app::AppState;
 use crate::navigation::{NavigableRoute, Route};

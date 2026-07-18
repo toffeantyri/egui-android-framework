@@ -5,8 +5,14 @@
 //! - `Application` как корень DI
 //! - Data layer с `StateStore` (без ручного poll())
 //! - `UiNotifier` для реактивного обновления UI
-//! - BackPressed — системная кнопка Назад → завершение приложения
+//! - BackPressed — системная кнопка Назад, завершение приложения
 //! - Material Design 3 тема (светлая/тёмная) с корректными цветами текста на фоне
+//!
+//! Сборка:
+//!   ./scripts/build_android.sh --example counter
+//!
+//! Запуск:
+//!   ./scripts/build_android.sh --run --example counter
 
 pub mod app;
 pub mod component;
@@ -15,7 +21,7 @@ pub mod msg;
 pub mod view;
 
 #[cfg(target_os = "android")]
-use egui_android_framework::platform_android::run;
+use egui_android_platform_android::run;
 
 #[cfg(target_os = "android")]
 #[no_mangle]

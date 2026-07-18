@@ -3,6 +3,18 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Какой lib_name нужен. По умолчанию — egui_gl_app (из scripts/build_android.sh).
+// Другие скрипты (examples/*/run_android.sh) ставят APP_LIB_NAME в env.
+def libName = System.getenv("APP_LIB_NAME") ?: "egui_gl_app"
+def dirName = libName == "egui_gl_app" ? "gl_app"
+        : libName == "egui_android_counter" ? "counter"
+        : libName == "egui_showcase" ? "showcase"
+        : "gl_app"
+// android/app/ → ../../ = корень проекта (egui-android-framework/)
+def manifestPath = file("../../examples/${dirName}/AndroidManifest.xml")
+
+println "=== AndroidManifest: ${manifestPath} (lib_name=$libName) ==="
+
 android {
     namespace "com.example.egui_android"
     compileSdk 36
@@ -34,6 +46,7 @@ android {
 
     sourceSets {
         main {
+            manifest.srcFile manifestPath
             jniLibs.srcDirs = ["src/main/jniLibs"]
         }
     }
