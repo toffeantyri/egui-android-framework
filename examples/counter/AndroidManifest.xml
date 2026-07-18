@@ -2,13 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:label="Egui App"
+        android:label="Counter"
         android:hasCode="true">
 
         <activity
             android:name="com.example.egui_android.EguiActivity"
             android:exported="true"
-            android:label="Egui App"
+            android:label="Counter"
             android:theme="@style/AppTheme">
             <meta-data android:name="android.app.lib_name" android:value="egui_android_counter" />
             <intent-filter>

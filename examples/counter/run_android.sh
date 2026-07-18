@@ -48,9 +48,11 @@ for arg in "$@"; do
     esac
 done
 
-# Gradle (android/app/build.gradle) читает APP_LIB_NAME из окружения,
-# чтобы подставить правильный манифест (examples/counter/AndroidManifest.xml)
+# Gradle (android/app/build.gradle) читает APP_LIB_NAME и APP_PACKAGE из окружения
+# APP_LIB_NAME — для выбора манифеста и lib_name
+# APP_PACKAGE — applicationId (чтобы разные примеры не перезаписывали друг друга)
 export APP_LIB_NAME="${CRATE//-/_}"       # egui_android_counter
+export APP_PACKAGE="com.example.egui_counter"
 
 echo "=== 1/3: Сборка .so ($CARGO_PROFILE) ==="
 cd "$PROJECT_ROOT"
@@ -80,7 +82,7 @@ if [ "$INSTALL" = true ]; then
     echo "=== 3/3: Установка и запуск ==="
     adb install -r "$APK_PATH"
     echo "  Установлено."
-    adb shell am start -n com.example.egui_android/.EguiActivity
+    adb shell am start -n com.example.egui_counter/com.example.egui_android.EguiActivity
 fi
 
 if [ "$SHOW_LOGS" = true ]; then

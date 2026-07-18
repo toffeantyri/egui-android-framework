@@ -22,10 +22,41 @@ mod gl_backend;
 #[cfg(target_os = "android")]
 mod native_backend;
 
-#[cfg(target_os = "android")]
-use crate::egl_backend::EglState;
 use crate::platform_state::PlatformState;
 use egui_android_platform::SystemTheme;
+
+/// Ошибка backend'а.
+#[derive(Debug)]
+pub enum BackendError {
+    /// EGL инициализация не удалась.
+    EglInit(String),
+    /// Нет NativeWindow.
+    NoNativeWindow,
+    /// Пересоздание EGL surface не удалось.
+    RecreateSurface(String),
+    /// Прочие ошибки.
+    Other(String),
+}
+
+impl std::fmt::Display for BackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BackendError::EglInit(msg) => write!(f, "EGL init: {}", msg),
+            BackendError::NoNativeWindow => write!(f, "нет NativeWindow"),
+            BackendError::RecreateSurface(msg) => write!(f, "recreate surface: {}", msg),
+            BackendError::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+/// Стиль системных баров.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemBarsStyle {
+    /// Прозрачные бары — контент рисуется под ними.
+    Transparent,
+    /// Стандартные непрозрачные бары.
+    Opaque,
+}
 
 /// Поверхность (surface) для рендеринга.
 #[derive(Debug, Clone)]
@@ -132,11 +163,17 @@ pub enum KeyAction {
 ///
 /// Каждый backend (Native, GL, Game) реализует этот трейт.
 pub trait AndroidBackend {
-    /// Инициализировать backend.
+    /// Инициализировать backend (без EGL).
     fn init(&mut self) -> Result<(), String>;
 
     /// Получить накопившиеся события.
     fn poll_events(&mut self) -> Vec<BackendEvent>;
+
+    /// Инициализировать графику (EGL display + context + surface).
+    fn init_graphics(&mut self) -> Result<(), BackendError>;
+
+    /// Уничтожить графику (EGL surface + context + display).
+    fn destroy_graphics(&mut self);
 
     /// Получить обработчик поверхности.
     fn surface_handle(&self) -> SurfaceHandle;
@@ -156,12 +193,6 @@ pub trait AndroidBackend {
     /// Запрошено ли завершение приложения.
     fn should_close(&self) -> bool;
 
-    /// Получить EGL состояние (для рендеринга).
-    fn egl_state(&self) -> Option<&EglState>;
-
-    /// Получить мутабельное EGL состояние.
-    fn egl_state_mut(&mut self) -> Option<&mut EglState>;
-
     /// Получить размер окна (ширина, высота).
     fn window_size(&self) -> (u32, u32);
 
@@ -169,7 +200,7 @@ pub trait AndroidBackend {
     fn content_rect(&self) -> (i32, i32, i32, i32);
 
     /// Пересоздать EGL surface при новом NativeWindow (после Pause/Resume).
-    fn recreate_surface(&mut self) -> Result<(), String>;
+    fn recreate_surface(&mut self) -> Result<(), BackendError>;
 
     // ─── PlatformState (insets, theme, clear_color, JNI) ──────────
 
@@ -194,17 +225,12 @@ pub trait AndroidBackend {
     /// Установить clear color из Color32.
     fn set_clear_color(&self, color: egui::Color32);
 
-    /// Настроить цвета системных баров в соответствии с темой.
-    fn apply_system_bars_style(&mut self);
+    /// Настроить стиль системных баров.
+    fn set_system_bars_style(&mut self, style: SystemBarsStyle);
 
-    /// Установить цвета системных баров для светлой и тёмной темы.
-    fn set_system_bars_colors(&mut self, light: u32, dark: u32);
-
-    /// Получить указатель на Java VM.
-    fn vm_ptr(&self) -> *mut std::ffi::c_void;
-
-    /// Получить указатель на Activity.
-    fn activity_ptr(&self) -> *mut std::ffi::c_void;
+    /// Обменять буферы (EGL swap buffers).
+    /// Вызывается после каждого кадра рендеринга.
+    fn swap_buffers(&mut self) -> Result<(), String>;
 }
 
 /// Тип Android backend'а.
@@ -233,6 +259,14 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
         (**self).poll_events()
     }
 
+    fn init_graphics(&mut self) -> Result<(), BackendError> {
+        (**self).init_graphics()
+    }
+
+    fn destroy_graphics(&mut self) {
+        (**self).destroy_graphics()
+    }
+
     fn surface_handle(&self) -> SurfaceHandle {
         (**self).surface_handle()
     }
@@ -257,31 +291,15 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
         (**self).should_close()
     }
 
-    fn egl_state(&self) -> Option<&EglState> {
-        (**self).egl_state()
-    }
-
-    fn egl_state_mut(&mut self) -> Option<&mut EglState> {
-        (**self).egl_state_mut()
-    }
-
     fn window_size(&self) -> (u32, u32) {
         (**self).window_size()
-    }
-
-    fn vm_ptr(&self) -> *mut std::ffi::c_void {
-        (**self).vm_ptr()
-    }
-
-    fn activity_ptr(&self) -> *mut std::ffi::c_void {
-        (**self).activity_ptr()
     }
 
     fn content_rect(&self) -> (i32, i32, i32, i32) {
         (**self).content_rect()
     }
 
-    fn recreate_surface(&mut self) -> Result<(), String> {
+    fn recreate_surface(&mut self) -> Result<(), BackendError> {
         (**self).recreate_surface()
     }
 
@@ -313,11 +331,11 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
         (**self).set_clear_color(color)
     }
 
-    fn apply_system_bars_style(&mut self) {
-        (**self).apply_system_bars_style()
+    fn set_system_bars_style(&mut self, style: SystemBarsStyle) {
+        (**self).set_system_bars_style(style)
     }
 
-    fn set_system_bars_colors(&mut self, light: u32, dark: u32) {
-        (**self).set_system_bars_colors(light, dark)
+    fn swap_buffers(&mut self) -> Result<(), String> {
+        (**self).swap_buffers()
     }
 }

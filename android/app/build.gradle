@@ -13,7 +13,9 @@ def dirName = libName == "egui_gl_app" ? "gl_app"
 // android/app/ → ../../ = корень проекта (egui-android-framework/)
 def manifestPath = file("../../examples/${dirName}/AndroidManifest.xml")
 
-println "=== AndroidManifest: ${manifestPath} (lib_name=$libName) ==="
+def appPackage = System.getenv("APP_PACKAGE") ?: "com.example.egui_gl_app"
+
+println "=== AndroidManifest: ${manifestPath} (lib_name=$libName, package=$appPackage) ==="
 
 android {
     namespace "com.example.egui_android"
@@ -21,7 +23,7 @@ android {
     buildToolsVersion "29.0.3"
 
     defaultConfig {
-        applicationId "com.example.egui_android"
+        applicationId appPackage
         minSdk 26
         targetSdk 36
         ndk {

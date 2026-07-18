@@ -23,8 +23,8 @@ use android_activity::{
 };
 
 use crate::backend::{
-    AndroidBackend, BackendEvent, InputEvent as BackendInputEvent, Insets,
-    KeyAction as BackendKeyAction, LifecycleEvent, SurfaceHandle, TouchPhase,
+    AndroidBackend, BackendError, BackendEvent, InputEvent as BackendInputEvent, Insets,
+    KeyAction as BackendKeyAction, LifecycleEvent, SurfaceHandle, SystemBarsStyle, TouchPhase,
 };
 use crate::egl_backend::EglState;
 use crate::platform_state::PlatformState;
@@ -198,20 +198,32 @@ impl GlBackend {
 
 impl AndroidBackend for GlBackend {
     fn init(&mut self) -> Result<(), String> {
-        log::info!("GlBackend: инициализация (GameActivity)");
+        log::info!("GlBackend: init — без EGL");
+        // Инициализация без EGL — EGL создаётся в init_graphics
+        let pp = self
+            .app
+            .native_window()
+            .map(|nw| crate::insets::get_pp(&self.app.config(), nw.width(), nw.height()))
+            .unwrap_or(1.0);
+        self.dpi = pp;
+        Ok(())
+    }
 
+    fn init_graphics(&mut self) -> Result<(), BackendError> {
+        log::info!("GlBackend: init_graphics (EGL)");
         if let Some(nw) = self.app.native_window() {
-            // В game-activity native_window() возвращает ANativeWindow
-            // из SurfaceView, который создаётся GameActivity glue.
-            let egl_state = EglState::create(&nw)?;
-            let pp = crate::insets::get_pp(&self.app.config(), nw.width(), nw.height());
-            self.dpi = pp;
+            let egl_state = EglState::create(&nw).map_err(|e| BackendError::EglInit(e))?;
             self.egl = Some(egl_state);
-
-            // IME editor info будет настроен при первом показе клавиатуры
             Ok(())
         } else {
-            Err("GlBackend: нет NativeWindow".into())
+            Err(BackendError::NoNativeWindow)
+        }
+    }
+
+    fn destroy_graphics(&mut self) {
+        log::info!("GlBackend: destroy_graphics");
+        if let Some(mut egl) = self.egl.take() {
+            egl.destroy();
         }
     }
 
@@ -219,10 +231,6 @@ impl AndroidBackend for GlBackend {
         self.events.clear();
         self.drain_lifecycle_events();
         self.drain_input_events();
-        // Text input через text_input_state() пока отключён —
-        // в android-activity 0.6.1 есть баг с race condition
-        // при первом вызове (slice::from_raw_parts).
-        // TODO: включить после обновления android-activity.
         std::mem::take(&mut self.events)
     }
 
@@ -246,27 +254,17 @@ impl AndroidBackend for GlBackend {
     fn show_keyboard(&mut self) {
         log::info!("GlBackend: показать клавиатуру (IME)");
         self.ime_visible = true;
-        // GameActivity предоставляет show_soft_input без JNI
         self.app.show_soft_input(false);
     }
 
     fn hide_keyboard(&mut self) {
         log::info!("GlBackend: скрыть клавиатуру (IME)");
         self.ime_visible = false;
-        // GameActivity предоставляет hide_soft_input без JNI
         self.app.hide_soft_input(false);
     }
 
     fn should_close(&self) -> bool {
         self.should_close.load(Ordering::Relaxed)
-    }
-
-    fn egl_state(&self) -> Option<&EglState> {
-        self.egl.as_ref()
-    }
-
-    fn egl_state_mut(&mut self) -> Option<&mut EglState> {
-        self.egl.as_mut()
     }
 
     fn window_size(&self) -> (u32, u32) {
@@ -276,26 +274,21 @@ impl AndroidBackend for GlBackend {
             .unwrap_or((0, 0))
     }
 
-    fn vm_ptr(&self) -> *mut std::ffi::c_void {
-        self.app.vm_as_ptr()
-    }
-
-    fn activity_ptr(&self) -> *mut std::ffi::c_void {
-        self.app.activity_as_ptr()
-    }
-
     fn content_rect(&self) -> (i32, i32, i32, i32) {
         let rect = self.app.content_rect();
         (rect.left, rect.top, rect.right, rect.bottom)
     }
 
-    fn recreate_surface(&mut self) -> Result<(), String> {
+    fn recreate_surface(&mut self) -> Result<(), BackendError> {
         if let (Some(ref mut egl), Some(nw)) = (self.egl.as_mut(), self.app.native_window()) {
-            egl.recreate_surface(&nw)?;
+            egl.recreate_surface(&nw)
+                .map_err(|e| BackendError::RecreateSurface(e))?;
             log::info!("GlBackend: EGL surface пересоздан");
             Ok(())
         } else {
-            Err("GlBackend: нет EGL или NativeWindow для пересоздания surface".into())
+            Err(BackendError::Other(
+                "нет EGL или NativeWindow для пересоздания surface".into(),
+            ))
         }
     }
 
@@ -348,20 +341,39 @@ impl AndroidBackend for GlBackend {
         self.platform_state.set_clear_color_from(color);
     }
 
-    fn apply_system_bars_style(&mut self) {
+    fn set_system_bars_style(&mut self, style: SystemBarsStyle) {
         let vm = self.app.vm_as_ptr();
         let activity = self.app.activity_as_ptr();
-        if !vm.is_null() && !activity.is_null() {
-            crate::system_bars::apply_system_bars_color_jni(
-                vm,
-                activity,
-                self.platform_state.current_theme(),
-            );
+        if vm.is_null() || activity.is_null() {
+            return;
+        }
+
+        let vm_ptr = vm as usize;
+        let activity_ptr = activity as usize;
+        let theme = self.platform_state.current_theme();
+
+        match style {
+            SystemBarsStyle::Transparent => {
+                self.app.run_on_java_main_thread(Box::new(move || {
+                    let vm = vm_ptr as *mut std::ffi::c_void;
+                    let activity = activity_ptr as *mut std::ffi::c_void;
+                    if !vm.is_null() && !activity.is_null() {
+                        crate::system_bars::set_transparent_system_bars(vm, activity);
+                        crate::system_bars::apply_system_bars_color_jni(vm, activity, theme);
+                    }
+                }));
+            }
+            SystemBarsStyle::Opaque => {
+                // TODO: восстановить непрозрачные бары
+            }
         }
     }
 
-    fn set_system_bars_colors(&mut self, _light: u32, _dark: u32) {
-        // System bars colors will be stored in PlatformState
-        // when the feature is needed
+    fn swap_buffers(&mut self) -> Result<(), String> {
+        if let Some(ref egl) = self.egl {
+            egl.swap_buffers()
+        } else {
+            Err("EGL не инициализирован".into())
+        }
     }
 }

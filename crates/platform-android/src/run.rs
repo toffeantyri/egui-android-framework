@@ -59,7 +59,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     app_instance.on_start();
     app_instance.on_resume();
 
-    // --- Устанавливаем прозрачные системные бары (на Java main thread) ---
+    // --- Создаём backend и настраиваем системные бары ---
     // Важно: setStatusBarColor/setNavigationBarColor должны вызываться на UI thread.
     // Захватываем указатели до перемещения app в backend.
     let vm_ptr = app.vm_as_ptr() as usize;
@@ -72,7 +72,6 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
         }
     }));
 
-    // --- Создаём backend ---
     let mut backend: Box<dyn AndroidBackend> = match kind {
         AndroidBackendKind::Gl => {
             log::info!("run: создаём GlBackend");
@@ -119,18 +118,18 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     LifecycleEvent::InitWindow => {
                         log::info!("Lifecycle: InitWindow");
 
-                        // Если EGL уже инициализирован — пересоздаём surface (Pause/Resume)
-                        if backend.egl_state().is_some() {
+                        // Проверяем, был ли уже создан EGL
+                        let has_egl = !backend.surface_handle().as_egl_surface().is_null();
+
+                        if has_egl {
+                            // InitWindow после Pause/Resume — пересоздаём surface
                             if let Err(e) = backend.recreate_surface() {
                                 log::error!("Ошибка пересоздания EGL surface: {}", e);
-                                // Уничтожаем painter — будет создан заново
                                 if let Some(ref mut p) = egui_painter {
                                     p.destroy();
                                 }
                                 egui_painter = None;
-                                if let Some(ref mut s) = backend.egl_state_mut() {
-                                    s.destroy();
-                                }
+                                backend.destroy_graphics();
                             } else {
                                 // Повторно инициализируем painter с новым surface
                                 if let Some(ref mut p) = egui_painter {
@@ -142,11 +141,14 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                                 }
                             }
                         } else {
-                            // Первый InitWindow — инициализируем backend
-                            if let Err(e) = backend.init() {
-                                log::error!("Ошибка инициализации backend'а: {}", e);
+                            // Первый InitWindow — инициализируем EGL
+                            backend.init().ok();
+                            if let Err(e) = backend.init_graphics() {
+                                log::error!("Ошибка инициализации EGL: {}", e);
                             }
                         }
+
+                        // Системные бары уже настроены при старте через run_on_java_main_thread
 
                         // Точка интеграции: IME, Insets, DPI
                         //
@@ -284,16 +286,16 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
             if let Some(ref mut painter) = egui_painter {
                 painter.destroy();
             }
-            if let Some(ref mut state) = backend.egl_state_mut() {
-                state.destroy();
-            }
+            backend.destroy_graphics();
             log::info!("Выход из главного цикла");
             break;
         }
 
         // --- Инициализация Painter (если ещё не создан) ---
         if egui_painter.is_none() {
-            if let Some(ref _egl_state) = backend.egl_state() {
+            // Проверяем, инициализирована ли графика через surface_handle
+            let has_graphics = !backend.surface_handle().as_egl_surface().is_null();
+            if has_graphics {
                 let gl = unsafe {
                     egui_glow::painter::Context::from_loader_function(|name| {
                         let cname =
@@ -421,15 +423,13 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                 );
             }
 
-            // Swap buffers
-            if let Some(ref state) = backend.egl_state() {
-                if let Err(e) = state.swap_buffers() {
-                    log::warn!("swap_buffers: {}", e);
-                    if let Some(ref mut p) = egui_painter {
-                        p.destroy();
-                    }
-                    egui_painter = None;
+            // Swap buffers через backend
+            if let Err(e) = backend.swap_buffers() {
+                log::warn!("swap_buffers: {}", e);
+                if let Some(ref mut p) = egui_painter {
+                    p.destroy();
                 }
+                egui_painter = None;
             }
         }
     }

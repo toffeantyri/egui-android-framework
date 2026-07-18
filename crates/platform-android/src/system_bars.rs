@@ -61,7 +61,10 @@ mod inner {
             let mut env = match jvm.attach_current_thread() {
                 Ok(env) => env,
                 Err(e) => {
-                    log::error!("set_transparent_system_bars: attach_current_thread: {:?}", e);
+                    log::error!(
+                        "set_transparent_system_bars: attach_current_thread: {:?}",
+                        e
+                    );
                     return;
                 }
             };
@@ -243,7 +246,12 @@ mod inner {
 
             // resources = activity.getResources()
             let resources = match env
-                .call_method(&activity, "getResources", "()Landroid/content/res/Resources;", &[])
+                .call_method(
+                    &activity,
+                    "getResources",
+                    "()Landroid/content/res/Resources;",
+                    &[],
+                )
                 .and_then(|v| v.l())
             {
                 Ok(r) => r,
@@ -288,7 +296,11 @@ mod inner {
                 SystemTheme::Light
             };
 
-            log::info!("detect_system_theme_jni: uiMode={:#x} → {:?}", ui_mode, theme);
+            log::info!(
+                "detect_system_theme_jni: uiMode={:#x} → {:?}",
+                ui_mode,
+                theme
+            );
 
             Some(theme)
         }
@@ -316,7 +328,10 @@ mod inner {
             let mut env = match jvm.attach_current_thread() {
                 Ok(env) => env,
                 Err(e) => {
-                    log::warn!("apply_system_bars_color_jni: attach_current_thread: {:?}", e);
+                    log::warn!(
+                        "apply_system_bars_color_jni: attach_current_thread: {:?}",
+                        e
+                    );
                     return;
                 }
             };
@@ -355,48 +370,6 @@ mod inner {
                 "setNavigationBarColor",
                 "(I)V",
                 &[jni::objects::JValue::Int(color)],
-            );
-
-            // DecorView.setSystemUiVisibility для светлых/тёмных иконок
-            let decor_view = match env
-                .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-                .and_then(|v| v.l())
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    log::warn!("apply_system_bars_color_jni: getDecorView: {:?}", e);
-                    return;
-                }
-            };
-
-            // SYSTEM_UI_FLAG_LIGHT_STATUS_BAR = 0x00002000
-            // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR = 0x00000010
-            let light_status_bar = 0x0000_2000i32;
-            let light_nav_bar = 0x0000_0010i32;
-
-            // Для светлой темы — тёмные иконки, для тёмной — светлые
-            let (appearance, mask) = match theme {
-                SystemTheme::Light => (light_status_bar | light_nav_bar, light_status_bar | light_nav_bar),
-                SystemTheme::Dark => (0, light_status_bar | light_nav_bar),
-            };
-
-            // setSystemUiVisibility для совместимости
-            let current_visibility = env
-                .call_method(&decor_view, "getSystemUiVisibility", "()I", &[])
-                .and_then(|v| v.i())
-                .unwrap_or(0);
-
-            // Для тёмной темы убираем флаги LIGHT
-            let new_flags = match theme {
-                SystemTheme::Light => current_visibility | appearance,
-                SystemTheme::Dark => current_visibility & !(light_status_bar | light_nav_bar),
-            };
-
-            let _ = env.call_method(
-                &decor_view,
-                "setSystemUiVisibility",
-                "(I)V",
-                &[jni::objects::JValue::Int(new_flags)],
             );
 
             log::info!(
