@@ -23,7 +23,8 @@
 //! `on_resume()` / `on_pause()` / `on_destroy()` пробрасываются
 //! в RootComponent, который делегирует активному компоненту.
 
-use crate::ui_notifier::{AndroidWakeHandle, UiNotifier};
+use crate::ui_notifier::UiNotifier;
+use egui_android_platform::Waker;
 
 use egui;
 
@@ -67,11 +68,7 @@ pub trait Application: Sized + 'static {
     /// изменения состояния.
     ///
     /// Реализация по умолчанию возвращает `None`.
-    fn create_notifier(
-        &mut self,
-        _ctx: &egui::Context,
-        _wake: AndroidWakeHandle,
-    ) -> Option<UiNotifier> {
+    fn create_notifier(&mut self, _ctx: &egui::Context, _wake: Waker) -> Option<UiNotifier> {
         None
     }
 

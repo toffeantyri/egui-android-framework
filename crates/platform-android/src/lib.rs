@@ -81,6 +81,7 @@ pub mod platform_state;
 pub mod run;
 pub mod system_bars;
 pub mod theme;
+pub mod waker;
 
 #[cfg(target_os = "android")]
 pub use run::run;

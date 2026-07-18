@@ -23,6 +23,7 @@ use crate::backend::{
 };
 use crate::egl_backend::EglState;
 use crate::platform_state::PlatformState;
+use crate::waker::Waker;
 use egui_android_platform::SystemTheme;
 
 /// NativeActivity backend — fallback.
@@ -342,5 +343,14 @@ impl AndroidBackend for NativeBackend {
         } else {
             Err("EGL не инициализирован".into())
         }
+    }
+
+    fn create_waker(&self) -> Waker {
+        let app = self.app();
+        let app_ptr = app as *const android_activity::AndroidApp as usize;
+        Waker::new(move || {
+            let app = unsafe { &*(app_ptr as *const android_activity::AndroidApp) };
+            app.run_on_java_main_thread(Box::new(|| {}));
+        })
     }
 }

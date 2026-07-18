@@ -11,45 +11,9 @@
 //! - Не знает про Domain, Components, Reducer, Data Layer
 //! - Вызывается Runtime, не бизнес-логикой
 
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
-/// Handle для пробуждения Android event loop.
-///
-/// Создаётся из замыкания, которое вызывает `AndroidApp::wake()`.
-/// В тестах можно использовать заглушку.
-///
-/// # Пример
-///
-/// ```ignore
-/// let wake = AndroidWakeHandle::new(move || { let _ = app.wake(); });
-/// ```
-pub struct AndroidWakeHandle {
-    wake_fn: Arc<dyn Fn() + Send + Sync>,
-}
-
-impl Clone for AndroidWakeHandle {
-    fn clone(&self) -> Self {
-        Self {
-            wake_fn: Arc::clone(&self.wake_fn),
-        }
-    }
-}
-
-impl AndroidWakeHandle {
-    /// Создать новый handle.
-    pub fn new(wake_fn: impl Fn() + Send + Sync + 'static) -> Self {
-        Self {
-            wake_fn: Arc::new(wake_fn),
-        }
-    }
-
-    /// Пробудить Android event loop.
-    ///
-    /// Вызывает `MainEvent::Wake` в главном цикле `run()`.
-    pub fn wake(&self) {
-        (self.wake_fn)();
-    }
-}
+use egui_android_platform::Waker;
 
 /// Инфраструктурный уведомитель.
 ///
@@ -58,7 +22,7 @@ impl AndroidWakeHandle {
 /// Runtime вызывает `check()` — если есть сигнал, вызывает repaint + wake.
 pub struct UiNotifier {
     ctx: egui::Context,
-    wake: Option<AndroidWakeHandle>,
+    wake: Option<Waker>,
     rx: mpsc::Receiver<()>,
 }
 
@@ -67,11 +31,7 @@ impl UiNotifier {
     ///
     /// `rx` — приёмник сигналов от data layer.
     /// Data layer отправляет `()` после каждого `store.update()`.
-    pub fn new(
-        ctx: egui::Context,
-        wake: Option<AndroidWakeHandle>,
-        rx: mpsc::Receiver<()>,
-    ) -> Self {
+    pub fn new(ctx: egui::Context, wake: Option<Waker>, rx: mpsc::Receiver<()>) -> Self {
         Self { ctx, wake, rx }
     }
 

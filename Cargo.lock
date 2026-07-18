@@ -278,6 +278,7 @@ name = "egui-android-runtime"
 version = "0.3.3-alpha.3"
 dependencies = [
  "egui",
+ "egui-android-platform",
  "log",
  "thiserror 2.0.18",
  "tokio",

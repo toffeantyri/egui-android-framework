@@ -11,8 +11,11 @@ pub mod frame;
 pub mod platform;
 pub mod theme;
 
+pub mod waker;
+
 pub use config::*;
 pub use event::*;
 pub use frame::*;
 pub use platform::*;
 pub use theme::*;
+pub use waker::Waker;

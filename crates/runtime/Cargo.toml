@@ -12,3 +12,4 @@ egui = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+egui-android-platform = { version = "0.3.3-alpha.3", path = "../platform" }

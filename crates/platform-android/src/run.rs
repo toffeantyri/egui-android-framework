@@ -30,10 +30,7 @@ use crate::backend::{
 
 use crate::input::InputState;
 
-use egui_android_runtime::{
-    ui_notifier::{AndroidWakeHandle, UiNotifier},
-    Application,
-};
+use egui_android_runtime::{ui_notifier::UiNotifier, Application};
 
 use glow::HasContext;
 
@@ -97,10 +94,8 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     let mut last_frame = Instant::now();
     let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
 
-    // Waker — создаём один раз из AndroidApp
-    // После создания backend'а app больше не доступен напрямую.
-    // Используем заглушку для waker'а (будет улучшено).
-    let waker = AndroidWakeHandle::new(|| {});
+    // Waker — получаем из backend (вызывает app.wake() для реактивности)
+    let waker = backend.create_waker();
 
     // UiNotifier
     let mut notifier: Option<UiNotifier> = None;

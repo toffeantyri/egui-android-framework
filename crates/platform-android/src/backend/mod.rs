@@ -23,6 +23,7 @@ mod gl_backend;
 mod native_backend;
 
 use crate::platform_state::PlatformState;
+use crate::waker::Waker;
 use egui_android_platform::SystemTheme;
 
 /// Ошибка backend'а.
@@ -231,6 +232,12 @@ pub trait AndroidBackend {
     /// Обменять буферы (EGL swap buffers).
     /// Вызывается после каждого кадра рендеринга.
     fn swap_buffers(&mut self) -> Result<(), String>;
+
+    /// Создать waker для пробуждения event loop.
+    ///
+    /// Платформенный механизм — backend владеет `AndroidApp` и может
+    /// отправлять сигнал Wake в главный цикл.
+    fn create_waker(&self) -> Waker;
 }
 
 /// Тип Android backend'а.
@@ -337,5 +344,9 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn swap_buffers(&mut self) -> Result<(), String> {
         (**self).swap_buffers()
+    }
+
+    fn create_waker(&self) -> Waker {
+        (**self).create_waker()
     }
 }
