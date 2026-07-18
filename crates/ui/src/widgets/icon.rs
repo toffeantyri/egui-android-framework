@@ -3,7 +3,8 @@
 //! Использует `egui::Image<'static>` для рендеринга.
 //! Не диспатчит сообщения.
 
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Виджет-иконка.
 pub struct Icon {

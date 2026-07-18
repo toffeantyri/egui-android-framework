@@ -134,8 +134,7 @@ mod tests {
         node.handle_dyn(Box::new("world".to_string()));
 
         // Достаём обратно, чтобы проверить состояние
-        let comp: &mut TestComponent =
-            unsafe { &mut *(node.as_mut() as *mut dyn ComponentNode as *mut TestComponent) };
+        let comp = node.as_any_mut().downcast_mut::<TestComponent>().unwrap();
         assert_eq!(comp.handled, vec!["hello".to_string(), "world".to_string()]);
     }
 

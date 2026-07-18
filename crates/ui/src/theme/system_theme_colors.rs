@@ -15,8 +15,17 @@
 //! ```
 
 use egui::Color32;
-use egui_android_core::SystemTheme;
 use std::sync::OnceLock;
+
+/// Системная тема: светлая или тёмная.
+///
+/// Локальное определение — этот тип был перенесён в `egui-android-platform`,
+/// от которого данный крейт не зависит.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemTheme {
+    Light,
+    Dark,
+}
 
 /// Цвета фона UI для светлой и тёмной темы.
 #[derive(Clone, Copy, Debug)]

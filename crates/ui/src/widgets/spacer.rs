@@ -3,7 +3,8 @@
 //! Добавляет отступ по ширине, высоте или в обеих осях.
 //! Не диспатчит сообщения.
 
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Виджет-отступ.
 pub struct Spacer {

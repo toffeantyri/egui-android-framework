@@ -5,7 +5,8 @@
 
 use std::cell::RefCell;
 
-use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget as WidgetTrait, UiWrapper};
+use egui_android_runtime::Dispatcher;
 use egui_android_ui::containers::{Align, Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
 use egui_android_ui::widgets::{Button, Spacer, Text};

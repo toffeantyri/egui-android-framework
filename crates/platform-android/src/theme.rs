@@ -17,7 +17,7 @@
 //! gl.clear_color(r, g, b, 1.0);
 //! ```
 
-use egui_android_core::SystemTheme;
+use egui_android_platform::SystemTheme;
 use std::sync::atomic::{AtomicI8, AtomicU32, Ordering};
 
 // -1 = не инициализировано, 0 = Light, 1 = Dark

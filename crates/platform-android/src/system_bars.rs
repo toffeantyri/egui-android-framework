@@ -281,7 +281,7 @@ pub fn set_blur_for_system_bars(
 
 // ─── Определение системной темы ────────────────────────────────────────────────
 
-use egui_android_core::SystemTheme;
+use egui_android_platform::SystemTheme;
 
 /// Цвета для системных баров (status bar, navigation bar).
 ///

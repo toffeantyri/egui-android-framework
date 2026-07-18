@@ -11,7 +11,8 @@
 //! });
 //! ```
 
-use egui_android_core::{Constraints, Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Контейнер с горизонтальным расположением дочерних виджетов.
 ///

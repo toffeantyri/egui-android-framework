@@ -52,7 +52,8 @@
 //!     .render(ui, dispatch);
 //! ```
 
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 pub use crate::animation::SlideDirection;
 pub use value::Modifier;
@@ -62,7 +63,7 @@ mod value {
     use crate::UiWrapper;
     use egui::{Color32, CornerRadius, Response, Sense, Ui};
     use egui_android_core::Constraints;
-    use egui_android_core::Dispatcher;
+    use egui_android_runtime::Dispatcher;
 
     /// Тип callback для clickable_with.
     type ClickableCallback<M> = Box<dyn Fn(&Response, &Ui, &Dispatcher<M>)>;

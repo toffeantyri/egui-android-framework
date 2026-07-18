@@ -263,7 +263,6 @@ dependencies = [
  "android-activity",
  "android_logger",
  "egui",
- "egui-android-core",
  "egui-android-platform",
  "egui-android-runtime",
  "egui_glow",
@@ -290,6 +289,7 @@ version = "0.3.3-alpha.3"
 dependencies = [
  "egui",
  "egui-android-core",
+ "egui-android-runtime",
  "log",
 ]
 

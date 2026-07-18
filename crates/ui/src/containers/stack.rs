@@ -22,7 +22,8 @@
 //! - **clickable и fill_max_size внутри Stack."
 
 use crate::widgets::Widget;
-use egui_android_core::{Constraints, Dispatcher, UiWrapper};
+use egui_android_core::{Constraints, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Варианты выравнивания ребёнка внутри Stack.
 #[derive(Debug, Clone, Copy, PartialEq)]

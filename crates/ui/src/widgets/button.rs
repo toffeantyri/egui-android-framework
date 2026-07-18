@@ -48,7 +48,8 @@
 //!     .render(ui, dispatch);
 //! ```
 
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Цвета кнопки для различных состояний.
 pub struct ButtonColors {

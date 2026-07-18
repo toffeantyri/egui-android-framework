@@ -34,7 +34,8 @@
 //! Текст переносится по строкам, если не помещается в доступную ширину.
 
 use egui::Align;
-use egui_android_core::{widget::Widget, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget, UiWrapper};
+use egui_android_runtime::Dispatcher;
 
 /// Виджет текста.
 pub struct Text {

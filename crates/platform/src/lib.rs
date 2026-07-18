@@ -9,8 +9,10 @@ pub mod config;
 pub mod event;
 pub mod frame;
 pub mod platform;
+pub mod theme;
 
 pub use config::*;
 pub use event::*;
 pub use frame::*;
 pub use platform::*;
+pub use theme::*;

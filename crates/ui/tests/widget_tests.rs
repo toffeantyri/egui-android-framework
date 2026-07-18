@@ -2,7 +2,8 @@
 
 use std::cell::RefCell;
 
-use egui_android_core::{widget::Widget as WidgetTrait, Dispatcher, UiWrapper};
+use egui_android_core::{widget::Widget as WidgetTrait, UiWrapper};
+use egui_android_runtime::Dispatcher;
 use egui_android_ui::animation::{
     animate_bool, animate_value, AnimatedVisibility, AnimationExt, Fade, Slide, SlideDirection,
 };

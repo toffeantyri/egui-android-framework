@@ -122,7 +122,7 @@ impl Application for CounterApp {
             self.prev_dark_mode = Some(self.theme_state.is_dark_mode);
             #[cfg(target_os = "android")]
             {
-                use egui_android_framework::core::SystemTheme;
+                use egui_android_framework::platform::SystemTheme;
                 use egui_android_framework::platform_android::system_bars;
                 use egui_android_framework::platform_android::theme::set_clear_color_from;
                 use egui_android_framework::ui::theme::Theme;
