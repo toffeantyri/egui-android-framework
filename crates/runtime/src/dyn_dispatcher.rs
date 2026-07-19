@@ -1,6 +1,6 @@
 //! Type-erased диспетчер сообщений — [`DynDispatcher`].
 //!
-//! Позволяет хранить `Dispatcher` как `Box<dyn Any>` без generic-параметра.
+//! Позволяет хранить `Dispatcher` как type-erased контейнер без generic-параметра.
 //! Используется в `Box<dyn ComponentNode>` для совместимости c `ChildStack`.
 //!
 //! # Как работает
@@ -8,9 +8,17 @@
 //! Создаётся в [`Application::frame()`] вместе с receiver.
 //! Передаётся в `ComponentNode::render()`.
 //! Blanket-impl через `dispatch.wrap::<M>()` создаёт `Dispatcher<M>`,
-//! который упаковывает каждое сообщение в `Box<dyn Any + Send>`.
+//! который упаковывает каждое сообщение через [`MessageEnvelope`].
 //!
 //! После рендера все сообщения drain'ятся из receiver и downcast'ятся.
+//!
+//! # Безопасность типов
+//!
+//! Внутри канал использует `Box<dyn Any + Send>` — это вынужденное решение
+//! для передачи сообщений разных типов через один канал.
+//! Однако каждый элемент упаковывается через [`MessageEnvelope<M>`],
+//! что гарантирует `M: Clone + Debug + Send + 'static`.
+//! При ошибке downcast сообщение логируется с именем ожидаемого типа.
 
 use std::any::Any;
 use std::sync::mpsc;
@@ -33,7 +41,7 @@ impl DynDispatcher {
         let _ = self.tx.send(msg);
     }
 
-    /// Получить типизированный Dispatcher, упаковывающий M в Box<dyn Any + Send>.
+    /// Получить типизированный Dispatcher, упаковывающий M через MessageEnvelope.
     ///
     /// Не спавнит поток — упаковка происходит непосредственно в Dispatch::dispatch().
     /// Dispatcher<M> можно клонировать, отправлять в замыкания.

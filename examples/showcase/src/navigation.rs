@@ -73,14 +73,53 @@ impl NestedRoute {
     }
 }
 
-/// Единый enum для навигации в любой стек.
+/// Сообщения для вложенного стека навигации внутри NestedScreen.
 ///
-/// Аналог sealed class NavigableRoutes в Kotlin/Decompose.
-/// Каждый вариант — это отдельный стек со своим Route enum.
+/// Каждый стек имеет свой тип сообщений — это позволяет
+/// `NestedScreen` обрабатывать их самостоятельно через `handle_dyn()`,
+/// без участия `NavigationHost`.
+///
+/// Аналог sealed class в Kotlin/Decompose: каждый стек определяет
+/// свои маршруты и сообщения. `NavigationHost` просто пробрасывает
+/// сообщение активному компоненту через `ComponentNode::handle_dyn()`.
+#[derive(Clone, Debug)]
+pub enum NestedMsg {
+    /// Перейти на вложенный экран.
+    Navigate(NestedRoute),
+    /// Вернуться назад (pop из вложенного стека).
+    Back,
+    /// Открыть слой 2.
+    OpenLayer2,
+}
+
+/// Маршруты второго уровня вложенной навигации.
+///
+/// Демонстрирует, что каждый вложенный стек имеет свой enum маршрутов
+/// и свой тип сообщений, независимый от других стеков.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum NavigableRoute {
-    /// Навигация в корневой стек.
-    Main(Route),
-    /// Навигация во вложенный стек NestedScreen.
-    Nested(NestedRoute),
+pub enum NestedLayer2Route {
+    X,
+    Y,
+}
+
+impl NestedLayer2Route {
+    pub fn title(&self) -> &str {
+        match self {
+            NestedLayer2Route::X => "Экран X",
+            NestedLayer2Route::Y => "Экран Y",
+        }
+    }
+}
+
+/// Сообщения для второго уровня вложенной навигации.
+///
+/// Абсолютно независимый тип — не связан с `NestedMsg` или `RootMsg`.
+/// `NestedLayer2Screen` обрабатывает их через свой `handle_dyn()`, а
+/// `NavigationHost` просто пробрасывает их активному компоненту.
+#[derive(Clone, Debug)]
+pub enum NestedLayer2Msg {
+    /// Перейти на вложенный экран.
+    Navigate(NestedLayer2Route),
+    /// Вернуться назад (pop из стека).
+    Back,
 }

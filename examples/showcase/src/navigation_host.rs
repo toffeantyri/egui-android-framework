@@ -2,20 +2,28 @@
 //!
 //! Координатор между Application и экранами.
 //! Владеет корневым ChildStack, создаёт экраны по маршруту,
-//! маршрутизирует сообщения, обрабатывает BackPressed.
+//! делегирует сообщения активному компоненту через `ComponentNode::handle_dyn()`.
 //!
 //! Не реализует Component трейт — рендер через render_dyn.
 //!
-//! Обработка Back:
-//! 1. BackCustomScreen::handle_back() — кастомная логика (переключение цвета).
-//! 2. NestedScreen::handle_back() — pop из вложенного стека.
-//! 3. ComponentContext::on_back() → back_fallback:
+//! # Обработка сообщений через handle_dyn
+//!
+//! Сообщения от кнопок идут через `DynDispatcher` → `mpsc` → `uidynmsg_rx`.
+//! `NavigationHost` не разбирает их вручную — он просто вызывает
+//! `active.handle_dyn(msg)` на активном компоненте.
+//! Blanket-impl `ComponentNode` делает downcast и вызывает `handle()`.
+//!
+//! Каждый компонент сам обрабатывает свои сообщения:
+//! - `NestedScreen` получает `NestedMsg` и управляет своим `ChildStack`
+//! - Экраны без своего типа сообщений игнорируют `handle_dyn`
+//!
+//! # Обработка Back
+//!
+//! 1. `active.handle_back()` — компонент может перехватить (NestedScreen, BackCustomScreen)
+//! 2. `ComponentContext::on_back()` → `back_fallback`:
 //!    - стек > 1 → pop из корневого ChildStack
 //!    - стек = 1 (Home) → false (завершение приложения)
-//! 4. Если стек пуст или не изменился — завершение.
-//!
-//! Системный Back (platform-android) и UI Back (кнопка "← Назад")
-//! идут через один путь.
+//! 3. Если стек не изменился — завершение.
 
 use egui_android_framework::{
     core::{ComponentContext, ComponentNode, LifecycleObserver, UiWrapper},
@@ -24,7 +32,7 @@ use egui_android_framework::{
 };
 
 use crate::app::AppState;
-use crate::navigation::{NavigableRoute, Route};
+use crate::navigation::Route;
 use crate::screens::{
     animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
     home::HomeScreen, modifier_value::ModifierValueScreen, nested::NestedScreen,
@@ -34,8 +42,8 @@ use crate::screens::{
 /// Сообщения навигации.
 #[derive(Clone, Debug)]
 pub enum RootMsg {
-    /// Перейти по маршруту (корневой стек или вложенный).
-    Navigate(NavigableRoute),
+    /// Перейти по маршруту в корневой стек.
+    Navigate(Route),
     /// Вернуться назад (pop из стека).
     Back,
     /// Переключить тему.
@@ -74,7 +82,6 @@ impl NavigationHost {
 
         // Устанавливаем back_fallback.
         // stack — Box, указатель на данные в куче стабилен при любых перемещениях Self.
-        // finish_requested не трогаем из замыкания — проверяем стек после on_back().
         struct RawStack(*mut ChildStack<Route>);
         unsafe impl Send for RawStack {}
 
@@ -129,52 +136,40 @@ impl NavigationHost {
 
     /// Обработать Back.
     ///
-    /// 1. BackCustomScreen::handle_back() — кастомная логика.
-    /// 2. NestedScreen::handle_back() — pop из вложенного стека.
-    /// 3. ComponentContext::on_back() → back_fallback.
-    /// 4. Если стек не изменился — завершение.
+    /// 1. `active.handle_back()` — кастомная логика (NestedScreen, BackCustomScreen)
+    /// 2. `ComponentContext::on_back()` → `back_fallback`:
+    ///    - стек > 1 → pop из корневого ChildStack
+    ///    - стек = 1 (Home) → false → завершение
+    /// 3. Если стек не изменился — завершение.
     pub fn on_back(&mut self) {
-        // Шаг 1: BackCustomScreen — кастомная логика (переключение цвета)
+        // Шаг 1: активный компонент может сам обработать Back
         if let Some(active) = self.stack.active_mut() {
-            if let Some(custom) = active.as_any_mut().downcast_mut::<BackCustomScreen>() {
-                if custom.handle_back() {
-                    return;
-                }
-            }
-        }
-        // Шаг 2: NestedScreen — pop из вложенного стека
-        if let Some(active) = self.stack.active_mut() {
-            if let Some(nested) = active.as_any_mut().downcast_mut::<NestedScreen>() {
-                if nested.handle_back() {
-                    return;
-                }
+            if active.handle_back() {
+                return;
             }
         }
 
-        // Шаг 3: BackDispatcher + back_fallback
+        // Шаг 2: BackDispatcher + back_fallback (pop из корневого стека)
         let len_before = self.stack.len();
         let handled = self.context.on_back();
 
-        // Шаг 4: если стек не изменился и Back не обработан — Home, завершаем.
+        // Шаг 3: если стек не изменился и Back не обработан — Home, завершаем.
         if self.stack.is_empty() || (!handled && self.stack.len() == len_before) {
             self.context.finish_requested = true;
         }
     }
 
+    /// Обработать сообщение от UI.
+    ///
+    /// Сообщения обрабатываются по приоритету:
+    /// 1. `RootMsg::Navigate(route)` — навигация в корневой стек
+    /// 2. `RootMsg::Back` — системный Back
+    /// 3. `RootMsg::ToggleTheme` — переключение темы
     pub fn handle_msg(&mut self, msg: RootMsg) {
         match msg {
-            RootMsg::Navigate(nav) => match nav {
-                NavigableRoute::Main(route) => {
-                    self.stack.push(route.clone(), Self::create_screen(&route));
-                }
-                NavigableRoute::Nested(route) => {
-                    if let Some(active) = self.stack.active_mut() {
-                        if let Some(nested) = active.as_any_mut().downcast_mut::<NestedScreen>() {
-                            nested.push_sub(route);
-                        }
-                    }
-                }
-            },
+            RootMsg::Navigate(route) => {
+                self.stack.push(route.clone(), Self::create_screen(&route));
+            }
             RootMsg::Back => {
                 self.on_back();
             }
@@ -185,6 +180,9 @@ impl NavigationHost {
     }
 
     /// Рендеринг с DynDispatcher.
+    ///
+    /// Сообщения от кнопок идут через `uidynmsg_tx` → `mpsc`.
+    /// `handle_msg()` вычитывает их и обрабатывает.
     pub fn render_dyn(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
         if let Some(active) = self.stack.active() {
             active.render(ui, uidynmsg_tx);

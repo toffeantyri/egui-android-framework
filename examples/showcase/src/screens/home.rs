@@ -9,7 +9,7 @@ use egui_android_framework::ui::{
     widgets::{Button, Spacer, Text, Widget},
 };
 
-use crate::navigation::{NavigableRoute, Route};
+use crate::navigation::Route;
 use crate::navigation_host::RootMsg;
 
 /// Главный экран.
@@ -50,7 +50,7 @@ impl UiComponent for HomeScreen {
                 Text::new("Выберите демо:").render(ui, dispatch);
                 for route in routes {
                     Button::new(route.title())
-                        .on_click(RootMsg::Navigate(NavigableRoute::Main(route)))
+                        .on_click(RootMsg::Navigate(route))
                         .theme_colors(c.primary)
                         .text_color(c.on_primary)
                         .modifier(Modifier::new().fill_max_width().padding(8.0))

@@ -26,7 +26,10 @@ pub trait Component: LifecycleObserver + Send + 'static {
     type State: 'static;
 
     /// Тип сообщения, возвращаемого View-функцией.
-    type Message: 'static + Send;
+    ///
+    /// Должен реализовывать `Clone + Debug + Send + 'static` для
+    /// типобезопасной передачи через каналы и диагностики ошибок.
+    type Message: 'static + Send + Clone + std::fmt::Debug;
 
     /// Отрисовать UI через View-функцию.
     ///

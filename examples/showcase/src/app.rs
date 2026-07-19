@@ -131,9 +131,28 @@ impl Application for ShowcaseApplication {
         });
 
         // Drain'им сообщения от View (DynDispatcher)
+        //
+        // Если сообщение удалось downcast'ить в RootMsg — обрабатываем
+        // напрямую (навигация, тема).
+        //
+        // Иначе пробрасываем активному компоненту через handle_dyn() —
+        // компонент сам знает свой тип сообщения (например, NestedMsg).
+        // Blanket-impl ComponentNode сделает downcast и вызовет handle().
         for msg in uidynmsg_rx.try_iter() {
-            if let Ok(root_msg) = msg.downcast::<RootMsg>() {
-                self.root.handle_msg(*root_msg);
+            // Пробуем downcast в RootMsg — сообщения корневого стека.
+            // Если не получилось — пробрасываем активному компоненту
+            // через handle_dyn(). Компонент сам сделает downcast в свой тип.
+            match msg.downcast::<RootMsg>() {
+                Ok(root_msg) => {
+                    log::debug!("Получено RootMsg: {:?}", root_msg);
+                    self.root.handle_msg(*root_msg);
+                }
+                Err(msg) => {
+                    log::debug!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
+                    if let Some(active) = self.root.stack.active_mut() {
+                        active.handle_dyn(msg);
+                    }
+                }
             }
         }
 

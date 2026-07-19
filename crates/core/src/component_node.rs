@@ -89,6 +89,11 @@ where
     fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
         if let Ok(typed) = msg.downcast::<T::Message>() {
             crate::Component::handle(self, *typed);
+        } else {
+            log::error!(
+                "ComponentNode::handle_dyn: ошибка типа сообщения — ожидался {}, получен неизвестный тип",
+                std::any::type_name::<T::Message>()
+            );
         }
     }
 
