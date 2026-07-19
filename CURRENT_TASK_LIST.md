@@ -314,4 +314,59 @@ fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
   🔲 🟧 Задача 5: Modifier API (ui)
   🔲 🟨 Задача 8: Хрупкие тесты (ui)
   🔲 🟩 Задача 11: Патч egui
+
+---
+
+## Архитектурные замечания по результатам аудита
+
+> Выявлены в ходе проверки кода на соответствие архитектуре. Не являются блокерами,
+> но снижают качество кода и предсказуемость системы.
+
+### 🟡 Замечание A: Application не наследует LifecycleObserver
+
+**Локация**: `crates/runtime/src/application.rs`
+
+`Application` объявляет методы lifecycle напрямую (`on_create`, `on_start`, etc.)\nвместо наследования от `LifecycleObserver` из `egui-android-core`.
+
+**Проблема**: Дублирование контракта. Если `LifecycleObserver` изменится,
+`Application` нужно будет менять вручную.
+
+**Решение**: Наследовать `LifecycleObserver` в `Application`.
+
+**Статус**: 🔲 Не сделано
+
+---
+
+### 🟡 Замечание B: MessageEnvelope не используется в DynDispatcher
+
+**Локация**: `crates/runtime/src/message_envelope.rs`, `crates/runtime/src/dyn_dispatcher.rs`
+
+`MessageEnvelope<M>` определён как типобезопасная обёртка, но в `DynDispatcher::wrap()`
+сообщение упаковывается сырым `Box::new(msg)`, а не в `MessageEnvelope`.
+
+**Проблема**: `MessageEnvelope` — мёртвый код. Документация говорит, что он используется,
+но код его игнорирует.
+
+**Решение**: Либо использовать `MessageEnvelope` в `WrappedImpl`, либо удалить тип.
+
+**Статус**: 🔲 Не сделано
+
+---
+
+### 🟡 Замечание C: JNI указатели в публичном API PlatformState
+
+**Локация**: `crates/platform-android/src/platform_state.rs`
+
+`vm_ptr()` и `activity_ptr()` возвращают сырые указатели. Любой код, имеющий
+доступ к `PlatformState`, может их использовать.
+
+**Проблема**: Unsafe в публичном API. Нарушение инкапсуляции.
+
+**Решение**: Инкапсулировать JNI-вызовы в backend, не предоставлять сырые указатели.
+
+**Статус**: 🔲 Не сделано
+
+---
+
+### 🟢 Есть вопросы? Сверься с полным архитектурным отчётом в `.agents/skills/arch-result/report.md`
 ```
