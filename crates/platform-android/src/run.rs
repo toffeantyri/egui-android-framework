@@ -400,7 +400,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     let gl = &*painter.gl();
 
                     gl.disable(glow::SCISSOR_TEST);
-                    let (cr, cg, cb) = backend.clear_color();
+                    let (cr, cg, cb) = backend.platform_state().current_clear_color();
                     gl.clear_color(cr, cg, cb, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
 

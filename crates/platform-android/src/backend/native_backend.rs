@@ -303,14 +303,6 @@ impl AndroidBackend for NativeBackend {
         self.platform_state.set_theme_override(theme);
     }
 
-    fn clear_color(&self) -> (f32, f32, f32) {
-        self.platform_state.current_clear_color()
-    }
-
-    fn set_clear_color(&self, color: egui::Color32) {
-        self.platform_state.set_clear_color_from(color);
-    }
-
     fn set_system_bars_style(&mut self, style: SystemBarsStyle) {
         let vm = self.app.vm_as_ptr();
         let activity = self.app.activity_as_ptr();

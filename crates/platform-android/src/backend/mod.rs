@@ -220,12 +220,6 @@ pub trait AndroidBackend {
     /// Установить override темы.
     fn set_theme_override(&mut self, theme: Option<SystemTheme>);
 
-    /// Получить clear color для glClear.
-    fn clear_color(&self) -> (f32, f32, f32);
-
-    /// Установить clear color из Color32.
-    fn set_clear_color(&self, color: egui::Color32);
-
     /// Настроить стиль системных баров.
     fn set_system_bars_style(&mut self, style: SystemBarsStyle);
 
@@ -328,14 +322,6 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn set_theme_override(&mut self, theme: Option<SystemTheme>) {
         (**self).set_theme_override(theme)
-    }
-
-    fn clear_color(&self) -> (f32, f32, f32) {
-        (**self).clear_color()
-    }
-
-    fn set_clear_color(&self, color: egui::Color32) {
-        (**self).set_clear_color(color)
     }
 
     fn set_system_bars_style(&mut self, style: SystemBarsStyle) {

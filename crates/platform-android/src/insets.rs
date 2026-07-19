@@ -11,10 +11,6 @@
 
 #![cfg(target_os = "android")]
 
-use std::sync::Once;
-
-static LOG_ONCE: Once = Once::new();
-
 /// Insets в точках (points = пиксели / pp).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InsetsPt {
@@ -116,15 +112,13 @@ pub fn get_system_insets_jni(
             bottom,
         };
 
-        LOG_ONCE.call_once(|| {
-            log::info!(
-                "JNI insets (WindowInsets.Type.systemBars): left={}, top={}, right={}, bottom={}",
-                insets.left,
-                insets.top,
-                insets.right,
-                insets.bottom
-            );
-        });
+        log::info!(
+            "JNI insets (WindowInsets.Type.systemBars): left={}, top={}, right={}, bottom={}",
+            insets.left,
+            insets.top,
+            insets.right,
+            insets.bottom
+        );
 
         Some(insets)
     }
@@ -139,13 +133,11 @@ pub fn get_pp(config: &android_activity::ConfigurationRef, width: i32, height: i
     if let Some(density_dpi) = config.density() {
         if density_dpi > 0 {
             let pp = density_dpi as f32 / 160.0;
-            LOG_ONCE.call_once(|| {
-                log::info!(
-                    "pp: system densityDpi={}, pixels_per_point={:.2}",
-                    density_dpi,
-                    pp
-                );
-            });
+            log::info!(
+                "pp: system densityDpi={}, pixels_per_point={:.2}",
+                density_dpi,
+                pp
+            );
             return pp;
         }
     }
@@ -153,13 +145,11 @@ pub fn get_pp(config: &android_activity::ConfigurationRef, width: i32, height: i
     // Fallback
     let w = width.max(height) as f32;
     let pp = (w / 450.0).max(1.5).min(4.0);
-    LOG_ONCE.call_once(|| {
-        log::info!(
-            "pp: fallback эвристика для {}x{} → pp={:.2}",
-            width,
-            height,
-            pp
-        );
-    });
+    log::info!(
+        "pp: fallback эвристика для {}x{} → pp={:.2}",
+        width,
+        height,
+        pp
+    );
     pp
 }
