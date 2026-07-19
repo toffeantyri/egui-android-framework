@@ -13,10 +13,10 @@ use android_activity::{
     InputStatus,
 };
 
-pub(crate) struct InputState {
-    pub(crate) events: Vec<egui::Event>,
-    pub(crate) pointer_pos: Option<egui::Pos2>,
-    pub(crate) back_pressed: bool,
+pub struct InputState {
+    pub events: Vec<egui::Event>,
+    pub pointer_pos: Option<egui::Pos2>,
+    pub back_pressed: bool,
 }
 
 impl InputState {

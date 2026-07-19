@@ -81,6 +81,7 @@ pub mod input;
 pub mod input_processing;
 pub mod insets;
 pub mod lifecycle;
+pub mod r#loop;
 pub mod platform_state;
 pub mod run;
 pub mod system_bars;
