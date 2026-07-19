@@ -77,12 +77,13 @@ UI (нажатие кнопки)
         → Component::handle(msg) — отправляет команду в data layer
           → Data Layer (фоновый поток) получает команду
             → store.update(|s| s.count += 1)    ← ЕДИНСТВЕННАЯ ТОЧКА
-              → data_statechanged_tx.send(())               ← сигнал в Runtime
-                → UiNotifier::check()
-                  → ctx.request_repaint()
-                  → waker.wake()                    ← Waker из platform (app.run_on_java_main_thread)
-                    → poll_events() получает Wake
-                      → frame() → render(state, &dispatcher) → новый UI
+                      → data_statechanged_tx.send(())               ← сигнал в Runtime
+                        → RuntimeContext::check()
+                          → UiNotifier::check()
+                            → ctx.request_repaint()
+                            → waker.wake()                    ← Waker из platform (app.run_on_java_main_thread)
+                              → poll_events() получает Wake
+                                → frame() → render(state, &dispatcher) → новый UI
 ```
 
 Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
@@ -124,8 +125,10 @@ Message = и событие, и семантика
 - `create()` — создаёт приложение, каналы, запускает data layer.
 - `root() / root_ref()` — доступ к корневому компоненту.
 - `config() / config_mut()` — настройки (log_tag, target_fps).
-- `create_notifier(ctx, wake: Waker) -> Option<UiNotifier>` — создаёт инфраструктуру уведомлений.
+- `create_runtime_context(ctx, wake: Waker) -> RuntimeContext` — создаёт контекст выполнения Runtime.
   `Waker` — из `egui-android-platform`, создаётся в backend через `app.run_on_java_main_thread(||{})`.
+  Platform-android хранит `RuntimeContext` и вызывает только `check()`.
+  См. [`RuntimeContext`](#runtimecontext--egui-android-runtime).
 - `frame(ctx, raw_input) -> FullOutput` — один кадр: создаёт `Dispatcher`, вызывает `sync → render`, drain'ит receiver, обрабатывает сообщения через `handle()`.
 - `on_save_state()` — вызывается платформой при Lifecycle::Destroy. Сохранить ChildStack.
 - `on_restore_state()` — вызывается платформой при InitWindow. Восстановить ChildStack.
@@ -174,8 +177,16 @@ Message = и событие, и семантика
 - `subscribe() -> watch::Receiver<T>` — подписка на изменения.
 - `clone_state() -> Self` — копия с разделяемым каналом.
 
+### `RuntimeContext` — `egui-android-runtime`
+- Контекст выполнения Runtime. Владеет `UiNotifier`, инкапсулирует `Waker`.
+- Создаётся в `Application::create_runtime_context()` и передаётся платформе.
+- `check()` — единая точка входа для platform-android. Вызывает `UiNotifier::check()`.
+- `new(notifier: Option<UiNotifier>)` — создаёт контекст. `None` для приложений без data layer.
+- Platform-android НЕ знает про UiNotifier, Waker, каналы — только про RuntimeContext::check().
+- Живёт в главном цикле platform-android как `Option<RuntimeContext>`, инициализируется один раз после EGL.
+
 ### `UiNotifier` — `egui-android-runtime`
-- Инфраструктурный уведомитель. Вызывается в главном потоке.
+- Инфраструктурный уведомитель. Вызывается в главном потоке (только через RuntimeContext).
 - `check()` — проверяет `mpsc::Receiver<()>` и при сигнале вызывает `repaint + wake()`.
 - Принимает `Option<Waker>` — waker из `egui-android-platform` (создаётся в backend).
 - Не знает про Domain, Components, Reducer.
@@ -354,7 +365,7 @@ fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
 |---|---|---|
 | `ui_msg_tx` / `ui_msg_rx` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
 | `data_cmd_tx` / `data_cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
-| `data_statechanged_tx` / `data_statechanged_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
+| `data_statechanged_tx` / `data_statechanged_rx` | `mpsc::channel::<()>()` | Data Layer → RuntimeContext (→ UiNotifier) |
 | `nav_event_tx` / `nav_event_rx` | `mpsc::channel::<NavEvent>()` | Component → ChildStack (навигация) |
 | `ui_dynmsg_tx` / `ui_dynmsg_rx` | `mpsc::channel::<Box<dyn Any + Send>>()` | View → ComponentNode (type-erased) |
 | `store` | `StateStore<T>` (watch) | Data Layer → Component (sync_from_store) |
@@ -511,7 +522,7 @@ if let Some(active) = self.stack.active_mut() {
 
 | Событие | Действие |
 |---|---|
-| `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()` |
+| `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()`, инициализация `RuntimeContext` |
 | `InitWindow` (повторный) | `recreate_surface()`, не трогать display/context/painter |
 | `Resume` | `app_instance.on_resume()` |
 | `Pause` | `app_instance.on_pause()` |
@@ -522,9 +533,22 @@ if let Some(active) = self.stack.active_mut() {
 
 ```rust,ignore
 // run.rs — главный цикл
+let mut rt_ctx: Option<RuntimeContext> = None;
+let mut rt_ctx_initialized = false;
 let mut destroy_requested = false;
 loop {
     // poll + input + on_back_pressed + render
+
+    // Инициализация RuntimeContext после создания EGL (один раз)
+    if !rt_ctx_initialized && egui_painter.is_some() {
+        rt_ctx_initialized = true;
+        rt_ctx = Some(app_instance.create_runtime_context(&egui_ctx, waker.clone()));
+    }
+
+    // Проверка уведомлений от data layer (через RuntimeContext)
+    if let Some(ref mut ctx) = rt_ctx {
+        ctx.check();
+    }
 
     let full_output = app_instance.frame(&egui_ctx, raw_input);
 
@@ -702,26 +726,27 @@ loop {
 6. **`store.update()` — единственная точка изменения состояния.** Никаких прямых
    присваиваний через `RwLock`.
 
-7. **Data layer после `store.update()` всегда шлёт `notify_tx.send(())`.**
+7. **Data layer после `store.update()` всегда шлёт `data_statechanged_tx.send(())`.**
 
 8. **Component синхронизируется из store через `sync_from_store()` в начале frame.**
 
-9. **Главный цикл событийный:** `poll_events(16ms)` + `notifier.check()` + `frame()`.
+9. **Главный цикл событийный:** `poll_events(16ms)` + `rt_ctx.check()` + `frame()`.
    Никаких `poll()`, `on_event()`, `needs_redraw`.
+   Platform-android больше не знает про UiNotifier — только про `RuntimeContext::check()`.
 
 10. **Упрощённая MVI-модель:** Intent и Message — это одно и то же (`Msg`).
     Не вводи разделение Intent/Message без явного указания.
 
-11. **Импорты — через umbrella или напрямую:**
+12. **Импорты — через umbrella или напрямую:**
     ```rust
     // Через umbrella (если подключен egui-android-framework)
-    use egui_android_framework::runtime::{Application, Dispatcher, DynDispatcher};
+    use egui_android_framework::runtime::{Application, Dispatcher, DynDispatcher, RuntimeContext};
     use egui_android_framework::platform::Waker;
     use egui_android_framework::core::{Component, ComponentNode, LifecycleObserver, UiWrapper};
     use egui_android_framework::navigation::ChildStack;
 
     // Напрямую (если подключен только конкретный крейт)
-    use egui_android_runtime::Application;
+    use egui_android_runtime::{Application, RuntimeContext};
     use egui_android_core::{Component, ComponentNode};
     use egui_android_platform::Waker;
     ```
@@ -787,6 +812,19 @@ loop {
         .render(ui, dispatch);
     });
     ```
+
+15. **`RuntimeContext` владеет UiNotifier, а не platform-android:**
+    Platform-android больше не хранит `Option<UiNotifier>`. Вместо этого:
+    - `Application::create_notifier()` → `Application::create_runtime_context()`
+    - Platform-android хранит `Option<RuntimeContext>` и вызывает `rt_ctx.check()`
+    - Platform-android НЕ импортирует UiNotifier — только RuntimeContext
+    - Waker передаётся внутрь RuntimeContext и инкапсулируется от platform-android
+    - Создание RuntimeContext:
+      ```rust
+      let (statechanged_tx, statechanged_rx) = mpsc::channel::<()>();
+      let notifier = UiNotifier::new(ctx.clone(), Some(waker), statechanged_rx);
+      RuntimeContext::new(Some(notifier))
+      ```
 
 ## GL-режим (GameActivity)
 

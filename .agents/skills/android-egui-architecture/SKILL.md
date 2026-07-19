@@ -72,7 +72,7 @@ Data Layer никогда не взаимодействует с UI.
 | State | `egui-android-runtime` | StateStore (tokio::sync::watch) |
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
 | Navigation | `egui-android-navigation` | ChildStack, save/restore состояния |
-| Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, каналы |
+| Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, RuntimeContext, каналы |
 | Umbrella | `egui-android-framework` | Re-export всех крейтов |
 
 ---
@@ -115,7 +115,10 @@ Data Layer никогда не взаимодействует с UI.
 - передача FullOutput платформе
 - Application trait
 - Dispatcher, StateStore, UiNotifier
-- **Waker** — платформенная абстракция для пробуждения event loop (определён в `egui-android-platform`, используется UiNotifier)
+- **RuntimeContext** — контекст выполнения, владеет UiNotifier,
+  инкапсулирует Waker. Platform-android вызывает только `check()`.
+- **Waker** — платформенная абстракция для пробуждения event loop
+  (определён в `egui-android-platform`, передаётся в RuntimeContext через Application)
 
 Не знает:
 
@@ -267,6 +270,40 @@ Store не знает:
 
 ---
 
+### RuntimeContext
+
+**Крейт**: `egui-android-runtime`
+
+RuntimeContext — контекст выполнения Runtime.
+
+Владеет `UiNotifier` и инкапсулирует `Waker`.
+Платформа (platform-android) видит только RuntimeContext и вызывает `check()`.
+
+Отвечает за:
+
+- единую точку входа для платформы (`check()`)
+- инкапсуляцию Waker и UiNotifier от платформы
+
+RuntimeContext не знает:
+
+- Domain
+- Components
+- Reducer
+- Data Layer
+
+Архитектурный поток:
+
+```
+Platform (Android)
+  └── app.create_runtime_context(ctx, waker) → RuntimeContext
+  └── rt_ctx.check()                              ← единственный вызов
+        └── UiNotifier::check()
+              ├── ctx.request_repaint()
+              └── waker.wake()
+```
+
+---
+
 ### UiNotifier
 
 **Крейт**: `egui-android-runtime`
@@ -302,6 +339,8 @@ State
 Store
  ↓
 UiNotifier
+ ↓
+RuntimeContext
  ↓
 Runtime
  ↓

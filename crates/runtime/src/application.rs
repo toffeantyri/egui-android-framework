@@ -30,8 +30,9 @@
 //! и восстановить `ChildStack` через `ChildStack::save()` / `restore()`.
 //! Состояние каждого компонента определяется его `save_state()`.
 
-use crate::ui_notifier::UiNotifier;
 use egui_android_platform::Waker;
+
+use crate::runtime_context::RuntimeContext;
 
 use egui;
 
@@ -67,16 +68,17 @@ pub trait Application: Sized + 'static {
     /// Получить мутабельную ссылку на конфиг.
     fn config_mut(&mut self) -> &mut AppConfig;
 
-    /// Создать инфраструктурный `UiNotifier`.
+    /// Создать контекст выполнения Runtime.
     ///
-    /// Вызывается Runtime после инициализации EGL.
-    /// Application передаёт `Receiver<()>` — канал уведомлений
-    /// от data layer. Data layer отправляет `()` после каждого
-    /// изменения состояния.
+    /// Вызывается платформой (platform-android) после инициализации EGL,
+    /// один раз за время жизни backend'а.
     ///
-    /// Реализация по умолчанию возвращает `None`.
-    fn create_notifier(&mut self, _ctx: &egui::Context, _wake: Waker) -> Option<UiNotifier> {
-        None
+    /// Application создаёт `RuntimeContext`, который владеет `UiNotifier`
+    /// и инкапсулирует `Waker`. Платформа вызывает только `check()`.
+    ///
+    /// Реализация по умолчанию возвращает пустой контекст (без notifier).
+    fn create_runtime_context(&mut self, _ctx: &egui::Context, _wake: Waker) -> RuntimeContext {
+        RuntimeContext::new(None)
     }
 
     /// Один кадр: рендеринг компонента и обработка сообщений.

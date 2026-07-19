@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::{LifecycleObserver, UiWrapper},
     platform::Waker,
-    runtime::{AppConfig, Application, DynDispatcher, StateStore, UiNotifier},
+    runtime::{AppConfig, Application, DynDispatcher, RuntimeContext, StateStore},
     ui::theme::MaterialTheme,
 };
 
@@ -69,8 +69,8 @@ impl Application for ShowcaseApplication {
         &mut self.config
     }
 
-    fn create_notifier(&mut self, _ctx: &egui::Context, _wake: Waker) -> Option<UiNotifier> {
-        None
+    fn create_runtime_context(&mut self, _ctx: &egui::Context, _wake: Waker) -> RuntimeContext {
+        RuntimeContext::new(None)
     }
 
     fn on_back_pressed(&mut self) {

@@ -1,7 +1,7 @@
 //! Главный цикл для Decompose-style архитектуры.
 //!
 //! Событийный цикл — без polling, без фоновых потоков для UI.
-//! `UiNotifier` проверяется синхронно в главном потоке.
+//! `RuntimeContext` проверяется синхронно в главном потоке.
 //!
 //! # Архитектура потока данных
 //!
@@ -30,7 +30,7 @@ use crate::backend::{
 
 use crate::input::InputState;
 
-use egui_android_runtime::{ui_notifier::UiNotifier, Application};
+use egui_android_runtime::{Application, RuntimeContext};
 
 use glow::HasContext;
 
@@ -97,9 +97,9 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     // Waker — получаем из backend (вызывает app.wake() для реактивности)
     let waker = backend.create_waker();
 
-    // UiNotifier
-    let mut notifier: Option<UiNotifier> = None;
-    let mut notifier_initialized = false;
+    // RuntimeContext — владеет UiNotifier, инкапсулирует Waker
+    let mut rt_ctx: Option<RuntimeContext> = None;
+    let mut rt_ctx_initialized = false;
 
     let mut destroy_requested = false;
 
@@ -312,10 +312,11 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         }
                         egui_painter = Some(painter);
 
-                        if !notifier_initialized {
-                            notifier_initialized = true;
-                            log::info!("run: инициализируем UiNotifier");
-                            notifier = app_instance.create_notifier(&egui_ctx, waker.clone());
+                        if !rt_ctx_initialized {
+                            rt_ctx_initialized = true;
+                            log::info!("run: инициализируем RuntimeContext");
+                            rt_ctx =
+                                Some(app_instance.create_runtime_context(&egui_ctx, waker.clone()));
                         }
                     }
                     Err(e) => {
@@ -342,9 +343,9 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
             }
         }
 
-        // --- Проверка уведомлений от data layer ---
-        if let Some(ref mut n) = notifier {
-            n.check();
+        // --- Проверка уведомлений от data layer (через RuntimeContext) ---
+        if let Some(ref mut ctx) = rt_ctx {
+            ctx.check();
         }
 
         // --- Рендеринг ---

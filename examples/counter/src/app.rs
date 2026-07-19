@@ -15,7 +15,7 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::{Component, LifecycleObserver, UiWrapper},
     platform::Waker,
-    runtime::{AppConfig, Application, Dispatcher, StateStore, UiNotifier},
+    runtime::{AppConfig, Application, Dispatcher, RuntimeContext, StateStore, UiNotifier},
     ui::theme::MaterialTheme,
 };
 
@@ -91,10 +91,11 @@ impl Application for CounterApp {
         &mut self.config
     }
 
-    fn create_notifier(&mut self, ctx: &egui::Context, wake: Waker) -> Option<UiNotifier> {
-        log::info!("CounterApp: создаём UiNotifier");
+    fn create_runtime_context(&mut self, ctx: &egui::Context, wake: Waker) -> RuntimeContext {
+        log::info!("CounterApp: создаём RuntimeContext");
         let rx = std::mem::replace(&mut self.statechanged_rx, mpsc::channel().1);
-        Some(UiNotifier::new(ctx.clone(), Some(wake), rx))
+        let notifier = UiNotifier::new(ctx.clone(), Some(wake), rx);
+        RuntimeContext::new(Some(notifier))
     }
 
     fn on_back_pressed(&mut self) {
