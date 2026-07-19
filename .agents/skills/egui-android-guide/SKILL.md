@@ -583,11 +583,25 @@ loop {
 │   │
 │   ├── platform-android/   — egui-android-platform-android (cfg = android)
 │   │   └── src/
-│   │       ├── run.rs       — run<A: Application>() — главный цикл
-│   │       ├── egl_backend.rs — EGL FFI + EglState
-│   │       ├── input.rs     — InputState + process_input_events()
-│   │       ├── waker.rs     — Waker (реэкспорт из egui-android-platform)
-│   │       └── ...
+│   │       ├── run.rs             — Оркестратор: run() / run_with_backend()
+│   │       ├── event.rs           — BackendEvent, LifecycleEvent, Insets, BackendError
+│   │       ├── loop.rs            — RunState + tick() — главный цикл
+│   │       ├── lifecycle.rs       — handle_init_window, resume, pause, stop, destroy
+│   │       ├── graphics.rs        — GraphicsPipeline — Painter + рендеринг
+│   │       ├── input_processing.rs — Конвертация BackendEvent → egui::Event
+│   │       ├── input.rs           — InputState + process_input_events() (NativeActivity)
+│   │       ├── egl_backend.rs     — EGL FFI + EglState
+│   │       ├── insets.rs          — JNI WindowInsets + get_pp()
+│   │       ├── platform_state.rs  — PlatformState (Arc<Mutex>)
+│   │       ├── system_bars.rs     — JNI system bars
+│   │       ├── theme.rs           — clear_color через PlatformState
+│   │       ├── waker.rs           — Waker (реэкспорт из egui-android-platform)
+│   │       ├── backend/
+│   │       │   ├── mod.rs         — AndroidBackend trait, SurfaceHandle, SystemBarsStyle
+│   │       │   ├── gl_backend.rs  — GlBackend (GameActivity + EGL + IME)
+│   │       │   └── native_backend.rs — NativeBackend (fallback)
+│   │       └── bin/
+│   │           └── cargo-android-init.rs — генератор android/ Gradle-проекта
 │   │
 │   ├── runtime/            — egui-android-runtime
 │   │   └── src/

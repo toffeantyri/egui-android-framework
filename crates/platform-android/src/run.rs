@@ -1,24 +1,37 @@
-//! Главный цикл для Decompose-style архитектуры.
+//! Главный цикл — оркестратор platform-android.
 //!
-//! Оркестратор: инициализация → цикл (`RunState::tick`) → очистка.
+//! Единственная точка входа для запуска egui-приложения на Android.
+//! Вызывается из `android_main()` в каждом приложении.
 //!
-//! Событийный цикл — без polling, без фоновых потоков для UI.
-//! `RuntimeContext` проверяется синхронно в главном потоке.
+//! # Архитектура
 //!
-//! # Архитектура потока данных
+//! `run_with_backend()` выполняет три фазы:
 //!
-//! ```
-//! run_with_backend()
-//!   ├── инициализация: app_instance, backend, egui_ctx, waker
-//!   ├── loop: RunState::tick()
-//!   │     ├── poll_events → lifecycle / input_processing
-//!   │     ├── destroy_requested? → on_destroy + break
-//!   │     ├── GraphicsPipeline::try_new()
-//!   │     ├── back_pressed → process_back_pressed
-//!   │     ├── rt_ctx.check()
-//!   │     └── render: insets → raw_input → frame → render_frame
-//!   └── очистка: backend.destroy_graphics()
-//! ```
+//! 1. **Инициализация**
+//!    - Создание `Application` (DI-корень)
+//!    - Создание backend (`GlBackend` / `NativeBackend`)
+//!    - Настройка системных баров (прозрачные, JNI)
+//!    - Создание `egui::Context`, Waker
+//!    - Создание `RunState`
+//!
+//! 2. **Главный цикл** — `RunState::tick()` (см. [`loop::RunState`])
+//!    - `poll_events` → lifecycle / input_processing
+//!    - `destroy_requested` → on_destroy + break
+//!    - `GraphicsPipeline::try_new()`
+//!    - `back_pressed` → process_back_pressed
+//!    - `rt_ctx.check()`
+//!    - render: insets → raw_input → frame → render_frame
+//!
+//! 3. **Очистка**
+//!    - `GraphicsPipeline::destroy()`
+//!    - `backend.destroy_graphics()`
+//!
+//! # Событийный цикл
+//!
+//! `RunState::tick()` — одна итерация. Всегда без блокировки:
+//! - `poll_events(0ms)` — неблокирующий опрос
+//! - `UiNotifier` — сигнал от data layer, проверяется каждый кадр
+//! - FPS-ограничение через `target_dt` (60 FPS по умолчанию)
 
 #![cfg(target_os = "android")]
 
@@ -39,6 +52,11 @@ pub fn run<A: Application>(app: AndroidApp) {
 }
 
 /// Запустить egui-приложение с указанным backend'ом.
+///
+/// `kind` — тип backend'а:
+/// - `Gl` — GameActivity + EGL (основной, с IME)
+/// - `Native` — NativeActivity (fallback, без IME)
+/// - `Game` — зарезервировано (пока использует Gl)
 pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKind) {
     let mut app_instance = A::create();
 
@@ -54,7 +72,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     app_instance.on_resume();
 
     // --- Создаём backend и настраиваем системные бары ---
-    // Важно: setStatusBarColor/setNavigationBarColor должны вызываться на UI thread.
+    // System bars (setStatusBarColor/setNavigationBarColor) — только на UI thread.
     // Захватываем указатели до перемещения app в backend.
     let vm_ptr = app.vm_as_ptr() as usize;
     let activity_ptr = app.activity_as_ptr() as usize;

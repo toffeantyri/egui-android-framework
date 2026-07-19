@@ -181,7 +181,7 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 | egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier, RuntimeContext, AppConfig |
 | egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |
 | egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Абстрактный Platform trait, FrameInput, PlatformEvent |
-| egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл, lifecycle, system bars |
+| egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл (RunState::tick), lifecycle, system bars, GraphicsPipeline |
 | egui-android-framework | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
 
 ## Технологии

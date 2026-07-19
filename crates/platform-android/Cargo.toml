@@ -22,12 +22,12 @@ ndk = { workspace = true }
 libc = { workspace = true }
 jni = "0.21"
 
-egui-android-platform = { version = "0.3.3-alpha.3", path = "../platform" }
-egui-android-runtime = { version = "0.3.3-alpha.3", path = "../runtime" }
+egui-android-platform = { version = "0.4.0-alpha.1", path = "../platform" }
+egui-android-runtime = { version = "0.4.0-alpha.1", path = "../runtime" }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 egui = { workspace = true }
 log = { workspace = true }
 
-egui-android-platform = { version = "0.3.3-alpha.3", path = "../platform" }
-egui-android-runtime = { version = "0.3.3-alpha.3", path = "../runtime" }
+egui-android-platform = { version = "0.4.0-alpha.1", path = "../platform" }
+egui-android-runtime = { version = "0.4.0-alpha.1", path = "../runtime" }

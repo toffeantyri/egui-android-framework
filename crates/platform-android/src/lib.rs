@@ -1,15 +1,44 @@
 //! Android-платформа — главный цикл, EGL, ввод для egui-приложений.
 //!
-//! Отвечает за:
-//! - Android lifecycle (Resume, Pause, Stop, Destroy)
-//! - EGL инициализацию и управление поверхностью
-//! - NDK input (касания, клавиатура, кнопка Back)
-//! - Главный цикл событий с рендерингом через egui_glow
-//! - Backend-абстракцию ([`AndroidBackend`], [`GlBackend`], [`NativeBackend`])
+//! # Структура модулей
+//!
+//! | Модуль | Ответственность |
+//! |--------|----------------|
+//! | [`run`] | Оркестратор: `run()` / `run_with_backend()` |
+//! | [`loop`](r#loop) | `RunState` — состояние и итерация главного цикла |
+//! | [`event`] | Типы событий: `BackendEvent`, `LifecycleEvent`, `Insets` |
+//! | [`lifecycle`] | Обработка InitWindow/Resume/Pause/Stop/Destroy |
+//! | [`graphics`] | `GraphicsPipeline` — Painter + рендеринг |
+//! | [`input_processing`] | Конвертация BackendEvent → egui::Event |
+//! | [`backend`] | `AndroidBackend` trait, `GlBackend`, `NativeBackend` |
+//! | [`egl_backend`] | EGL FFI + `EglState` |
+//! | [`input`] | `InputState` — очередь egui-событий |
+//! | [`insets`] | JNI WindowInsets + `get_pp()` |
+//! | [`platform_state`] | `PlatformState` — insets, theme, clear_color, JNI |
+//! | [`system_bars`] | JNI управление системными барами |
+//! | [`theme`] | Установка clear_color через PlatformState |
+//! | [`waker`] | Реэкспорт `egui_android_platform::Waker` |
+//!
+//! # Архитектура потока данных
+//!
+//! ```text
+//! run::run_with_backend()
+//!   └── RunState::tick()           (каждый кадр)
+//!         ├── backend.poll_events()
+//!         │     ├── Lifecycle → lifecycle::handle_lifecycle_event()
+//!         │     └── Input/Text/Insets/Dpi → input_processing::process_backend_input()
+//!         ├── destroy_requested? → on_destroy + break
+//!         ├── GraphicsPipeline::try_new()
+//!         ├── input_processing::process_back_pressed()
+//!         ├── rt_ctx.check()
+//!         └── GraphicsPipeline::render_frame()
+//!               ├── scissor test (insets)
+//!               ├── egui_ctx.tessellate()
+//!               ├── painter.paint_and_update_textures()
+//!               └── backend.swap_buffers()
+//! ```
 //!
 //! Этот крейт НЕ знает про бизнес-логику, State, Reducer, Components.
-
-#![allow(unused_imports, unused_variables, dead_code)]
 //!
 //! # Сборка APK
 //!
@@ -72,6 +101,8 @@
 //!
 //! EGL и OpenGL вызовы — unsafe. Весь unsafe-код изолирован в `egl_backend`.
 //! IME JNI-вызовы — unsafe, изолированы в backend/gl_backend.rs.
+
+#![allow(unused_imports, unused_variables, dead_code)]
 
 pub mod backend;
 pub mod egl_backend;
