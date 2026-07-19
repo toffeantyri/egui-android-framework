@@ -519,51 +519,145 @@ Architecture Validation
 Только после этого допускается предлагать изменения.
 
 ---
-📐 Правила именования каналов
+📐 Раздел: Правила именования каналов
 
-Общий принцип:
-Формат: `<source>_<semantic>_<direction>`
-где direction = `tx` (transmit) или `rx` (receive).
+🎯 Назначение раздела
+Каналы являются ключевым механизмом однонаправленного потока данных в архитектуре Reactive MVI/UDP. Неправильное или неинтуитивное именование каналов приводит к путанице между слоями, нарушению архитектурного контракта и усложняет чтение кода. Этот раздел устанавливает строгие правила именования каналов, чтобы их назначение было очевидно из имени, без необходимости читать документацию.
 
-Источник (source):
-- `ui` — UI слой
-- `data` — Data Layer
-- `nav` — навигация
+---
 
-Семантика (semantic):
-- `msg` — сообщение (Message)
-- `cmd` — команда (Command)
-- `event` — событие (Event)
-- `dynmsg` — type-erased сообщение
-- `statechanged` — сигнал об изменении состояния
+📡 Общий принцип именования
+Каждый канал должен отражать:
 
-Правила:
-1. Запрещены абстрактные имена: `tx`, `rx`, `cmd`, `notify`, `dispatcher`, `receiver`
-2. Имя должно быть самодокументируемым: источник + семантика + направление
-3. Суффиксы `_tx`/`_rx` обязательны
-4. Имя отражает семантику, а не механику
-5. Единообразие во всех крейтах
+1. Источник — кто отправляет данные  
+2. Семантику — что именно передаётся  
+3. Назначение — кто получает  
+4. Направление — tx (transmit) или rx (receive)
 
-Семантические категории:
+Формат имени:
 
-| Категория | tx | rx | Где используется |
-|---|---|---|---|
-| UI → Component | `ui_msg_tx` | `ui_msg_rx` | Dispatcher |
-| Component → Data Layer | `data_cmd_tx` | `data_cmd_rx` | ComponentContext, data layer |
-| Data Layer → Runtime | `data_statechanged_tx` | `data_statechanged_rx` | UiNotifier |
-| Навигация | `nav_event_tx` | `nav_event_rx` | ComponentContext, ChildStack |
-| UI → ComponentNode (type-erased) | `ui_dynmsg_tx` | `ui_dynmsg_rx` | DynDispatcher |
+`
+<source><semantic><direction>
+`
 
-Таблица переименования (было → стало):
+Где <direction> — tx или rx.
 
-| Было | Стало |
-|---|---|
-| `cmd_tx`/`cmd_rx` | `data_cmd_tx`/`data_cmd_rx` |
-| `notify_tx`/`notify_rx` | `data_statechanged_tx`/`data_statechanged_rx` |
-| `nav_tx`/`nav_rx` | `nav_event_tx`/`nav_event_rx` |
-| `dispatcher`/`receiver` | `ui_msg_tx`/`ui_msg_rx` |
-| `dyn_dispatcher`/`dyn_receiver` | `ui_dynmsg_tx`/`ui_dynmsg_rx` |
+Использование tx/rx обязательно, но они являются только указателем направления, а не смысловой частью имени.
 
-Примечание: `Dispatcher` и `DynDispatcher` — это типы-обёртки, не каналы. Правила именования применяются к переменным-каналам (Sender/Receiver), а не к типам.
+---
 
-Все новые каналы должны соответствовать этому формату.
+📦 Семантические категории каналов
+
+1. Каналы UI → Component (сообщения интерфейса)
+Используются в Dispatcher и DynDispatcher.
+
+- uimsgtx — UI отправляет сообщение компоненту  
+- uimsgrx — Component получает сообщение  
+
+Пример из документа:
+
+> View вызывает dispatch.dispatch(Msg) при событии, сообщения накапливаются в mpsc‑канале, после рендера receiver опустошается и каждое сообщение обрабатывается через Component::handle.  
+> 
+
+---
+
+2. Каналы Component → Data Layer (команды)
+Используются для отправки команд в data layer.
+
+- datacmdtx — Component отправляет команду  
+- datacmdrx — Data Layer принимает команду  
+
+Цитата:
+
+> Component преобразует Intent в Message, не обращаясь к Data Layer напрямую; команды отправляются через cmdtx/cmdrx.  
+> 
+
+---
+
+3. Каналы Data Layer → Runtime (уведомления об изменении состояния)
+Используются в UiNotifier.
+
+- statechangedtx — Data Layer сообщает Runtime, что состояние изменилось  
+- statechangedrx — Runtime слушает изменения  
+
+Цитата:
+
+> data layer всегда шлёт notifytx.send(()) после обновления, UiNotifier вызывает ctx.requestrepaint() и wake().  
+> 
+
+---
+
+4. Каналы навигации
+Используются в ComponentContext и ChildStack.
+
+- naveventtx — компонент инициирует навигационное событие  
+- naveventrx — навигационный слой принимает событие  
+
+---
+
+5. Type‑erased каналы (динамические сообщения)
+Используются в DynDispatcher.
+
+- uidynmsgtx — UI отправляет type‑erased сообщение  
+- uidynmsgrx — ComponentNode принимает сообщение  
+
+Цитата:
+
+> DynDispatcher посылает Box<dyn Any + Send> и позволяет получать типизированный Dispatcher через wrap.  
+> 
+
+---
+
+🧭 Правила обязательны для всех новых каналов
+1. Запрещены абстрактные имена: notifytx, cmdrx, dispatcher, receiver.  
+2. Имя канала должно быть самодокументируемым — по имени должно быть понятно:  
+   - кто отправляет  
+   - что отправляет  
+   - куда отправляет  
+3. Суффиксы tx/rx обязательны — они фиксируют направление.  
+4. Имя должно отражать семантику, а не механику.  
+5. Каналы — часть архитектурного контракта, их имена должны быть единообразны во всех крейтах (runtime, core, ui, navigation, platform).  
+6. Переименование старых каналов обязательно при рефакторинге.
+
+---
+
+🔄 Таблица переименования существующих каналов
+
+| Старое имя | Новое имя | Назначение |
+|-----------|-----------|------------|
+| dispatcher | uimsgtx | UI → Component сообщения |
+| receiver | uimsgrx | Component получает сообщения |
+| dyndispatcher | uidynmsgtx | UI → ComponentNode type‑erased |
+| dynreceiver | uidynmsgrx | ComponentNode получает type‑erased |
+| cmdtx | datacmdtx | Команды в data layer |
+| cmdrx | datacmdrx | Data layer принимает команды |
+| notifytx | statechangedtx | Сигнал обновления состояния |
+| notifyrx | statechangedrx | Runtime слушает обновления |
+| navtx | naveventtx | Навигационные события |
+| navrx | naveventrx | Навигационный слой принимает |
+
+---
+
+🧩 Пример корректного именования в коде
+
+`rust
+pub struct ComponentContext {
+    pub uimsgtx: Sender<Msg>,
+    pub datacmdtx: Sender<DataCmd>,
+    pub naveventtx: Sender<NavEvent>,
+    pub statechangedrx: Receiver<()>,
+}
+`
+
+Такой код самодокументируем, полностью согласован с архитектурой и не требует комментариев.
+
+---
+
+📘 Требование к документации
+Каждый новый канал должен быть описан в архитектурном SKILL в разделе “Поток данных”, включая:
+
+- источник  
+- назначение  
+- семантику  
+- тип сообщения  
+- жизненный цикл канала

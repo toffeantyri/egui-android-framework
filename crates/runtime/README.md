@@ -41,10 +41,10 @@
 ```
 UI (нажатие кнопки)
   → dispatch(Msg)
-    → Receiver накапливает
+    → ui_msg_rx накапливает
       ← после render: drain → Component::handle()
         → Data Layer → store.update()
-          → notify_tx.send(())
+          → data_statechanged_tx.send(())
             → UiNotifier::check() → request_repaint()
               → frame() → render(state, &dispatcher)
 ```

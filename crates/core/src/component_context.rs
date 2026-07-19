@@ -47,9 +47,9 @@ where
     State: Clone + Send + Sync + 'static,
 {
     /// Отправитель навигационных событий в родительский стек.
-    nav_tx: Option<mpsc::Sender<NavEvent>>,
+    navevent_tx: Option<mpsc::Sender<NavEvent>>,
     /// Отправитель команд в data layer.
-    data_cmd_tx: mpsc::Sender<DataCmd>,
+    datacmd_tx: mpsc::Sender<DataCmd>,
     /// Реактивное состояние приложения.
     store: StateStore<State>,
     /// Флаг: контекст жив (не уничтожен).
@@ -87,13 +87,13 @@ where
     /// Принимает опциональный навигационный Sender — `None` для root-компонента,
     /// у которого нет родительского стека.
     pub fn new(
-        nav_tx: Option<mpsc::Sender<NavEvent>>,
-        data_cmd_tx: mpsc::Sender<DataCmd>,
+        navevent_tx: Option<mpsc::Sender<NavEvent>>,
+        datacmd_tx: mpsc::Sender<DataCmd>,
         store: StateStore<State>,
     ) -> Self {
         Self {
-            nav_tx,
-            data_cmd_tx,
+            navevent_tx,
+            datacmd_tx,
             store,
             alive: true,
             back_dispatcher: BackDispatcher::new(),
@@ -128,14 +128,14 @@ where
     /// Безопасно игнорирует вызов, если контекст создан без навигационного канала
     /// (например, для root-компонента).
     pub fn send_nav(&self, event: NavEvent) {
-        if let Some(ref nav_tx) = self.nav_tx {
-            let _ = nav_tx.send(event);
+        if let Some(ref navevent_tx) = self.navevent_tx {
+            let _ = navevent_tx.send(event);
         }
     }
 
     /// Отправить команду в data layer.
     pub fn send_cmd(&self, cmd: DataCmd) {
-        let _ = self.data_cmd_tx.send(cmd);
+        let _ = self.datacmd_tx.send(cmd);
     }
 
     /// Получить доступ к реактивному состоянию приложения.
@@ -147,16 +147,16 @@ where
     }
 
     /// Получить отправитель команд (для клонирования).
-    pub fn data_cmd_tx(&self) -> mpsc::Sender<DataCmd> {
-        self.data_cmd_tx.clone()
+    pub fn datacmd_tx(&self) -> mpsc::Sender<DataCmd> {
+        self.datacmd_tx.clone()
     }
 
     /// Получить отправитель навигации (для клонирования).
     ///
     /// Возвращает `None`, если навигационный канал не был настроен
     /// (root-компонент).
-    pub fn nav_tx(&self) -> Option<mpsc::Sender<NavEvent>> {
-        self.nav_tx.clone()
+    pub fn navevent_tx(&self) -> Option<mpsc::Sender<NavEvent>> {
+        self.navevent_tx.clone()
     }
 
     /// Отметить контекст как уничтоженный.
@@ -180,8 +180,8 @@ where
     DataCmd: Send + 'static,
     State: Clone + Send + Sync + 'static,
 {
-    nav_tx: mpsc::Sender<NavEvent>,
-    data_cmd_tx: mpsc::Sender<DataCmd>,
+    navevent_tx: mpsc::Sender<NavEvent>,
+    datacmd_tx: mpsc::Sender<DataCmd>,
     store: StateStore<State>,
 }
 
@@ -193,13 +193,13 @@ where
 {
     /// Создать новый handle.
     pub fn new(
-        nav_tx: mpsc::Sender<NavEvent>,
-        data_cmd_tx: mpsc::Sender<DataCmd>,
+        navevent_tx: mpsc::Sender<NavEvent>,
+        datacmd_tx: mpsc::Sender<DataCmd>,
         store: StateStore<State>,
     ) -> Self {
         Self {
-            nav_tx,
-            data_cmd_tx,
+            navevent_tx,
+            datacmd_tx,
             store,
         }
     }
@@ -211,8 +211,8 @@ where
     /// StateStore.
     pub fn create_context(&self) -> ComponentContext<NavEvent, DataCmd, State> {
         ComponentContext::new(
-            Some(self.nav_tx.clone()),
-            self.data_cmd_tx.clone(),
+            Some(self.navevent_tx.clone()),
+            self.datacmd_tx.clone(),
             self.store.clone_state(),
         )
     }

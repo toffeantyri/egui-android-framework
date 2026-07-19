@@ -96,7 +96,7 @@ Intent → Message → Reducer → State → UI
 
 **Запрещено**: `poll()`, `update()` для обнаружения изменений, `sync()` для обнаружения, `refresh()`, `check_changes()`
 
-**Разрешено**: событийная модель через `notify_tx`, Reactive State через `watch::channel`
+**Разрешено**: событийная модель через `data_statechanged_tx`, Reactive State через `watch::channel`
 
 ### 4.4 Разделение ответственности
 
@@ -121,7 +121,7 @@ UI → Component → Store → Reducer → Effect → Repository
 - Нет `OnceLock` / глобальных статических переменных для Sender'ов
 - Нет `std::process::exit(0)` — цикл завершается через `break`
 - Комментарии, логи и строки ошибок — на русском
-- Data layer после `store.update()` всегда шлёт `notify_tx.send(())`
+- Data layer после `store.update()` всегда шлёт `data_statechanged_tx.send(())`
 - Component синхронизируется из store через `sync_from_store()` в начале `frame()`
 - Главный цикл событийный: `poll_events(16ms)` + `notifier.check()` + `frame()`
 - Нет `poll()`, `on_event()`, `needs_redraw()` — только событийная модель
@@ -132,8 +132,8 @@ UI → Component → Store → Reducer → Effect → Repository
 
 Опиши:
 - Как сообщения передаются от UI к Component (`Dispatcher` → `Receiver` → `handle`)
-- Как Component взаимодействует с Data Layer (`cmd_tx` → `cmd_rx`)
-- Как State обновляется и уведомляет Runtime (`store.update` → `notify_tx` → `UiNotifier`)
+- Как Component взаимодействует с Data Layer (`data_cmd_tx` → `data_cmd_rx`)
+- Как State обновляется и уведомляет Runtime (`store.update` → `data_statechanged_tx` → `UiNotifier`)
 - Как `Dispatcher` создаётся и используется (создаётся в `frame()`, живёт один кадр)
 - Как `UiNotifier` работает с Runtime (`check` → `request_repaint` → `wake`)
 

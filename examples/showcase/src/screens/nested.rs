@@ -47,8 +47,8 @@ impl NestedScreen {
 impl LifecycleObserver for NestedScreen {}
 
 impl ComponentNode for NestedScreen {
-    fn render(&self, ui: &mut UiWrapper, dyn_dispatcher: &DynDispatcher) {
-        let typed: Dispatcher<RootMsg> = dyn_dispatcher.wrap();
+    fn render(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
+        let typed: Dispatcher<RootMsg> = uidynmsg_tx.wrap();
         let dispatch = &typed;
 
         let c = &Theme::current_from_ui(ui).colors;
@@ -72,7 +72,7 @@ impl ComponentNode for NestedScreen {
                     Text::new("Текущий экран:")
                         .modifier(Modifier::new().padding(8.0))
                         .render(ui, dispatch);
-                    active.render(ui, dyn_dispatcher);
+                    active.render(ui, uidynmsg_tx);
                     Spacer::new(16.0).render(ui, dispatch);
                 }
 

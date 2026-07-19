@@ -201,11 +201,11 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 ```
 UI (нажатие кнопки)
   → dispatch.dispatch(Msg::Increment)
-    → Receiver накапливает сообщения
-      ← после render: drain receiver
+    → ui_msg_rx накапливает сообщения
+      ← после render: drain ui_msg_rx
         → Component::handle(msg) — команда в data layer
           → Data Layer → store.update(|s| s.count += 1)
-            → notify_tx.send(()) — сигнал Runtime
+            → data_statechanged_tx.send(()) — сигнал Runtime
               → UiNotifier::check() → request_repaint() + waker.wake()
                 → frame() → render(state, &dispatcher) → новый UI
 ```

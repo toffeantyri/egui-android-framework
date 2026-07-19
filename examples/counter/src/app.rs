@@ -33,8 +33,8 @@ pub struct AppThemeState {
 pub struct CounterApp {
     root: CounterComponent,
     config: AppConfig,
-    cmd_tx: mpsc::Sender<Msg>,
-    notify_rx: mpsc::Receiver<()>,
+    datacmd_tx: mpsc::Sender<Msg>,
+    statechanged_rx: mpsc::Receiver<()>,
     destroy_requested: bool,
     theme_state: AppThemeState,
     prev_dark_mode: Option<bool>,
@@ -53,13 +53,13 @@ impl Application for CounterApp {
 
         let store = StateStore::new(CounterState { count: 0 });
 
-        let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>();
-        let (notify_tx, notify_rx) = mpsc::channel::<()>();
+        let (datacmd_tx, datacmd_rx) = mpsc::channel::<Msg>();
+        let (statechanged_tx, statechanged_rx) = mpsc::channel::<()>();
 
         let store_for_worker = store.clone_state();
 
         std::thread::spawn(move || {
-            data_layer_worker(cmd_rx, store_for_worker, notify_tx);
+            data_layer_worker(datacmd_rx, store_for_worker, statechanged_tx);
         });
 
         let root = CounterComponent::new(store.clone_state());
@@ -67,8 +67,8 @@ impl Application for CounterApp {
         Self {
             root,
             config,
-            cmd_tx,
-            notify_rx,
+            datacmd_tx,
+            statechanged_rx,
             destroy_requested: false,
             theme_state: AppThemeState::default(),
             prev_dark_mode: None,
@@ -93,7 +93,7 @@ impl Application for CounterApp {
 
     fn create_notifier(&mut self, ctx: &egui::Context, wake: Waker) -> Option<UiNotifier> {
         log::info!("CounterApp: создаём UiNotifier");
-        let rx = std::mem::replace(&mut self.notify_rx, mpsc::channel().1);
+        let rx = std::mem::replace(&mut self.statechanged_rx, mpsc::channel().1);
         Some(UiNotifier::new(ctx.clone(), Some(wake), rx))
     }
 
@@ -132,7 +132,7 @@ impl Application for CounterApp {
 
         self.root.sync_from_store();
 
-        let (dispatcher, receiver) = Dispatcher::new();
+        let (uimsg_tx, uimsg_rx) = Dispatcher::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default()
@@ -144,11 +144,11 @@ impl Application for CounterApp {
                 )
                 .show(ctx, |ui| {
                     let mut wrapper = UiWrapper::new_unconstrained(ui);
-                    self.root.render(&mut wrapper, &dispatcher);
+                    self.root.render(&mut wrapper, &uimsg_tx);
                 });
         });
 
-        for msg in receiver.try_iter() {
+        for msg in uimsg_rx.try_iter() {
             match &msg {
                 Msg::ToggleTheme => {
                     self.theme_state.is_dark_mode = !self.theme_state.is_dark_mode;
@@ -163,7 +163,7 @@ impl Application for CounterApp {
                 }
                 _ => {
                     self.root.handle(msg.clone());
-                    let _ = self.cmd_tx.send(msg);
+                    let _ = self.datacmd_tx.send(msg);
                 }
             }
         }

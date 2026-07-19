@@ -56,8 +56,8 @@ pub struct NavigationHost {
 
 impl NavigationHost {
     pub fn new(store: StateStore<AppState>) -> Self {
-        let (nav_tx, _nav_rx) = std::sync::mpsc::channel();
-        let ctx = ComponentContext::new(None, nav_tx, store.clone_state());
+        let (navevent_tx, _navevent_rx) = std::sync::mpsc::channel();
+        let ctx = ComponentContext::new(None, navevent_tx, store.clone_state());
 
         let stack = Box::new(ChildStack::new());
 
@@ -185,9 +185,9 @@ impl NavigationHost {
     }
 
     /// Рендеринг с DynDispatcher.
-    pub fn render_dyn(&self, ui: &mut UiWrapper, dyn_dispatcher: &DynDispatcher) {
+    pub fn render_dyn(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
         if let Some(active) = self.stack.active() {
-            active.render(ui, dyn_dispatcher);
+            active.render(ui, uidynmsg_tx);
         }
     }
 }

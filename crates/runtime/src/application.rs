@@ -15,7 +15,7 @@
 //!   → sync_from_store()
 //!     → Dispatcher::new()
 //!       → root.render(ui, &dispatcher) — View диспатчит сообщения в момент события
-//!         → drain receiver → handle(msg) → cmd_tx.send(msg)
+//!         → drain receiver → handle(msg) → datacmd_tx.send(msg)
 //! ```
 //!
 //! # Жизненный цикл

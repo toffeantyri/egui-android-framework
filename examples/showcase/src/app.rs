@@ -22,7 +22,7 @@ pub struct ShowcaseApplication {
     root: NavigationHost,
     config: AppConfig,
     state: StateStore<AppState>,
-    _notify_rx: mpsc::Receiver<()>,
+    _statechanged_rx: mpsc::Receiver<()>,
     prev_dark_mode: Option<bool>,
 }
 
@@ -40,7 +40,7 @@ impl Application for ShowcaseApplication {
         let store = StateStore::new(AppState {
             is_dark_mode: false,
         });
-        let (_notify_tx, notify_rx) = mpsc::channel::<()>();
+        let (_statechanged_tx, statechanged_rx) = mpsc::channel::<()>();
 
         let root = NavigationHost::new(store.clone_state());
 
@@ -48,7 +48,7 @@ impl Application for ShowcaseApplication {
             root,
             config,
             state: store,
-            _notify_rx: notify_rx,
+            _statechanged_rx: statechanged_rx,
             prev_dark_mode: None,
         }
     }
@@ -114,7 +114,7 @@ impl Application for ShowcaseApplication {
 
         self.root.sync_from_store();
 
-        let (dyn_dispatcher, dyn_receiver) = DynDispatcher::new();
+        let (uidynmsg_tx, uidynmsg_rx) = DynDispatcher::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default()
@@ -126,12 +126,12 @@ impl Application for ShowcaseApplication {
                 )
                 .show(ctx, |ui| {
                     let mut wrapper = UiWrapper::new_unconstrained(ui);
-                    NavigationHost::render_dyn(&self.root, &mut wrapper, &dyn_dispatcher);
+                    NavigationHost::render_dyn(&self.root, &mut wrapper, &uidynmsg_tx);
                 });
         });
 
         // Drain'им сообщения от View (DynDispatcher)
-        for msg in dyn_receiver.try_iter() {
+        for msg in uidynmsg_rx.try_iter() {
             if let Ok(root_msg) = msg.downcast::<RootMsg>() {
                 self.root.handle_msg(*root_msg);
             }

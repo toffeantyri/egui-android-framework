@@ -1,7 +1,7 @@
 //! Data layer для примера счётчика.
 //!
 //! Получает команды, пишет результат напрямую в StateStore.
-//! После каждого изменения отправляет () в notify_tx —
+//! После каждого изменения отправляет () в statechanged_tx —
 //! UiNotifier в главном цикле подхватит и вызовет wake.
 
 use egui_android_framework::runtime::StateStore;
@@ -11,18 +11,18 @@ use std::sync::mpsc;
 
 /// Фоновая задача: получает команды, обновляет StateStore.
 pub fn data_layer_worker(
-    cmd_rx: mpsc::Receiver<Msg>,
+    datacmd_rx: mpsc::Receiver<Msg>,
     store: StateStore<CounterState>,
-    notify_tx: mpsc::Sender<()>,
+    statechanged_tx: mpsc::Sender<()>,
 ) {
     loop {
-        match cmd_rx.recv() {
+        match datacmd_rx.recv() {
             Ok(Msg::Increment) => {
                 store.update(|state| {
                     state.count = state.count.wrapping_add(1);
                     log::info!("DataLayer: count -> {}", state.count);
                 });
-                let _ = notify_tx.send(());
+                let _ = statechanged_tx.send(());
             }
             Ok(Msg::ToggleTheme) => {
                 // ToggleTheme обрабатывается в Application::frame()

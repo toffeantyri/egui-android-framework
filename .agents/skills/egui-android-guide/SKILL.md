@@ -77,7 +77,7 @@ UI (нажатие кнопки)
         → Component::handle(msg) — отправляет команду в data layer
           → Data Layer (фоновый поток) получает команду
             → store.update(|s| s.count += 1)    ← ЕДИНСТВЕННАЯ ТОЧКА
-              → notify_tx.send(())               ← сигнал в Runtime
+              → data_statechanged_tx.send(())               ← сигнал в Runtime
                 → UiNotifier::check()
                   → ctx.request_repaint()
                   → waker.wake()                    ← Waker из platform (app.run_on_java_main_thread)
@@ -86,7 +86,7 @@ UI (нажатие кнопки)
 ```
 
 Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
-Состояние само уведомляет Runtime через `notify_tx`.
+Состояние само уведомляет Runtime через `data_statechanged_tx`.
 
 ## Упрощённая MVI-модель
 
@@ -352,9 +352,11 @@ fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
 
 | Канал | Тип | Откуда → Куда |
 |---|---|---|
-| `dispatcher` / `receiver` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
-| `cmd_tx` / `cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
-| `notify_tx` / `notify_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
+| `ui_msg_tx` / `ui_msg_rx` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
+| `data_cmd_tx` / `data_cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
+| `data_statechanged_tx` / `data_statechanged_rx` | `mpsc::channel::<()>()` | Data Layer → UiNotifier |
+| `nav_event_tx` / `nav_event_rx` | `mpsc::channel::<NavEvent>()` | Component → ChildStack (навигация) |
+| `ui_dynmsg_tx` / `ui_dynmsg_rx` | `mpsc::channel::<Box<dyn Any + Send>>()` | View → ComponentNode (type-erased) |
 | `store` | `StateStore<T>` (watch) | Data Layer → Component (sync_from_store) |
 
 Dispatcher создаётся каждый кадр в `frame()` и живёт один кадр.
@@ -364,13 +366,13 @@ Receiver drain'ится после render — все сообщения обра
 
 В Decompose-like архитектуре RootComponent не реализует `Component`.
 Рендер идёт через `render_dyn()` с `DynDispatcher`.
-Сообщения от виджетов упаковываются в `Box<dyn Any + Send>` и читаются из `dyn_receiver`.
+Сообщения от виджетов упаковываются в `Box<dyn Any + Send>` и читаются из `ui_dynmsg_rx`.
 
 ```rust,ignore
 fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {
     self.root.sync_from_store();
 
-    let (dyn_dispatcher, dyn_receiver) = DynDispatcher::new();
+    let (ui_dynmsg_tx, ui_dynmsg_rx) = DynDispatcher::new();
 
     let full_output = egui_ctx.run_ui(raw_input, |ctx| {
         egui::CentralPanel::default()
@@ -380,11 +382,11 @@ fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui
                 .outer_margin(egui::Margin::ZERO))
             .show(ctx, |ui| {
                 let mut wrapper = UiWrapper::new_unconstrained(ui);
-                self.root.render_dyn(&mut wrapper, &dyn_dispatcher);
+                self.root.render_dyn(&mut wrapper, &ui_dynmsg_tx);
             });
     });
 
-    for msg in dyn_receiver.try_iter() {
+    for msg in ui_dynmsg_rx.try_iter() {
         if let Ok(root_msg) = msg.downcast::<RootMsg>() {
             self.root.handle_msg(*root_msg);
         }
