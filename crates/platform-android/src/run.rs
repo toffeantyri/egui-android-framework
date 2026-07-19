@@ -15,24 +15,20 @@
 //!       ↓
 //! Application::frame()
 //!       ↓
-//! egui_glow рендеринг
+//! GraphicsPipeline::render_frame()
 
 #![cfg(target_os = "android")]
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use android_activity::AndroidApp;
 
 use crate::backend::{AndroidBackend, AndroidBackendKind};
-
 use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
-
+use crate::graphics::GraphicsPipeline;
 use crate::input::InputState;
 
 use egui_android_runtime::{Application, RuntimeContext};
-
-use glow::HasContext;
 
 /// Запустить egui-приложение на Android.
 ///
@@ -89,7 +85,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     egui_ctx.set_pixels_per_point(backend.dpi());
     egui_ctx.set_fonts(egui::FontDefinitions::default());
 
-    let mut egui_painter: Option<egui_glow::Painter> = None;
+    let mut graphics: Option<GraphicsPipeline> = None;
     let mut input_state = InputState::new();
     let mut last_frame = Instant::now();
     let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
@@ -115,7 +111,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         &mut *backend,
                         &mut app_instance,
                         &egui_ctx,
-                        &mut egui_painter,
+                        &mut graphics,
                         &mut destroy_requested,
                     );
                 }
@@ -188,12 +184,10 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                 },
                 BackendEvent::TextInput(text) => {
                     log::info!("IME: текстовый ввод: '{}'", &text);
-                    // TextInput добавляется в input_state.events как Event::Text
                     input_state.events.push(egui::Event::Text(text));
                 }
                 BackendEvent::InsetsChanged(insets) => {
                     log::info!("InsetsChanged: {:?}", insets);
-                    // Insets будут применены через screen_rect в следующем кадре
                 }
                 BackendEvent::DpiChanged(dpi) => {
                     log::info!("DpiChanged: {}", dpi);
@@ -205,48 +199,26 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
         // --- Проверка завершения ---
         if destroy_requested {
             app_instance.on_destroy();
-            if let Some(ref mut painter) = egui_painter {
-                painter.destroy();
+            if let Some(ref mut g) = graphics {
+                g.destroy();
             }
             backend.destroy_graphics();
             log::info!("Выход из главного цикла");
             break;
         }
 
-        // --- Инициализация Painter (если ещё не создан) ---
-        if egui_painter.is_none() {
-            // Проверяем, инициализирована ли графика через surface_handle
-            let has_graphics = !backend.surface_handle().as_egl_surface().is_null();
-            if has_graphics {
-                let gl = unsafe {
-                    egui_glow::painter::Context::from_loader_function(|name| {
-                        let cname =
-                            std::ffi::CStr::from_ptr(name.as_ptr() as *const std::os::raw::c_char);
-                        get_proc_address(cname)
-                    })
-                };
+        // --- Инициализация GraphicsPipeline (если ещё не создан) ---
+        if graphics.is_none() {
+            graphics = GraphicsPipeline::try_new(
+                &mut *backend,
+                &mut app_instance,
+                &egui_ctx,
+                &waker,
+                &mut rt_ctx,
+                &mut rt_ctx_initialized,
+            );
 
-                match egui_glow::Painter::new(Arc::new(gl), "", None, true) {
-                    Ok(painter) => {
-                        unsafe {
-                            let gl_ptr = &*painter.gl();
-                            gl_ptr.clear_color(0.0, 0.0, 0.0, 1.0);
-                            gl_ptr.clear(glow::COLOR_BUFFER_BIT);
-                        }
-                        egui_painter = Some(painter);
-
-                        if !rt_ctx_initialized {
-                            rt_ctx_initialized = true;
-                            log::info!("run: инициализируем RuntimeContext");
-                            rt_ctx =
-                                Some(app_instance.create_runtime_context(&egui_ctx, waker.clone()));
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Painter::new не удался: {:?}", e);
-                    }
-                }
-            } else {
+            if graphics.is_none() {
                 // Нет EGL — ждём InitWindow
                 continue;
             }
@@ -317,42 +289,26 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                 continue;
             }
 
-            // Рендеринг через egui_glow
-            if let Some(ref mut painter) = egui_painter {
-                unsafe {
-                    let gl = &*painter.gl();
-
-                    gl.disable(glow::SCISSOR_TEST);
-                    let (cr, cg, cb) = backend.platform_state().current_clear_color();
-                    gl.clear_color(cr, cg, cb, 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-
-                    let scissor_x = (insets.left * pp) as i32;
-                    let scissor_y = (insets.bottom * pp) as i32;
-                    let scissor_w = (w as f32 - insets.left * pp - insets.right * pp) as i32;
-                    let scissor_h = (h as f32 - insets.top * pp - insets.bottom * pp) as i32;
-                    gl.enable(glow::SCISSOR_TEST);
-                    gl.scissor(scissor_x, scissor_y, scissor_w.max(1), scissor_h.max(1));
-                }
-
-                let primitives =
-                    egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
-
-                painter.paint_and_update_textures(
-                    [w, h],
-                    full_output.pixels_per_point,
-                    &primitives,
-                    &full_output.textures_delta,
+            // Рендеринг через GraphicsPipeline
+            if let Some(ref mut g) = graphics {
+                let clear_color = backend.platform_state().current_clear_color();
+                let success = g.render_frame(
+                    &egui_ctx,
+                    &full_output,
+                    (w, h),
+                    clear_color,
+                    (insets.left, insets.top, insets.right, insets.bottom),
+                    pp,
+                    &mut *backend,
                 );
-            }
-
-            // Swap buffers через backend
-            if let Err(e) = backend.swap_buffers() {
-                log::warn!("swap_buffers: {}", e);
-                if let Some(ref mut p) = egui_painter {
-                    p.destroy();
+                if !success {
+                    // swap_buffers не удался — пересоздадим painter
+                    let mut p = None;
+                    std::mem::swap(&mut p, &mut graphics);
+                    if let Some(mut old) = p {
+                        old.destroy();
+                    }
                 }
-                egui_painter = None;
             }
         }
     }
@@ -399,27 +355,5 @@ fn get_current_insets(
         top: top_pt,
         right: right_pt,
         bottom: bottom_pt,
-    }
-}
-
-/// Получить адрес OpenGL функции через dlsym.
-fn get_proc_address(name: &std::ffi::CStr) -> *const std::ffi::c_void {
-    // На Android нужно использовать eglGetProcAddress для загрузки OpenGL ES функций.
-    // dlsym(RTLD_DEFAULT) не находит GL функции, экспортируемые драйвером.
-    unsafe {
-        let func = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr());
-        if !func.is_null() {
-            return func;
-        }
-    }
-    // Fallback на eglGetProcAddress
-    unsafe {
-        type EglGetProcAddress =
-            unsafe extern "system" fn(*const libc::c_char) -> *const std::ffi::c_void;
-        let egl_get_proc_addr: EglGetProcAddress = std::mem::transmute(libc::dlsym(
-            libc::RTLD_DEFAULT,
-            b"eglGetProcAddress\0".as_ptr() as *const libc::c_char,
-        ));
-        egl_get_proc_addr(name.as_ptr())
     }
 }

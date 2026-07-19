@@ -14,6 +14,7 @@
 
 use crate::backend::AndroidBackend;
 use crate::event::LifecycleEvent;
+use crate::graphics::GraphicsPipeline;
 use egui_android_runtime::Application;
 
 /// Обработать событие жизненного цикла.
@@ -26,20 +27,18 @@ use egui_android_runtime::Application;
 /// * `backend` — backend платформы (для InitWindow)
 /// * `app_instance` — экземпляр приложения
 /// * `egui_ctx` — контекст egui
-/// * `egui_painter` — опциональный painter (для InitWindow)
+/// * `graphics` — опциональный GraphicsPipeline (для InitWindow: пересоздание surface)
 /// * `destroy_requested` — флаг завершения (устанавливается при Destroy)
 pub fn handle_lifecycle_event<A: Application>(
     event: LifecycleEvent,
     backend: &mut dyn AndroidBackend,
     app_instance: &mut A,
     egui_ctx: &egui::Context,
-    egui_painter: &mut Option<egui_glow::Painter>,
+    graphics: &mut Option<GraphicsPipeline>,
     destroy_requested: &mut bool,
 ) {
     match event {
-        LifecycleEvent::InitWindow => {
-            handle_init_window(backend, app_instance, egui_ctx, egui_painter)
-        }
+        LifecycleEvent::InitWindow => handle_init_window(backend, app_instance, egui_ctx, graphics),
         LifecycleEvent::Resume => handle_resume(app_instance),
         LifecycleEvent::Pause => handle_pause(app_instance),
         LifecycleEvent::Stop => handle_stop(app_instance),
@@ -59,7 +58,7 @@ fn handle_init_window<A: Application>(
     backend: &mut dyn AndroidBackend,
     app_instance: &mut A,
     egui_ctx: &egui::Context,
-    egui_painter: &mut Option<egui_glow::Painter>,
+    graphics: &mut Option<GraphicsPipeline>,
 ) {
     log::info!("Lifecycle: InitWindow");
 
@@ -70,17 +69,17 @@ fn handle_init_window<A: Application>(
         // InitWindow после Pause/Resume — пересоздаём surface
         if let Err(e) = backend.recreate_surface() {
             log::error!("Ошибка пересоздания EGL surface: {}", e);
-            if let Some(ref mut p) = egui_painter {
-                p.destroy();
+            if let Some(ref mut g) = graphics {
+                g.destroy();
             }
-            *egui_painter = None;
+            *graphics = None;
             backend.destroy_graphics();
         } else {
             // Повторно инициализируем painter с новым surface
-            if let Some(ref mut p) = egui_painter {
+            if let Some(ref mut g) = graphics {
                 unsafe {
                     use glow::HasContext;
-                    let gl = &*p.gl();
+                    let gl = &*g.painter.gl();
                     gl.clear_color(0.0, 0.0, 0.0, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
