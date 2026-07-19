@@ -15,7 +15,7 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::{Component, LifecycleObserver, UiWrapper},
     platform::Waker,
-    runtime::{AppConfig, Application, Dispatcher, RuntimeContext, StateStore, UiNotifier},
+    runtime::{Application, Dispatcher, RuntimeConfig, RuntimeContext, StateStore, UiNotifier},
     ui::theme::MaterialTheme,
 };
 
@@ -32,7 +32,7 @@ pub struct AppThemeState {
 /// Приложение-счётчик.
 pub struct CounterApp {
     root: CounterComponent,
-    config: AppConfig,
+    config: RuntimeConfig,
     datacmd_tx: mpsc::Sender<Msg>,
     statechanged_rx: mpsc::Receiver<()>,
     destroy_requested: bool,
@@ -46,7 +46,7 @@ impl Application for CounterApp {
     type RootComponent = CounterComponent;
 
     fn create() -> Self {
-        let config = AppConfig {
+        let config = RuntimeConfig {
             log_tag: "egui-counter".into(),
             ..Default::default()
         };
@@ -83,11 +83,11 @@ impl Application for CounterApp {
         &self.root
     }
 
-    fn config(&self) -> &AppConfig {
+    fn config(&self) -> &RuntimeConfig {
         &self.config
     }
 
-    fn config_mut(&mut self) -> &mut AppConfig {
+    fn config_mut(&mut self) -> &mut RuntimeConfig {
         &mut self.config
     }
 

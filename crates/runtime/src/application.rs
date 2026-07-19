@@ -34,6 +34,8 @@ use egui_android_platform::Waker;
 
 use crate::runtime_context::RuntimeContext;
 
+use std::sync::mpsc;
+
 use egui;
 
 // ─── Новый Application ─────────────────────────────────────────────────────────
@@ -63,10 +65,10 @@ pub trait Application: Sized + 'static {
     fn root_ref(&self) -> &Self::RootComponent;
 
     /// Получить конфиг приложения.
-    fn config(&self) -> &AppConfig;
+    fn config(&self) -> &RuntimeConfig;
 
     /// Получить мутабельную ссылку на конфиг.
-    fn config_mut(&mut self) -> &mut AppConfig;
+    fn config_mut(&mut self) -> &mut RuntimeConfig;
 
     /// Создать контекст выполнения Runtime.
     ///
@@ -164,18 +166,25 @@ pub trait Application: Sized + 'static {
     fn on_restore_state(&mut self) {}
 }
 
-// ─── AppConfig ─────────────────────────────────────────────────────────────────
+// ─── RuntimeConfig ──────────────────────────────────────────────────────────────
 
-/// Конфигурация приложения.
+/// Конфигурация выполнения приложения.
+///
+/// Содержит настройки Runtime, не связанные с платформой:
+/// - `log_tag` — тег для логгера (Android logcat)
+/// - `target_fps` — целевая частота кадров
+///
+/// Создаётся в `Application::create()` и хранится в экземпляре приложения.
+/// Платформа читает эти значения через `Application::config()`.
 #[derive(Clone)]
-pub struct AppConfig {
-    /// Тег для логгера Android.
+pub struct RuntimeConfig {
+    /// Тег для логгера (Android logcat).
     pub log_tag: String,
     /// Целевой FPS (кадров в секунду).
     pub target_fps: u32,
 }
 
-impl Default for AppConfig {
+impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             log_tag: "egui_app".to_owned(),
@@ -184,33 +193,55 @@ impl Default for AppConfig {
     }
 }
 
-// ─── DataLayerHandle (каркас) ──────────────────────────────────────────────────
+// ─── DataLayerHandle ─────────────────────────────────────────────────────────
 
 /// Handle для взаимодействия с data layer.
 ///
 /// Позволяет компонентам отправлять команды в фоновый data layer
 /// через `send()`. Создаётся в `Application::create()`.
+///
+/// # Типовой паттерн
+///
+/// ```rust,ignore
+/// let (data_cmd_tx, data_cmd_rx) = mpsc::channel::<MyMsg>();
+/// let data_handle = DataLayerHandle::new(data_cmd_tx.clone());
+///
+/// // data_handle передаётся в ComponentContext
+/// let ctx = ComponentContext::new(nav_tx, data_cmd_tx, store);
+///
+/// // data_cmd_rx передаётся в фоновый поток data layer
+/// std::thread::spawn(move || data_layer_worker(data_cmd_rx));
+/// ```
 #[derive(Clone)]
-pub struct DataLayerHandle {
-    // TODO: добавить Sender<DataCmd>
+pub struct DataLayerHandle<DataCmd: Send + 'static> {
+    tx: mpsc::Sender<DataCmd>,
 }
 
-impl DataLayerHandle {
-    /// Создать новый handle (заглушка).
-    pub fn new() -> Self {
-        Self {}
+impl<DataCmd: Send + 'static> DataLayerHandle<DataCmd> {
+    /// Создать новый handle.
+    pub fn new(tx: mpsc::Sender<DataCmd>) -> Self {
+        Self { tx }
     }
 
-    /// Отправить команду в data layer (заглушка).
-    pub fn send(&self, _cmd: impl Send + 'static) {
-        // TODO: реализовать отправку через канал
-        log::info!("DataLayerHandle::send — заглушка, команда не отправлена");
+    /// Отправить команду в data layer.
+    ///
+    /// Если data layer завершил работу (канал закрыт) — ошибка
+    /// логируется, но не паникует.
+    pub fn send(&self, cmd: DataCmd) {
+        if let Err(e) = self.tx.send(cmd) {
+            log::error!("DataLayerHandle: ошибка отправки команды: {}", e);
+        }
+    }
+
+    /// Получить Sender для передачи в ComponentContext.
+    pub fn sender(&self) -> mpsc::Sender<DataCmd> {
+        self.tx.clone()
     }
 }
 
-impl Default for DataLayerHandle {
-    fn default() -> Self {
-        Self::new()
+impl<DataCmd: Send + 'static> From<mpsc::Sender<DataCmd>> for DataLayerHandle<DataCmd> {
+    fn from(tx: mpsc::Sender<DataCmd>) -> Self {
+        Self::new(tx)
     }
 }
 

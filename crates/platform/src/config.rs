@@ -2,21 +2,13 @@
 
 /// Конфигурация платформы.
 ///
-/// Содержит настройки, общие для всех платформ.
-#[derive(Clone)]
+/// Содержит настройки, специфичные для платформенного уровня:
+/// - режим vsync
+///
+/// Настройки приложения (log_tag, target_fps) находятся в `RuntimeConfig`
+/// в крейте `egui-android-runtime`.
+#[derive(Clone, Default)]
 pub struct PlatformConfig {
-    /// Тег для логгера.
-    pub log_tag: String,
-
-    /// Целевой FPS (кадров в секунду).
-    pub target_fps: u32,
-}
-
-impl Default for PlatformConfig {
-    fn default() -> Self {
-        Self {
-            log_tag: "egui_app".to_owned(),
-            target_fps: 60,
-        }
-    }
+    /// Вертикальная синхронизация (ожидание vsync перед swap buffers).
+    pub vsync: bool,
 }

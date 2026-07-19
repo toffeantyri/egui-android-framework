@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::{LifecycleObserver, UiWrapper},
     platform::Waker,
-    runtime::{AppConfig, Application, DynDispatcher, RuntimeContext, StateStore},
+    runtime::{Application, DynDispatcher, RuntimeConfig, RuntimeContext, StateStore},
     ui::theme::MaterialTheme,
 };
 
@@ -20,7 +20,7 @@ pub struct AppState {
 /// Приложение-витрина.
 pub struct ShowcaseApplication {
     root: NavigationHost,
-    config: AppConfig,
+    config: RuntimeConfig,
     state: StateStore<AppState>,
     _statechanged_rx: mpsc::Receiver<()>,
     prev_dark_mode: Option<bool>,
@@ -32,7 +32,7 @@ impl Application for ShowcaseApplication {
     type RootComponent = NavigationHost;
 
     fn create() -> Self {
-        let config = AppConfig {
+        let config = RuntimeConfig {
             log_tag: "egui-showcase".into(),
             target_fps: 60,
         };
@@ -61,11 +61,11 @@ impl Application for ShowcaseApplication {
         &self.root
     }
 
-    fn config(&self) -> &AppConfig {
+    fn config(&self) -> &RuntimeConfig {
         &self.config
     }
 
-    fn config_mut(&mut self) -> &mut AppConfig {
+    fn config_mut(&mut self) -> &mut RuntimeConfig {
         &mut self.config
     }
 
