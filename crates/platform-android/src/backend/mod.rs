@@ -6,6 +6,13 @@
 //! - [`GlBackend`] — GL-режим с IME-поддержкой через JNI
 //! - [`NativeBackend`] — NativeActivity режим (fallback)
 //!
+//! Типы событий определены в [`crate::event`]:
+//! - [`BackendEvent`](crate::event::BackendEvent)
+//! - [`LifecycleEvent`](crate::event::LifecycleEvent)
+//! - [`InputEvent`](crate::event::InputEvent)
+//! - [`Insets`](crate::event::Insets)
+//! - [`BackendError`](crate::event::BackendError)
+//!
 //! # Архитектура
 //!
 //! Каждый backend реализует [`AndroidBackend`] и возвращает [`BackendEvent`].
@@ -22,33 +29,10 @@ mod gl_backend;
 #[cfg(target_os = "android")]
 mod native_backend;
 
+use crate::event::{BackendError, BackendEvent, InputEvent, Insets, LifecycleEvent, TouchPhase};
 use crate::platform_state::PlatformState;
 use crate::waker::Waker;
 use egui_android_platform::SystemTheme;
-
-/// Ошибка backend'а.
-#[derive(Debug)]
-pub enum BackendError {
-    /// EGL инициализация не удалась.
-    EglInit(String),
-    /// Нет NativeWindow.
-    NoNativeWindow,
-    /// Пересоздание EGL surface не удалось.
-    RecreateSurface(String),
-    /// Прочие ошибки.
-    Other(String),
-}
-
-impl std::fmt::Display for BackendError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BackendError::EglInit(msg) => write!(f, "EGL init: {}", msg),
-            BackendError::NoNativeWindow => write!(f, "нет NativeWindow"),
-            BackendError::RecreateSurface(msg) => write!(f, "recreate surface: {}", msg),
-            BackendError::Other(msg) => write!(f, "{}", msg),
-        }
-    }
-}
 
 /// Стиль системных баров.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,83 +66,6 @@ impl SurfaceHandle {
 // в многопоточном контексте — всё в главном потоке.
 unsafe impl Send for SurfaceHandle {}
 unsafe impl Sync for SurfaceHandle {}
-
-/// Отступы (WindowInsets) в точках.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Insets {
-    pub left: f32,
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
-}
-
-impl Default for Insets {
-    fn default() -> Self {
-        Self {
-            left: 0.0,
-            top: 0.0,
-            right: 0.0,
-            bottom: 0.0,
-        }
-    }
-}
-
-/// Событие бэкенда.
-///
-/// Пробрасывается из backend в Runtime для конвертации в egui-события.
-pub enum BackendEvent {
-    /// Событие жизненного цикла.
-    Lifecycle(LifecycleEvent),
-    /// Событие ввода (touch, key).
-    Input(InputEvent),
-    /// Текстовый ввод от IME.
-    TextInput(String),
-    /// Изменение WindowInsets.
-    InsetsChanged(Insets),
-    /// Изменение DPI.
-    DpiChanged(f32),
-}
-
-/// Событие жизненного цикла.
-#[derive(Debug, Clone, Copy)]
-pub enum LifecycleEvent {
-    /// Окно инициализировано (или пересоздано).
-    InitWindow,
-    /// Приложение возобновило работу.
-    Resume,
-    /// Приложение приостановлено.
-    Pause,
-    /// Приложение остановлено.
-    Stop,
-    /// Приложение уничтожено.
-    Destroy,
-}
-
-/// Событие ввода.
-pub enum InputEvent {
-    /// Сенсорное событие.
-    Touch { phase: TouchPhase, pos: egui::Pos2 },
-    /// Событие кнопки указателя.
-    PointerButton { pos: egui::Pos2, pressed: bool },
-    /// Событие клавиши.
-    Key { key_code: i32, action: KeyAction },
-}
-
-/// Фаза сенсорного события.
-#[derive(Debug, Clone, Copy)]
-pub enum TouchPhase {
-    Start,
-    Move,
-    End,
-    Cancel,
-}
-
-/// Действие клавиши.
-#[derive(Debug, Clone, Copy)]
-pub enum KeyAction {
-    Down,
-    Up,
-}
 
 /// Базовый трейт для Android backend'ов.
 ///

@@ -17,11 +17,12 @@ use android_activity::{
     AndroidApp, InputStatus, MainEvent,
 };
 
-use crate::backend::{
-    AndroidBackend, BackendError, BackendEvent, InputEvent as BackendInputEvent, Insets,
-    KeyAction as BackendKeyAction, LifecycleEvent, SurfaceHandle, SystemBarsStyle, TouchPhase,
-};
+use crate::backend::{AndroidBackend, SurfaceHandle, SystemBarsStyle};
 use crate::egl_backend::EglState;
+use crate::event::{
+    BackendError, BackendEvent, InputEvent as BackendInputEvent, Insets,
+    KeyAction as BackendKeyAction, LifecycleEvent, TouchPhase,
+};
 use crate::platform_state::PlatformState;
 use crate::waker::Waker;
 use egui_android_platform::SystemTheme;
@@ -180,6 +181,7 @@ impl AndroidBackend for NativeBackend {
             .map(|nw| crate::insets::get_pp(&self.app.config(), nw.width(), nw.height()))
             .unwrap_or(1.0);
         self.dpi = pp;
+
         Ok(())
     }
 
@@ -312,7 +314,9 @@ impl AndroidBackend for NativeBackend {
 
         let vm_ptr = vm as usize;
         let activity_ptr = activity as usize;
-        let theme = self.platform_state.current_theme();
+        let theme = self
+            .platform_state
+            .current_theme_or_fallback(egui_android_platform::SystemTheme::Light);
 
         match style {
             SystemBarsStyle::Transparent => {

@@ -112,6 +112,15 @@ impl PlatformState {
         inner.system_theme.expect("set_system_theme не был вызван")
     }
 
+    /// Получить текущую тему с fallback, если тема ещё не установлена.
+    pub fn current_theme_or_fallback(&self, fallback: SystemTheme) -> SystemTheme {
+        let inner = self.inner.lock().unwrap();
+        if let Some(t) = inner.theme_override {
+            return t;
+        }
+        inner.system_theme.unwrap_or(fallback)
+    }
+
     // ─── Clear color ────────────────────────────────────────────
 
     /// Установить clear color (упакованный 0xRRGGBB).
@@ -121,9 +130,7 @@ impl PlatformState {
 
     /// Установить clear color из Color32.
     pub fn set_clear_color_from(&self, color: egui::Color32) {
-        let packed = ((color.r() as u32) << 16)
-            | ((color.g() as u32) << 8)
-            | (color.b() as u32);
+        let packed = ((color.r() as u32) << 16) | ((color.g() as u32) << 8) | (color.b() as u32);
         self.set_clear_color(packed);
     }
 

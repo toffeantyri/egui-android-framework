@@ -24,9 +24,9 @@ use std::time::{Duration, Instant};
 
 use android_activity::AndroidApp;
 
-use crate::backend::{
-    AndroidBackend, AndroidBackendKind, BackendEvent, InputEvent, LifecycleEvent,
-};
+use crate::backend::{AndroidBackend, AndroidBackendKind};
+
+use crate::event::{BackendEvent, InputEvent, KeyAction, LifecycleEvent, TouchPhase};
 
 use crate::input::InputState;
 
@@ -147,6 +147,8 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
 
                         // Системные бары уже настроены при старте через run_on_java_main_thread
 
+                        // Системные бары уже настроены при старте через run_on_java_main_thread
+
                         // Точка интеграции: IME, Insets, DPI
                         //
                         // IME: клавиатура управляется через
@@ -188,49 +190,39 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                 },
                 BackendEvent::Input(input_ev) => match input_ev {
                     InputEvent::Touch { phase, pos } => {
-                        let egui_phase = match phase {
-                            crate::backend::TouchPhase::Start => egui::TouchPhase::Start,
-                            crate::backend::TouchPhase::Move => egui::TouchPhase::Move,
-                            crate::backend::TouchPhase::End
-                            | crate::backend::TouchPhase::Cancel => egui::TouchPhase::End,
-                        };
                         // Для End/Cancel используем последнюю известную позицию,
                         // так как backend шлёт Pos2::ZERO для этих фаз.
                         let actual_pos = match phase {
-                            crate::backend::TouchPhase::End
-                            | crate::backend::TouchPhase::Cancel => {
+                            TouchPhase::End | TouchPhase::Cancel => {
                                 input_state.pointer_pos.unwrap_or(pos)
                             }
                             _ => pos,
                         };
-                        let egui_touch_phase = match phase {
-                            crate::backend::TouchPhase::Start => egui::TouchPhase::Start,
-                            crate::backend::TouchPhase::Move => egui::TouchPhase::Move,
-                            crate::backend::TouchPhase::End
-                            | crate::backend::TouchPhase::Cancel => egui::TouchPhase::End,
+                        let egui_phase = match phase {
+                            TouchPhase::Start => egui::TouchPhase::Start,
+                            TouchPhase::Move => egui::TouchPhase::Move,
+                            TouchPhase::End | TouchPhase::Cancel => egui::TouchPhase::End,
                         };
                         input_state.events.push(egui::Event::Touch {
                             device_id: egui::TouchDeviceId(0),
                             id: egui::TouchId(0),
-                            phase: egui_touch_phase,
+                            phase: egui_phase,
                             pos: actual_pos,
                             force: None,
                         });
                         // Для Move дополнительно шлём PointerMoved — без него egui
                         // не отслеживает позицию указателя, и скролл не работает.
-                        if matches!(phase, crate::backend::TouchPhase::Move) {
+                        if matches!(phase, TouchPhase::Move) {
                             input_state
                                 .events
                                 .push(egui::Event::PointerMoved(actual_pos));
                         }
 
                         match phase {
-                            crate::backend::TouchPhase::Start
-                            | crate::backend::TouchPhase::Move => {
+                            TouchPhase::Start | TouchPhase::Move => {
                                 input_state.pointer_pos = Some(pos);
                             }
-                            crate::backend::TouchPhase::End
-                            | crate::backend::TouchPhase::Cancel => {
+                            TouchPhase::End | TouchPhase::Cancel => {
                                 // Не сбрасываем pointer_pos — он нужен для PointerButton UP ниже
                             }
                         }
@@ -257,7 +249,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     }
                     InputEvent::Key { key_code, action } => {
                         if key_code == 4 // AKEYCODE_BACK = 4
-                            && matches!(action, crate::backend::KeyAction::Down)
+                            && matches!(action, KeyAction::Down)
                         {
                             input_state.back_pressed = true;
                         }
@@ -445,12 +437,12 @@ fn get_current_insets(
     pp: f32,
     w: u32,
     h: u32,
-) -> crate::backend::Insets {
+) -> crate::event::Insets {
     // 1. Пробуем JNI insets через PlatformState
     let state = backend.platform_state();
     if state.insets_are_valid() {
         let px = state.insets_px();
-        return crate::backend::Insets {
+        return crate::event::Insets {
             left: px.left as f32 / pp,
             top: px.top as f32 / pp,
             right: px.right as f32 / pp,
@@ -471,7 +463,7 @@ fn get_current_insets(
         left_pt, top_pt, bottom_pt, right_pt, pp
     );
 
-    crate::backend::Insets {
+    crate::event::Insets {
         left: left_pt,
         top: top_pt,
         right: right_pt,
