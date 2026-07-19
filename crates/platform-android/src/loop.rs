@@ -178,6 +178,15 @@ impl RunState {
                 return true;
             }
 
+            // Синхронизируем clear color с темой Application
+            // После frame() egui-стиль уже содержит panel_fill, установленный
+            // Application через MaterialTheme::apply().
+            {
+                let style = egui_ctx.style_of(egui::Theme::Light).as_ref().clone();
+                let bg = style.visuals.panel_fill;
+                backend.platform_state().set_clear_color_from(bg);
+            }
+
             // Рендеринг через GraphicsPipeline
             if let Some(ref mut g) = self.graphics {
                 let clear_color = backend.platform_state().current_clear_color();

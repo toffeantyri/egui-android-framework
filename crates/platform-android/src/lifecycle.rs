@@ -98,8 +98,11 @@ fn handle_init_window<A: Application>(
     // Обновляем системные отступы через JNI
     backend.update_system_insets();
 
-    // Сохраняем PlatformState в egui::Context для Application
-    backend.platform_state().store_in_ctx(egui_ctx);
+    // Применяем clear_color и system_bars при старте
+    // (используем системную тему, если Application ещё не выставил свою)
+    let clear = egui::Color32::from_rgb(0x33, 0x33, 0x33);
+    backend.platform_state().set_clear_color_from(clear);
+    crate::system_bars::apply_system_bars_for_platform_state(backend.platform_state());
 
     // Обновляем DPI
     egui_ctx.set_pixels_per_point(backend.dpi());

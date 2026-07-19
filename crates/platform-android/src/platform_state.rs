@@ -1,7 +1,8 @@
 //! Состояние платформы — единое хранилище для insets, темы, clear_color и JNI-указателей.
 //!
 //! Заменяет глобальные статики `Atomic*` и `OnceLock` в `insets.rs`, `theme.rs`, `system_bars.rs`.
-//! Хранится в backend'е и синхронизируется с egui::Context для доступа из Application.
+//! Хранится только в backend'е. Доступ через `backend.platform_state()`.
+//! В `egui::Context` не сохраняется — Application не имеет к нему прямого доступа.
 
 #![cfg(target_os = "android")]
 
@@ -51,7 +52,7 @@ impl Default for PlatformStateInner {
 /// Состояние платформы — thread-safe обёртка над Arc<Mutex>.
 ///
 /// Клонируется дёшево (Arc), все клоны разделяют одно состояние.
-/// Может храниться в egui::Context::data() для доступа из Application.
+/// Хранится только в backend'е.
 #[derive(Debug, Clone)]
 pub struct PlatformState {
     inner: Arc<Mutex<PlatformStateInner>>,
@@ -161,29 +162,8 @@ impl PlatformState {
     pub fn activity_ptr(&self) -> *mut std::ffi::c_void {
         self.inner.lock().unwrap().activity_ptr
     }
-
-    // ─── Хранение в egui::Context ─────────────────────────────────
-
-    /// Ключ для хранения PlatformState в egui::Context::data().
-    fn cx_key() -> egui::Id {
-        egui::Id::new("platform_state")
-    }
-
-    /// Сохранить PlatformState в egui::Context.
-    pub fn store_in_ctx(&self, ctx: &egui::Context) {
-        ctx.data_mut(|data| {
-            data.insert_temp(Self::cx_key(), self.clone());
-        });
-    }
-
-    /// Получить PlatformState из egui::Context.
-    pub fn from_ctx(ctx: &egui::Context) -> Option<Self> {
-        ctx.data(|data| data.get_temp::<PlatformState>(Self::cx_key()))
-    }
 }
 
-// PlatformState хранится в egui::Context::data(), а IdTypeMap требует Clone + Send + Sync
-// Arc<Mutex<...>> выполняет все требования
 unsafe impl Send for PlatformState {}
 unsafe impl Sync for PlatformState {}
 

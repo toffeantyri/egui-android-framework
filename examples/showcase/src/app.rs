@@ -93,23 +93,10 @@ impl Application for ShowcaseApplication {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // При смене темы — обновляем системные бары (один раз, не каждый кадр)
+        // При смене темы — только применяем MaterialTheme в egui::Context.
+        // platform-android сам определит clear_color и system_bars.
         if self.prev_dark_mode != Some(new_dark) {
             self.prev_dark_mode = Some(new_dark);
-            #[cfg(target_os = "android")]
-            {
-                use egui_android_framework::platform_android::system_bars;
-                use egui_android_framework::platform_android::theme::set_clear_color_from;
-
-                let bg_color = if new_dark {
-                    MaterialTheme::dark().colors.background
-                } else {
-                    MaterialTheme::light().colors.background
-                };
-
-                set_clear_color_from(egui_ctx, bg_color);
-                system_bars::apply_system_bars_for_theme(egui_ctx);
-            }
         }
 
         self.root.sync_from_store();

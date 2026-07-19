@@ -14,22 +14,20 @@
 
 #![cfg(target_os = "android")]
 
+use crate::platform_state::PlatformState;
 use egui_android_platform::SystemTheme;
 
 pub use self::inner::*;
 
-/// Применить цвета системных баров для текущей темы через PlatformState в egui::Context.
+/// Применить цвета системных баров для текущей темы через PlatformState в backend.
 ///
-/// Вызывается из `Application::frame()`.
-pub fn apply_system_bars_for_theme(ctx: &egui::Context) {
-    use crate::platform_state::PlatformState;
-    if let Some(state) = PlatformState::from_ctx(ctx) {
-        let vm = state.vm_ptr();
-        let activity = state.activity_ptr();
-        if !vm.is_null() && !activity.is_null() {
-            let theme = state.current_theme();
-            inner::apply_system_bars_color_jni(vm, activity, theme);
-        }
+/// Вызывается из platform-android при инициализации или при смене темы.
+pub fn apply_system_bars_for_platform_state(state: &PlatformState) {
+    let vm = state.vm_ptr();
+    let activity = state.activity_ptr();
+    if !vm.is_null() && !activity.is_null() {
+        let theme = state.current_theme();
+        inner::apply_system_bars_color_jni(vm, activity, theme);
     }
 }
 

@@ -115,20 +115,10 @@ impl Application for CounterApp {
             MaterialTheme::light().apply(egui_ctx);
         }
 
-        // При смене темы — обновляем системные бары (один раз, не каждый кадр)
+        // При смене темы — только применяем MaterialTheme в egui::Context.
+        // platform-android сам определит clear_color и system_bars.
         if self.prev_dark_mode != Some(self.theme_state.is_dark_mode) {
             self.prev_dark_mode = Some(self.theme_state.is_dark_mode);
-            #[cfg(target_os = "android")]
-            {
-                use egui_android_framework::platform_android::system_bars;
-                use egui_android_framework::platform_android::theme::set_clear_color_from;
-                use egui_android_framework::ui::theme::Theme;
-
-                let theme = Theme::current(egui_ctx);
-                set_clear_color_from(egui_ctx, theme.colors.background);
-
-                system_bars::apply_system_bars_for_theme(egui_ctx);
-            }
         }
 
         self.root.sync_from_store();

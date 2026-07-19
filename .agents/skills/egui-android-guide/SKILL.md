@@ -5,6 +5,7 @@ description: Архитектура, правила и идиомы проект
 
 # egui-android-framework: Архитектура и правила
 
+Никогда не делаешь коммит, пока тебя о этом прямо не попросили.
 Проект — MVI-фреймворк для запуска egui-приложений на Android,
 разделённый на 7 крейтов в едином workspace.
 Вдохновлён [Decompose](https://github.com/arkivanov/Decompose) и Jetpack Compose:

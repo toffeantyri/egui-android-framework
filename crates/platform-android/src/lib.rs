@@ -116,7 +116,7 @@ pub mod r#loop;
 pub mod platform_state;
 pub mod run;
 pub mod system_bars;
-pub mod theme;
+
 pub mod waker;
 
 #[cfg(target_os = "android")]
