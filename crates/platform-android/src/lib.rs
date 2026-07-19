@@ -78,6 +78,7 @@ pub mod egl_backend;
 pub mod event;
 pub mod graphics;
 pub mod input;
+pub mod input_processing;
 pub mod insets;
 pub mod lifecycle;
 pub mod platform_state;

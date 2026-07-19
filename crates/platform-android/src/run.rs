@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use android_activity::AndroidApp;
 
 use crate::backend::{AndroidBackend, AndroidBackendKind};
-use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
+use crate::event::BackendEvent;
 use crate::graphics::GraphicsPipeline;
 use crate::input::InputState;
 
@@ -115,83 +115,12 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                         &mut destroy_requested,
                     );
                 }
-                BackendEvent::Input(input_ev) => match input_ev {
-                    InputEvent::Touch { phase, pos } => {
-                        // Для End/Cancel используем последнюю известную позицию,
-                        // так как backend шлёт Pos2::ZERO для этих фаз.
-                        let actual_pos = match phase {
-                            TouchPhase::End | TouchPhase::Cancel => {
-                                input_state.pointer_pos.unwrap_or(pos)
-                            }
-                            _ => pos,
-                        };
-                        let egui_phase = match phase {
-                            TouchPhase::Start => egui::TouchPhase::Start,
-                            TouchPhase::Move => egui::TouchPhase::Move,
-                            TouchPhase::End | TouchPhase::Cancel => egui::TouchPhase::End,
-                        };
-                        input_state.events.push(egui::Event::Touch {
-                            device_id: egui::TouchDeviceId(0),
-                            id: egui::TouchId(0),
-                            phase: egui_phase,
-                            pos: actual_pos,
-                            force: None,
-                        });
-                        // Для Move дополнительно шлём PointerMoved — без него egui
-                        // не отслеживает позицию указателя, и скролл не работает.
-                        if matches!(phase, TouchPhase::Move) {
-                            input_state
-                                .events
-                                .push(egui::Event::PointerMoved(actual_pos));
-                        }
-
-                        match phase {
-                            TouchPhase::Start | TouchPhase::Move => {
-                                input_state.pointer_pos = Some(pos);
-                            }
-                            TouchPhase::End | TouchPhase::Cancel => {
-                                // Не сбрасываем pointer_pos — он нужен для PointerButton UP ниже
-                            }
-                        }
-                    }
-                    InputEvent::PointerButton { pos, pressed } => {
-                        // Для UP используем последнюю известную позицию
-                        let actual_pos = if pressed {
-                            pos
-                        } else {
-                            input_state.pointer_pos.unwrap_or(pos)
-                        };
-                        input_state.events.push(egui::Event::PointerButton {
-                            pos: actual_pos,
-                            button: egui::PointerButton::Primary,
-                            pressed,
-                            modifiers: egui::Modifiers::default(),
-                        });
-                        if pressed {
-                            input_state.pointer_pos = Some(pos);
-                        } else {
-                            // Сбрасываем pointer_pos только после UP
-                            input_state.pointer_pos = None;
-                        }
-                    }
-                    InputEvent::Key { key_code, action } => {
-                        if key_code == 4 // AKEYCODE_BACK = 4
-                            && matches!(action, KeyAction::Down)
-                        {
-                            input_state.back_pressed = true;
-                        }
-                    }
-                },
-                BackendEvent::TextInput(text) => {
-                    log::info!("IME: текстовый ввод: '{}'", &text);
-                    input_state.events.push(egui::Event::Text(text));
-                }
-                BackendEvent::InsetsChanged(insets) => {
-                    log::info!("InsetsChanged: {:?}", insets);
-                }
-                BackendEvent::DpiChanged(dpi) => {
-                    log::info!("DpiChanged: {}", dpi);
-                    egui_ctx.set_pixels_per_point(dpi);
+                other => {
+                    crate::input_processing::process_backend_input(
+                        other,
+                        &mut input_state,
+                        &egui_ctx,
+                    );
                 }
             }
         }
@@ -226,16 +155,11 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
 
         // --- Back ---
         if input_state.back_pressed {
-            log::info!("Back нажата — отправляем в Application");
-            input_state.back_pressed = false;
-
-            // Если IME открыта — закрываем, иначе — навигация
-            if app_instance.is_keyboard_visible() {
-                app_instance.hide_keyboard();
-                backend.hide_keyboard();
-            } else {
-                app_instance.on_back_pressed();
-            }
+            crate::input_processing::process_back_pressed(
+                &mut app_instance,
+                &mut *backend,
+                &mut input_state,
+            );
         }
 
         // --- Проверка уведомлений от data layer (через RuntimeContext) ---
