@@ -7,8 +7,8 @@
 | Задача | Статус | Дата |
 |--------|--------|------|
 | 🟥 1. Глобальные статики — удалены | ✅ **Выполнено** | До 2026-07-19 |
-| 🟥 2. save/restore навигации | ❌ Не выполнено | — |
-| 🟥 3. type-erasure через dyn Any | ❌ Не выполнено | — |
+| 🟥 2. save/restore навигации | ✅ **Выполнено** (базовый) | 2026-07-19 |
+| 🟥 3. type-erasure через dyn Any | ✅ **Выполнено** | 2026-07-19 |
 | 🟧 4. Монолитный backend | ✅ **Выполнено** | 2026-07-19 |
 | 🟧 5. Перегруженный Modifier API | ❌ Не выполнено | — |
 | 🟧 6. ComponentContext слишком сложный | ❌ Не выполнено | — |
@@ -37,45 +37,34 @@
 
 ---
 
-🟥 2. egui-android-navigation
+🟥 2. egui-android-navigation — save/restore навигации
 
-Проблема: нет полноценного save/restore
-Исправление Waker не влияет на навигацию — она остаётся слабым звеном.
+**Статус: ✅ ВЫПОЛНЕНО** (базовый уровень)
 
-Что не так:
-- ChildStack::restore() зависит от порядка элементов.
-- Нет сериализации конфигураций.
-- Нет типобезопасного состояния компонентов.
-- Нет Router/Configuration слоя.
+Что сделано:
+- `ComponentState` trait — типобезопасное save/restore с ассоциированным типом `State`
+- `ChildStack::restore()` — проверяет соответствие конфигураций (prevents data corruption)
+- `ChildStack<C>` теперь требует `C: Debug` для логирования несовпадений
+- Базовый `ComponentNode::save_state()`/`restore_state()` — дефолт `None`/пусто (безопасное поведение)
+- Blanket-impl `ComponentNode for T: Component` больше не переопределяет save_state/restore_state
 
-Что делать:
-- Ввести ComponentState trait.
-- ChildStack::save() → Vec<(C, ComponentState)>.
-- ChildStack::restore() → восстановление по конфигурациям.
-- Добавить Router + Configuration (как в Decompose).
-
-Приоритет: 🟥🟥🟥
-Крейт: egui-android-navigation
+Что ещё нужно для полной совместимости с Decompose:
+- 🆕 2a. Parcelable-сериализация через JNI (android.os.Bundle)
+- 🆕 2b. Router/ComponentFactory слой
+- 🆕 2c. Рекурсивное сохранение дочерних стеков
+- (См. раздел «Decompose — что ещё нужно» ниже)
 
 ---
 
-🟥 3. egui-android-core
+🟥 3. egui-android-core — type-erasure через dyn Any
 
-Проблема: type‑erasure через dyn Any
-Исправление Waker не затрагивает messaging — проблема остаётся.
+**Статус: ✅ ВЫПОЛНЕНО**
 
-Что не так:
-- Сообщения хранятся как Box<dyn Any + Send>.
-- Ошибки типов проявляются только в runtime.
-- Невозможно статически проверить корректность сообщений.
-
-Что делать:
-- Ввести trait‑bounds: Msg: Clone + Debug + Send + 'static.
-- Убрать type‑erasure из DynDispatcher.
-- Ввести типобезопасный MessageEnvelope.
-
-Приоритет: 🟥🟥
-Крейт: egui-android-core
+Что сделано:
+- `Component::Message: Clone + Debug + Send + 'static` — статическая гарантия
+- `MessageEnvelope<M>` — типобезопасная обёртка (runtime/src/message_envelope.rs)
+- `ComponentNode::handle_dyn()` — логирование при ошибке downcast с указанием ожидаемого типа
+- Blanket-impl: `save_state()`/`restore_state()` убраны (наследуются из ComponentNode с дефолтом)
 
 ---
 
@@ -96,21 +85,13 @@
 Итог:
 - `run.rs`: 440 → 126 строк (-71%)
 - Модулей: 4 → 14 специализированных
-- Каждая ответственность в своём файле: run (оркестратор), loop (цикл),
-  graphics (рендеринг), lifecycle (жизненный цикл),
-  input_processing (ввод), event (типы)
+- Каждая ответственность в своём файле
 
 ---
 
 🟧 5. egui-android-ui
 
 Проблема: перегруженный Modifier API
-Исправление Waker не влияет на UI‑слой — он всё ещё слишком тяжёлый.
-
-Что не так:
-- Слишком много редких модификаторов.
-- Анимации смешаны с layout‑модификаторами.
-- Нарушение KISS/YAGNI.
 
 Что делать:
 - Вынести редкие модификаторы в ui-extras.
@@ -125,95 +106,141 @@
 🟧 6. egui-android-core
 
 Проблема: ComponentContext слишком сложный
-Исправление Waker не затрагивает этот слой.
-
-Что не так:
-- Смешение навигации, data layer, back‑dispatcher.
-- Три generic‑параметра → сложно объяснить.
 
 Что делать:
-- Разделить на:
-  - NavigationContext
-  - StateContext
-  - BackContext
-  - DataContext
+- Разделить на: NavigationContext, StateContext, BackContext, DataContext
 
 Приоритет: 🟧
 Крейт: egui-android-core
 
 ---
 
-🟨 Приоритет 3 — второстепенные проблемы (косметика)
+🟨 Приоритет 3 — второстепенные проблемы
 
 🟨 7. egui-android-platform
 
 Проблема: PlatformConfig смешивает ответственность
-Исправление Waker не влияет.
-
-Что не так:
-- target_fps относится к runtime.
-- log_tag относится к runtime.
-
-Что делать:
-- PlatformConfig → только платформенные параметры.
-- RuntimeConfig → FPS, логирование.
-
-Приоритет: 🟨
-Крейт: egui-android-platform
+Что делать: PlatformConfig → только платформенные параметры, RuntimeConfig → FPS, логирование.
 
 ---
 
 🟨 8. egui-android-ui
 
 Проблема: хрупкие layout‑тесты
-Исправление Waker не влияет.
-
-Что не так:
-- Тесты завязаны на внутренние детали measure/layout.
-
-Что делать:
-- Тестировать только публичный контракт.
-
-Приоритет: 🟨
-Крейт: egui-android-ui
+Что делать: тестировать только публичный контракт.
 
 ---
 
 🟨 9. egui-android-platform-android
 
 Проблема: гибридное хранение PlatformState
-Исправление Waker не влияет.
-
-Что не так:
-- Состояние хранится в backend и в egui::Context::data().
-
-Что делать:
-- Хранить только в backend.
-
-Приоритет: 🟨
-Крейт: egui-android-platform-android
+Что делать: хранить только в backend.
 
 ---
 
 🟩 Приоритет 4 — низкий
 
-🟩 10. egui-android-runtime
-
-Проблема: DataLayerHandle заглушка
-Исправление Waker не влияет.
-
-Что делать:
-- Ввести полноценный data layer или удалить заглушку.
+🟩 10. egui-android-runtime — DataLayerHandle заглушка
+🟩 11. egui-android-platform-android — патч egui
 
 ---
 
-🟩 11. egui-android-platform-android
+## Decompose — что ещё нужно для полной совместимости
 
-Проблема: патч egui
-Исправление Waker не влияет.
+### 🆕 2a. Parcelable-сериализация (navigation + platform-android)
 
-Что делать:
-- Удалить патч, когда upstream исправит баги.
+**Проблема**: `ChildStack::save()` сохраняет состояние в памяти (`Box<dyn Any + Send>`).
+При process kill (Android убивает процесс) состояние теряется.
+
+**В Decompose**: конфигурации сериализуются в `Parcelable` через `Bundle`,
+переживают перезапуск процесса.
+
+**Что нужно сделать**:
+
+1. Добавить трейт `ConfigSerializer`:
+```rust
+/// Сериализация конфигурации навигации в/из Bundle.
+pub trait ConfigSerializer<C> {
+    fn save(config: &C) -> Vec<i32>;            // или через JNI
+    fn restore(data: &[i32]) -> Option<C>;
+}
+```
+
+2. `ChildStack::save_parcelable()` → сериализует весь стек в Bundle
+
+3. `ChildStack::restore_parcelable()` → восстанавливает стек из Bundle
+
+4. `Application::on_save_state()` → вызывает `save_parcelable()` и сохраняет Bundle через JNI
+
+5. `Application::on_restore_state()` → восстанавливает Bundle через JNI
+
+**Зависимости**: JNI (уже есть), `android.os.Bundle`
+
+**Крейт**: `egui-android-navigation` + `egui-android-platform-android`
+
+---
+
+### 🆕 2b. Router/ComponentFactory слой (navigation)
+
+**Проблема**: `NavigationHost::create_screen()` содержит `match` по всем Route — нарушение OCP.
+
+**В Decompose**: `Router` — отдельный слой, который по конфигурации создаёт компонент.
+Config может быть сериализован и восстановлен.
+
+**Что нужно сделать**:
+
+1. Создать `ComponentFactory<C>` trait:
+```rust
+/// Фабрика компонентов по маршруту.
+pub trait ComponentFactory<C> {
+    /// Создать компонент для данного маршрута.
+    fn create(&self, config: C) -> Box<dyn ComponentNode>;
+}
+```
+
+2. `NavigationHost::create_screen()` принимает `&dyn ComponentFactory<Route>`
+
+3. Showcase реализует `ComponentFactory<Route>` — без match по всем Route в NavigationHost
+
+**Крейт**: `egui-android-navigation`
+
+---
+
+### 🆕 2c. Рекурсивное сохранение дочерних стеков (navigation)
+
+**Проблема**: `ChildStack::save()` сохраняет только верхний уровень. Если компонент
+сам содержит `ChildStack` (например, `NestedScreen`), его состояние не сохраняется.
+
+**В Decompose**: каждая компонента сама знает, как сохранить своё состояние,
+включая дочерние стеки. `save()` вызывается рекурсивно.
+
+**Что нужно сделать**:
+
+1. `ComponentNode::save_state()` по умолчанию вызывает `save_state()` на всех дочерних `ChildStack`
+
+2. Добавить в `ComponentNode` метод `save_recursive()`:
+```rust
+fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
+    // сохранить себя + рекурсивно дочерние стеки
+}
+```
+
+**Крейт**: `egui-android-core` + `egui-android-navigation`
+
+---
+
+### Сводная таблица по Decompose-совместимости
+
+| Возможность | Decompose | У нас | Статус |
+|-------------|-----------|-------|--------|
+| ChildStack с lifecycle | ✅ | ✅ | Готово |
+| ComponentState trait | ✅ | ✅ | Готово |
+| Проверка конфигураций при restore | ✅ | ✅ | Готово |
+| Типобезопасный save/restore | ✅ | ✅ | Готово |
+| Parcelable-сериализация | ✅ | ❌ | 🆕 Задача 2a |
+| Router/ComponentFactory | ✅ | ❌ | 🆕 Задача 2b |
+| Рекурсивное сохранение стеков | ✅ | ❌ | 🆕 Задача 2c |
+| Авто-восстановление после kill | ✅ | ❌ | Нужны 2a + 2b + 2c |
 
 ---
 
@@ -221,11 +248,11 @@
 
 | Крейт | Приоритет | Проблемы | Статус |
 |-------|-----------|----------|--------|
-| platform-android | 🟥🟥🟧🟨🟩 | глобальные статики ✅, монолит backend ✅, JNI/EGL утечки, двойное хранение состояния, патч egui | ⚠️ Две выполнены |
+| platform-android | 🟥🟧🟨🟩🆕 | глобальные статики ✅, монолит backend ✅, JNI/EGL утечки, двойное хранение, патч egui, **Parcelable (2a)** | ⚠️ 3 выполнены |
 | platform | 🟨 | PlatformConfig смешивает ответственность | ❌ |
-| runtime | 🟥🟩 | dyn Any (core), DataLayerHandle заглушка | ❌ |
-| core | 🟥🟥🟧 | dyn Any, сложный ComponentContext | ❌ |
-| navigation | 🟥🟥🟥 | слабый save/restore, нет Router | ❌ |
+| runtime | 🟩 | DataLayerHandle заглушка | ❌ |
+| core | 🟥🟧 | type-erasure ✅, ComponentContext сложный | ⚠️ 1 выполнена |
+| navigation | 🟥🟥🟥🆕🆕🆕 | save/restore ✅, **Router (2b)**, **рекурсивное сохранение (2c)** | ⚠️ 1 выполнена |
 | ui | 🟧🟨 | перегруженный Modifier, хрупкие тесты | ❌ |
 | framework | 🟩 | косметика | ❌ |
 
@@ -234,42 +261,23 @@
 ## Порядок выполнения (обновлённый)
 
 ```
-Фаза 1 — Выполнено ✅:
+✅ Фаза 1 — Выполнено:
   🟥 Задача 1: Глобальные статики — удалены
-  🟧 Задача 4: Монолитный backend → модульная архитектура (6 шагов)
+  🟧 Задача 4: Монолитный backend → модульная архитектура
 
-Фаза 2 — Следующая (безопасные изменения):
-  🔄 🟥 Задача 3: type-erasure в core (только core, не затрагивает platform-android)
-  🔄 🟨 Задача 7: PlatformConfig/AppConfig дублирование (platform + runtime)
-  🔄 🟩 Задача 10: DataLayerHandle (runtime)
+❌ Фаза 2 — Сейчас (безопасные изменения в других крейтах):
+  🔲 🟨 Задача 7: PlatformConfig/AppConfig дублирование (platform + runtime)
+  🔲 🟩 Задача 10: DataLayerHandle (runtime)
 
-Фаза 3 — После Фазы 2 (навигация):
-  ❌ 🟥 Задача 2: save/restore навигации (navigation)
+❌ Фаза 3 — Decompose-совместимость навигации:
+  🔲 🆕 Задача 2a: Parcelable-сериализация (navigation + platform-android)
+  🔲 🆕 Задача 2b: Router/ComponentFactory (navigation)
+  🔲 🆕 Задача 2c: Рекурсивное сохранение стеков (core + navigation)
 
-Фаза 4 — После всего (рефакторинг без изменения логики):
-  ❌ 🟧 Задача 6: ComponentContext разделение (core)
-  ❌ 🟧 Задача 5: Modifier API (ui)
-  ❌ 🟨 Задача 8: Хрупкие тесты (ui)
-  ❌ 🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
-  ❌ 🟩 Задача 11: Патч egui
+❌ Фаза 4 — После всего (рефакторинг без изменения логики):
+  🔲 🟧 Задача 6: ComponentContext разделение (core)
+  🔲 🟧 Задача 5: Modifier API (ui)
+  🔲 🟨 Задача 8: Хрупкие тесты (ui)
+  🔲 🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
+  🔲 🟩 Задача 11: Патч egui
 ```
-
----
-
-## Рекомендуемая следующая задача
-
-### 🟥 Задача 3: type-erasure через dyn Any (egui-android-core)
-
-**Почему она**: 
-- Осталась единственная критическая (🟥) проблема в core-крейте
-- Не затрагивает platform-android — можно безопасно делать
-- Showcase и Counter продолжат работать через `DynDispatcher` как wrapper
-- Минимальная инвазивность: trait bounds + `MessageEnvelope`, примеры не меняются
-
-**Что делать**:
-1. Добавить `Msg: Clone + Debug + Send + 'static` в `Component` trait
-2. Ввести типобезопасный `MessageEnvelope<M>`
-3. `DynDispatcher::wrap<M>()` будет упаковывать в `MessageEnvelope` вместо `Box<dyn Any>`
-4. `ComponentNode::handle_dyn()` — downcast через `MessageEnvelope`
-
-**Риск**: Низкий. Примеры не меняют свои типы сообщений.

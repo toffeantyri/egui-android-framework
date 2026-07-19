@@ -101,12 +101,6 @@ where
         false
     }
 
-    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
-        None
-    }
-
-    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

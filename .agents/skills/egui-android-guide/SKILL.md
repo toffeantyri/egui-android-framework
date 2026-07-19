@@ -162,12 +162,16 @@ Message = и событие, и семантика
 - Аналог `Component<*, *>` из Decompose (type erasure).
 - `render(ui: &mut UiWrapper, dispatch: &DynDispatcher)` — type-erased рендер.
 - `handle_dyn(msg: Box<dyn Any + Send>)` — type-erased handle (downcast внутри).
+  При ошибке downcast логирует ожидаемый тип (начиная с 0.4.0).
 - `handle_back() -> bool` — встроенная поддержка BackPressed (как в Decompose).
 - `save_state() -> Option<Box<dyn Any + Send>>` — сохранить состояние компонента
   для восстановления после пересоздания (по умолч. None).
+  Компонент может переопределить напрямую (blanket-impl больше не затирает).
 - `restore_state(Box<dyn Any + Send>)` — восстановить ранее сохранённое состояние.
 - `as_any() / as_any_mut()` — downcast для тестирования и доступа к конкретному типу.
 - Blanket-impl: любой `Component<Message: 'static + Send>` автоматически становится `ComponentNode`.
+  **Важно:** blanket-impl НЕ переопределяет `save_state()`/`restore_state()` —
+  они наследуются из `ComponentNode` с дефолтной реализацией (None/пусто).
 
 ### `StateStore<T>` — `egui-android-runtime`
 - Реактивное состояние на `tokio::sync::watch`.
@@ -254,17 +258,32 @@ Message = и событие, и семантика
 
 ### `ChildStack<C>` — `egui-android-navigation`
 - Стек дочерних компонентов с управлением жизненным циклом.
-- Generic только по `C` (конфигурация/route). Внутри хранит `Vec<(C, Box<dyn ComponentNode>)>`.
-- `push(config, Box<dyn ComponentNode>)` — добавить компонент на вершину.
-- `pop() -> Option<(C, Box<dyn ComponentNode>)>` — убрать верхний элемент.
-- `active() -> Option<&dyn ComponentNode>` — ссылка на активный компонент.
-- `active_mut() -> Option<&mut dyn ComponentNode>` — мутабельная ссылка.
-- `replace / bring_to_front / clear` — управление стеком.
-- При push/pop/replace вызываются lifecycle-методы компонентов (on_create, on_destroy).
+- Generic только по `C` (конфигурация/route). `C: Clone + PartialEq + Debug`.
+- Внутри хранит `Vec<(C, Box<dyn ComponentNode>)>`.
+- `push/pop/replace/bring_to_front/clear` — управление стеком.
+- При push/pop/replace вызываются lifecycle-методы компонентов.
 - Аналог `ChildStack` из Decompose. Позволяет хранить компоненты разных типов.
 - `save() -> Vec<(C, Option<Box<dyn Any + Send>>)>` — сохранить состояние всех компонентов
   для восстановления после пересоздания Activity.
-- `restore(saved)` — передать сохранённое состояние компонентам через `restore_state()`.
+- `restore(saved)` — восстановить состояние. **Проверяет соответствие конфигураций**
+  на каждой позиции. При несовпадении — `log::warn!`.
+
+### `ComponentState` — `egui-android-navigation`
+- Типобезопасное сохранение и восстановление состояния компонента.
+- `type State: Clone + Debug + Send + 'static` — ассоциированный тип.
+- `save(&self) -> Self::State` — сохранить состояние.
+- `restore(&mut self, state: Self::State)` — восстановить состояние.
+- Компонент реализует `ComponentState` (вместе с `Component`) для типобезопасного save/restore.
+- `ComponentNode::save_state()`/`restore_state()` имеют дефолтную реализацию (`None`/пусто).
+  Blanket-impl НЕ переопределяет их — компонент может переопределить напрямую.
+
+### `MessageEnvelope<M>` — `egui-android-runtime`
+- Типобезопасная обёртка сообщения.
+- `M: Clone + Debug + Send + 'static` — гарантируется на этапе компиляции.
+- `MessageEnvelope::new(msg)` — создание.
+- `MessageEnvelope::into_inner(self)` — извлечение.
+- Используется в `DynDispatcher` для упаковки сообщений.
+- При ошибке downcast логирует ожидаемый тип.
 
 ### `BackDispatcher`, `BackCallback` — `egui-android-core`
 - Центральный менеджер обработки системной кнопки Back.

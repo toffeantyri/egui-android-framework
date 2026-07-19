@@ -66,7 +66,7 @@ struct ChildItem<C> {
 
 impl<C> ChildStack<C>
 where
-    C: Clone + PartialEq,
+    C: Clone + PartialEq + std::fmt::Debug,
 {
     /// Создать пустой стек.
     pub fn new() -> Self {
@@ -206,13 +206,31 @@ where
 
     /// Восстановить состояние стека после пересоздания.
     ///
-    /// Передаёт сохранённое состояние каждому компоненту через `restore_state()`.
-    /// Количество и порядок элементов должен совпадать с текущим стеком.
+    /// Проходит по текущему стеку и сопоставляет с сохранённым по конфигурациям.
+    /// Если конфигурация на позиции совпала — вызывает `restore_state()`.
+    /// Если не совпала — логирует предупреждение и пропускает.
+    ///
+    /// Это безопаснее старого поведения (восстановление вслепую по порядку):
+    /// при изменении структуры стека восстановление не повредит данные.
     pub fn restore(&mut self, saved: Vec<(C, Option<Box<dyn std::any::Any + Send>>)>) {
-        for (i, (_config, state)) in saved.into_iter().enumerate() {
+        for (i, (saved_config, state)) in saved.into_iter().enumerate() {
             if let Some(state) = state {
                 if let Some(item) = self.items.get_mut(i) {
-                    item.component.restore_state(state);
+                    if item.config == saved_config {
+                        log::debug!(
+                            "ChildStack::restore: восстанавливаем состояние для {:?}",
+                            saved_config
+                        );
+                        item.component.restore_state(state);
+                    } else {
+                        log::warn!(
+                            "ChildStack::restore: несовпадение конфигурации на позиции {}: \
+                             ожидалась {:?}, найдена {:?}",
+                            i,
+                            saved_config,
+                            item.config
+                        );
+                    }
                 }
             }
         }
@@ -237,7 +255,7 @@ where
 
 impl<C> Default for ChildStack<C>
 where
-    C: Clone + PartialEq,
+    C: Clone + PartialEq + std::fmt::Debug,
 {
     fn default() -> Self {
         Self::new()
