@@ -26,7 +26,7 @@ use android_activity::AndroidApp;
 
 use crate::backend::{AndroidBackend, AndroidBackendKind};
 
-use crate::event::{BackendEvent, InputEvent, KeyAction, LifecycleEvent, TouchPhase};
+use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
 
 use crate::input::InputState;
 
@@ -109,85 +109,16 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
 
         for event in backend_events {
             match event {
-                BackendEvent::Lifecycle(ev) => match ev {
-                    LifecycleEvent::InitWindow => {
-                        log::info!("Lifecycle: InitWindow");
-
-                        // Проверяем, был ли уже создан EGL
-                        let has_egl = !backend.surface_handle().as_egl_surface().is_null();
-
-                        if has_egl {
-                            // InitWindow после Pause/Resume — пересоздаём surface
-                            if let Err(e) = backend.recreate_surface() {
-                                log::error!("Ошибка пересоздания EGL surface: {}", e);
-                                if let Some(ref mut p) = egui_painter {
-                                    p.destroy();
-                                }
-                                egui_painter = None;
-                                backend.destroy_graphics();
-                            } else {
-                                // Повторно инициализируем painter с новым surface
-                                if let Some(ref mut p) = egui_painter {
-                                    unsafe {
-                                        let gl = &*p.gl();
-                                        gl.clear_color(0.0, 0.0, 0.0, 1.0);
-                                        gl.clear(glow::COLOR_BUFFER_BIT);
-                                    }
-                                }
-                            }
-                        } else {
-                            // Первый InitWindow — инициализируем EGL
-                            backend.init().ok();
-                            if let Err(e) = backend.init_graphics() {
-                                log::error!("Ошибка инициализации EGL: {}", e);
-                            }
-                            // Восстанавливаем состояние навигации после пересоздания
-                            app_instance.on_restore_state();
-                        }
-
-                        // Системные бары уже настроены при старте через run_on_java_main_thread
-
-                        // Системные бары уже настроены при старте через run_on_java_main_thread
-
-                        // Точка интеграции: IME, Insets, DPI
-                        //
-                        // IME: клавиатура управляется через
-                        // GlBackend::show_keyboard()/hide_keyboard(), которые вызывают
-                        // run_on_java_main_thread → JNI InputMethodManager.
-                        //
-                        // WindowInsets: получаем через JNI, хранятся в PlatformState.
-                        // В GL-режиме android-activity может пробрасывать InsetsChanged
-                        // через MainEvent — для этого добавлен BackendEvent::InsetsChanged.
-                        //
-                        // DPI: получаем из конфигурации Android через get_pp().
-                        // GlBackend шлёт BackendEvent::DpiChanged при InitWindow.
-                        backend.update_system_insets();
-
-                        // Сохраняем PlatformState в egui::Context для Application
-                        backend.platform_state().store_in_ctx(&egui_ctx);
-
-                        // Обновляем DPI
-                        egui_ctx.set_pixels_per_point(backend.dpi());
-                    }
-                    LifecycleEvent::Resume => {
-                        log::info!("Lifecycle: Resume");
-                        app_instance.on_resume();
-                    }
-                    LifecycleEvent::Pause => {
-                        log::info!("Lifecycle: Pause");
-                        app_instance.on_pause();
-                    }
-                    LifecycleEvent::Stop => {
-                        log::info!("Lifecycle: Stop");
-                        app_instance.on_stop();
-                    }
-                    LifecycleEvent::Destroy => {
-                        log::info!("Lifecycle: Destroy");
-                        // Сохраняем состояние навигации перед уничтожением
-                        app_instance.on_save_state();
-                        destroy_requested = true;
-                    }
-                },
+                BackendEvent::Lifecycle(ev) => {
+                    crate::lifecycle::handle_lifecycle_event(
+                        ev,
+                        &mut *backend,
+                        &mut app_instance,
+                        &egui_ctx,
+                        &mut egui_painter,
+                        &mut destroy_requested,
+                    );
+                }
                 BackendEvent::Input(input_ev) => match input_ev {
                     InputEvent::Touch { phase, pos } => {
                         // Для End/Cancel используем последнюю известную позицию,

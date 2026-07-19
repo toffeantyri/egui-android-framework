@@ -175,19 +175,10 @@ impl<M: Send> Widget<M> for Text {
                 };
                 let (rect, _response) = ui.allocate_exact_size(alloc_size, egui::Sense::hover());
 
+                // Отладочный лог убран — спамил logcat каждую секунду.
+                // При необходимости включить: раскомментировать вызов throttled_log в debug_log.rs.
                 let _uid = (rect.min.y * 1000.0) as u64;
-                crate::debug_log::throttled_log("T6", 1000, || {
-                    format!(
-                        "uid={} text={:?} txt_sz={:.0}x{:.0} alloc={:.0}x{:.0} avail_w={:.0}",
-                        _uid,
-                        self.text,
-                        text_size.x,
-                        text_size.y,
-                        alloc_size.x,
-                        alloc_size.y,
-                        ui.available_width()
-                    )
-                });
+                let _ = _uid;
 
                 // Вычисляем позицию текста: по умолчанию левый верхний угол,
                 // при align учитываем разницу между шириной rect и текста.
