@@ -542,7 +542,7 @@ if let Some(active) = self.stack.active_mut() {
 
 | Событие | Действие |
 |---|---|
-| `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()`, инициализация `RuntimeContext` |
+| `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()`, инициализация `RuntimeContext`. Устанавливает clear_color и system_bars через backend. |
 | `InitWindow` (повторный) | `recreate_surface()`, не трогать display/context/painter |
 | `Resume` | `app_instance.on_resume()` |
 | `Pause` | `app_instance.on_pause()` |
@@ -760,7 +760,7 @@ loop {
 6. **`store.update()` — единственная точка изменения состояния.** Никаких прямых
    присваиваний через `RwLock`.
 
-7. **Data layer после `store.update()` всегда шлёт `data_statechanged_tx.send(())`.**
+7. **Data layer после `store.update()` всегда шлёт `data_statechanged_tx.send(())`. **
 
 8. **Component синхронизируется из store через `sync_from_store()` в начале frame.**
 
@@ -768,7 +768,13 @@ loop {
    Никаких `poll()`, `on_event()`, `needs_redraw`.
    Platform-android больше не знает про UiNotifier — только про `RuntimeContext::check()`.
 
-10. **Упрощённая MVI-модель:** Intent и Message — это одно и то же (`Msg`).
+10. **`PlatformState` хранится только в backend** — не копируется в `egui::Context::data()`.
+    Clear color синхронизируется после `frame()`: чтение `panel_fill` из egui-стиля
+    → `backend.platform_state().set_clear_color_from()`. Application задаёт тему
+    через `MaterialTheme::apply(ctx)`, platform-android сам применяет clear_color
+    и system_bars.
+
+11. **Упрощённая MVI-модель:** Intent и Message — это одно и то же (`Msg`).
     Не вводи разделение Intent/Message без явного указания.
 
 12. **Импорты — через umbrella или напрямую:**

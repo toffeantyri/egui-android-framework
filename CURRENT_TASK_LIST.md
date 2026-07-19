@@ -12,10 +12,10 @@
 | 🟧 4. Монолитный backend | ✅ **Выполнено** | 2026-07-19 |
 | 🟧 5. Перегруженный Modifier API | ❌ Не выполнено | — |
 | 🟧 6. ComponentContext слишком сложный | ❌ Не выполнено | — |
-| 🟨 7. PlatformConfig/AppConfig дублирование | ❌ Не выполнено | — |
+| 🟨 7. PlatformConfig/AppConfig дублирование | ✅ **Выполнено** | 2026-07-19 |
 | 🟨 8. Хрупкие layout-тесты | ❌ Не выполнено | — |
-| 🟨 9. Гибридное хранение PlatformState | ❌ Не выполнено | — |
-| 🟩 10. DataLayerHandle заглушка | ❌ Не выполнено | — |
+| 🟨 9. Гибридное хранение PlatformState | ✅ **Выполнено** | 2026-07-19 |
+| 🟩 10. DataLayerHandle заглушка | ✅ **Выполнено** | 2026-07-19 |
 | 🟩 11. Патч egui | ❌ Не выполнено | — |
 
 ---
@@ -29,10 +29,9 @@
 Что сделано:
 - Глобальные `Atomic*` и `OnceLock` (`INSETLEFT`, `SYSTEMTHEME`, `GLOBALVM`, `SYSTEMBARS_COLORS`) — удалены.
 - Всё состояние перенесено в `PlatformState` (через `Arc<Mutex<>>`), хранится в backend instance.
-- `PlatformState` синхронизируется с `egui::Context::data()` через `store_in_ctx()` / `from_ctx()`.
+- `PlatformState` — единый источник истины в backend. Синхронизация с `egui::Context::data()` удалена (см. Задачу 9).
 
-Что ещё остаётся (🟨 задача 9):
-- Два источника истины: `PlatformState` в backend + `egui::Context::data()`. Нужно хранить только в backend.
+Что ещё остаётся:
 - JNI указатели (`vm_ptr`, `activity_ptr`) — сырые указатели в публичном API `PlatformState`.
 
 ---
@@ -119,8 +118,17 @@
 
 🟨 7. egui-android-platform
 
-Проблема: PlatformConfig смешивает ответственность
-Что делать: PlatformConfig → только платформенные параметры, RuntimeConfig → FPS, логирование.
+**Статус: ✅ ВЫПОЛНЕНО**
+
+Проблема: PlatformConfig смешивает ответственность — содержит log_tag и target_fps,
+которые относятся к Runtime, а не к платформе.
+
+Что сделано:
+- `AppConfig` переименован в `RuntimeConfig` (crates/runtime)
+- `PlatformConfig` очищен от `log_tag`/`target_fps`, оставлен только `vsync`
+- `Application::config()` / `config_mut()` возвращают `&RuntimeConfig`
+- Platform-android читает `log_tag`/`target_fps` через `Application::config()`
+- Примеры обновлены: `AppConfig` → `RuntimeConfig`
 
 ---
 
@@ -133,14 +141,40 @@
 
 🟨 9. egui-android-platform-android
 
-Проблема: гибридное хранение PlatformState
-Что делать: хранить только в backend.
+**Статус: ✅ ВЫПОЛНЕНО**
+
+Проблема: гибридное хранение PlatformState — два источника истины
+(backend + egui::Context::data()).
+
+Что сделано:
+- `PlatformState::store_in_ctx()` / `from_ctx()` — удалены. Единый источник — backend.
+- `theme.rs` — удалён публичный API (`set_clear_color_from`, `current_clear_color`, `current_theme`, `init_system_theme`, `set_theme_override`)
+- `system_bars.rs` — `apply_system_bars_for_theme(ctx)` заменён на `apply_system_bars_for_platform_state(&PlatformState)`
+- `lifecycle.rs` — при InitWindow: вместо `store_in_ctx()` теперь напрямую устанавливает `clear_color` и system_bars через backend
+- `loop.rs` — после `frame()`: чтение `panel_fill` из egui-стиля (установлен Application через `MaterialTheme::apply()`) → `set_clear_color_from()`
+- `lib.rs` — убран `pub mod theme`
+- Примеры — убраны вызовы `set_clear_color_from()` и `apply_system_bars_for_theme()`
+
+Архитектура: Application задаёт тему через egui::Context, platform-android
+сам применяет clear_color и system_bars.
 
 ---
 
 🟩 Приоритет 4 — низкий
 
-🟩 10. egui-android-runtime — DataLayerHandle заглушка
+🟩 10. egui-android-runtime — DataLayerHandle
+
+**Статус: ✅ ВЫПОЛНЕНО**
+
+Проблема: `DataLayerHandle::send()` — пустышка, не отправляет команды.
+
+Что сделано:
+- `DataLayerHandle<DataCmd>` — generic-тип поверх `mpsc::Sender<DataCmd>`
+- `send()` реально отправляет команду в data layer
+- `sender()` — получение сырого `mpsc::Sender` для передачи в `ComponentContext`
+- `From<mpsc::Sender<DataCmd>>` для удобной конвертации
+- Убран `Default` (требует Sender)
+
 🟩 11. egui-android-platform-android — патч egui
 
 ---
@@ -248,9 +282,9 @@ fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
 
 | Крейт | Приоритет | Проблемы | Статус |
 |-------|-----------|----------|--------|
-| platform-android | 🟥🟧🟨🟩🆕 | глобальные статики ✅, монолит backend ✅, JNI/EGL утечки, двойное хранение, патч egui, **Parcelable (2a)** | ⚠️ 3 выполнены |
-| platform | 🟨 | PlatformConfig смешивает ответственность | ❌ |
-| runtime | 🟩 | DataLayerHandle заглушка | ❌ |
+| platform-android | 🟥🟧🟨🟩🆕 | глобальные статики ✅, монолит backend ✅, JNI/EGL утечки, ~~двойное хранение~~ ✅, патч egui, **Parcelable (2a)** | ⚠️ 4 выполнены |
+| platform | 🟨 | ~~PlatformConfig смешивает ответственность~~ ✅ | ✅ Выполнено |
+| runtime | 🟩 | ~~DataLayerHandle заглушка~~ ✅ | ✅ Выполнено |
 | core | 🟥🟧 | type-erasure ✅, ComponentContext сложный | ⚠️ 1 выполнена |
 | navigation | 🟥🟥🟥🆕🆕🆕 | save/restore ✅, **Router (2b)**, **рекурсивное сохранение (2c)** | ⚠️ 1 выполнена |
 | ui | 🟧🟨 | перегруженный Modifier, хрупкие тесты | ❌ |
@@ -265,9 +299,10 @@ fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
   🟥 Задача 1: Глобальные статики — удалены
   🟧 Задача 4: Монолитный backend → модульная архитектура
 
-❌ Фаза 2 — Сейчас (безопасные изменения в других крейтах):
-  🔲 🟨 Задача 7: PlatformConfig/AppConfig дублирование (platform + runtime)
-  🔲 🟩 Задача 10: DataLayerHandle (runtime)
+✅ Фаза 2 — Выполнено:
+  🟨 Задача 7: PlatformConfig/AppConfig дублирование (platform + runtime)
+  🟩 Задача 10: DataLayerHandle (runtime)
+  🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
 
 ❌ Фаза 3 — Decompose-совместимость навигации:
   🔲 🆕 Задача 2a: Parcelable-сериализация (navigation + platform-android)
@@ -278,6 +313,5 @@ fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
   🔲 🟧 Задача 6: ComponentContext разделение (core)
   🔲 🟧 Задача 5: Modifier API (ui)
   🔲 🟨 Задача 8: Хрупкие тесты (ui)
-  🔲 🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
   🔲 🟩 Задача 11: Патч egui
 ```

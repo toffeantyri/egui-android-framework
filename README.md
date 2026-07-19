@@ -112,7 +112,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 use egui_android_framework::{
     core::*,
     ui::prelude::*,
-    runtime::{Application, Dispatcher, StateStore, AppConfig},
+    runtime::{Application, Dispatcher, RuntimeConfig, StateStore},
     platform_android::run,
 };
 
@@ -179,7 +179,7 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 |---|---|---|
 | egui-android-core | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, ViewFn, Widget, LifecycleObserver, BackDispatcher, UiWrapper, Constraints |
 | egui-android-ui | [![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui) | Виджеты (Button, Text, Spacer, Icon), контейнеры (Column, Row, Stack, LazyColumn), модификаторы, remember, анимации, темы Material Design 3 |
-| egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier, RuntimeContext, AppConfig |
+| egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier, RuntimeContext, RuntimeConfig, DataLayerHandle |
 | egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |
 | egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Абстрактный Platform trait, FrameInput, PlatformEvent |
 | egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл (RunState::tick), lifecycle, system bars, GraphicsPipeline |
