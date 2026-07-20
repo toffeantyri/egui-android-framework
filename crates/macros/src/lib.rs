@@ -133,7 +133,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
         .collect();
 
     let persistent_state_impl = quote! {
-        impl ::egui_android_core::PersistentState for #name {
+        impl ::egui_android_framework::core::PersistentState for #name {
             type State = #saved_state_name;
 
             fn save(&self) -> Self::State {

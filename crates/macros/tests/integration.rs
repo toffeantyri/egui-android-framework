@@ -2,11 +2,11 @@
 //!
 //! Проверяют генерацию PersistentState через #[derive(Component)] + #[persistent_fields(...)].
 
-use egui_android_core::{
+use egui_android_framework::core::{
     Component as EguiComponent, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
 };
+use egui_android_framework::runtime::Dispatcher;
 use egui_android_macros::Component;
-use egui_android_runtime::Dispatcher;
 
 // ─── Компонент с persistent полями ─────────────────────────────────
 

@@ -8,6 +8,8 @@
 //! use egui_android_framework::Component;  // derive-макрос
 //! ```
 
+pub extern crate egui_android_core;
+
 pub use egui_android_core as core;
 pub use egui_android_navigation as navigation;
 pub use egui_android_platform as platform;

@@ -6,6 +6,7 @@
 //!
 //! Аналог Decompose: `stateKeeper` для данных, `remember` для UI.
 
+pub use egui_android_framework::core;
 use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{

@@ -256,6 +256,7 @@ version = "0.4.0-alpha.1"
 dependencies = [
  "bincode",
  "egui-android-core",
+ "egui-android-framework",
  "egui-android-runtime",
  "proc-macro2",
  "quote",
@@ -331,7 +332,6 @@ dependencies = [
  "android_logger",
  "bincode",
  "egui",
- "egui-android-core",
  "egui-android-framework",
  "log",
  "serde",

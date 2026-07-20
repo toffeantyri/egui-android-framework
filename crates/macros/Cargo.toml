@@ -18,5 +18,6 @@ proc-macro2 = "1"
 [dev-dependencies]
 egui-android-core = { version = "0.4.0-alpha.1", path = "../core" }
 egui-android-runtime = { version = "0.4.0-alpha.1", path = "../runtime" }
+egui-android-framework = { version = "0.4.0-alpha.1", path = "../framework" }
 serde = { workspace = true }
 bincode = { workspace = true }
