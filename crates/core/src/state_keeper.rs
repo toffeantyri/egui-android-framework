@@ -51,6 +51,7 @@ use std::any::Any;
 /// Каждый узел хранит:
 /// - `own_state` — состояние текущего компонента (если есть)
 /// - `children` — дочерние StateKeeper по строковым ключам
+#[derive(Debug)]
 pub struct StateKeeper {
     own_state: Option<Box<dyn Any + Send>>,
     children: Vec<(String, StateKeeper)>,
