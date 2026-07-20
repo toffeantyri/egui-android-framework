@@ -2,7 +2,7 @@
 
 ---
 
-## Статус выполнения
+## Статус выполнения (закрытые задачи)
 
 | Задача | Статус | Дата |
 |--------|--------|------|
@@ -10,289 +10,238 @@
 | 🟥 2. save/restore навигации | ✅ **Выполнено** (базовый) | 2026-07-19 |
 | 🟥 3. type-erasure через dyn Any | ✅ **Выполнено** | 2026-07-19 |
 | 🟧 4. Монолитный backend | ✅ **Выполнено** | 2026-07-19 |
-| 🟧 5. Перегруженный Modifier API | ❌ Не выполнено | — |
-| 🟧 6. ComponentContext слишком сложный | ❌ Не выполнено | — |
 | 🟨 7. PlatformConfig/AppConfig дублирование | ✅ **Выполнено** | 2026-07-19 |
-| 🟨 8. Хрупкие layout-тесты | ❌ Не выполнено | — |
 | 🟨 9. Гибридное хранение PlatformState | ✅ **Выполнено** | 2026-07-19 |
 | 🟩 10. DataLayerHandle заглушка | ✅ **Выполнено** | 2026-07-19 |
-| 🟩 11. Патч egui | ❌ Не выполнено | — |
+| 🆕 2b. Router/ComponentFactory слой | ✅ **Выполнено** | 2026-07-20 |
 
 ---
 
-🟥 Приоритет 1 — критические архитектурные проблемы
+## Целевая архитектура: Decompose-style ComponentContext
 
-🟥 1. egui-android-platform-android — глобальное состояние
+Текущая архитектура отличается от Decompose в ключевом моменте: **компонент сам владеет ChildStack, сам вызывает save/restore на своих стеках**. В Decompose этой ответственности у компонента нет — всем управляет ComponentContext.
 
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Что сделано:
-- Глобальные `Atomic*` и `OnceLock` (`INSETLEFT`, `SYSTEMTHEME`, `GLOBALVM`, `SYSTEMBARS_COLORS`) — удалены.
-- Всё состояние перенесено в `PlatformState` (через `Arc<Mutex<>>`), хранится в backend instance.
-- `PlatformState` — единый источник истины в backend. Синхронизация с `egui::Context::data()` удалена (см. Задачу 9).
-
-Что ещё остаётся:
-- JNI указатели (`vm_ptr`, `activity_ptr`) — сырые указатели в публичном API `PlatformState`.
+Ниже — целевая архитектура, к которой мы движемся.
 
 ---
 
-🟥 2. egui-android-navigation — save/restore навигации
+### Проблема текущей архитектуры
 
-**Статус: ✅ ВЫПОЛНЕНО** (базовый уровень)
+Сейчас:
 
-Что сделано:
-- `ComponentState` trait — типобезопасное save/restore с ассоциированным типом `State`
-- `ChildStack::restore()` — проверяет соответствие конфигураций (prevents data corruption)
-- `ChildStack<C>` теперь требует `C: Debug` для логирования несовпадений
-- Базовый `ComponentNode::save_state()`/`restore_state()` — дефолт `None`/пусто (безопасное поведение)
-- Blanket-impl `ComponentNode for T: Component` больше не переопределяет save_state/restore_state
-
-Что ещё нужно для полной совместимости с Decompose:
-- 🆕 2a. Parcelable-сериализация через JNI (android.os.Bundle)
-- 🆕 2b. Router/ComponentFactory слой
-- 🆕 2c. Рекурсивное сохранение дочерних стеков
-- (См. раздел «Decompose — что ещё нужно» ниже)
-
----
-
-🟥 3. egui-android-core — type-erasure через dyn Any
-
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Что сделано:
-- `Component::Message: Clone + Debug + Send + 'static` — статическая гарантия
-- `MessageEnvelope<M>` — типобезопасная обёртка (runtime/src/message_envelope.rs)
-- `ComponentNode::handle_dyn()` — логирование при ошибке downcast с указанием ожидаемого типа
-- Blanket-impl: `save_state()`/`restore_state()` убраны (наследуются из ComponentNode с дефолтом)
-
----
-
-🟧 Приоритет 2 — серьёзные проблемы
-
-🟧 4. egui-android-platform-android — монолитный backend
-
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Что сделано (6 шагов):
-- **Шаг 1**: `event.rs` — вынос типов событий из `backend/mod.rs`
-- **Шаг 2**: `lifecycle.rs` — вынос InitWindow/Resume/Pause/Stop/Destroy
-- **Шаг 3**: `graphics.rs` — `GraphicsPipeline` (Painter + рендеринг)
-- **Шаг 4**: `input_processing.rs` — конвертация BackendEvent → egui::Event
-- **Шаг 5**: `loop.rs` — `RunState` + `tick()` — одна итерация главного цикла
-- **Шаг 6**: финальная чистка, документация, версия 0.4.0-alpha.1
-
-Итог:
-- `run.rs`: 440 → 126 строк (-71%)
-- Модулей: 4 → 14 специализированных
-- Каждая ответственность в своём файле
-
----
-
-🟧 5. egui-android-ui
-
-Проблема: перегруженный Modifier API
-
-Что делать:
-- Вынести редкие модификаторы в ui-extras.
-- Анимации вынести в ui-animation.
-- Оставить минимальный набор базовых модификаторов.
-
-Приоритет: 🟧
-Крейт: egui-android-ui
-
----
-
-🟧 6. egui-android-core
-
-Проблема: ComponentContext слишком сложный
-
-Что делать:
-- Разделить на: NavigationContext, StateContext, BackContext, DataContext
-
-Приоритет: 🟧
-Крейт: egui-android-core
-
----
-
-🟨 Приоритет 3 — второстепенные проблемы
-
-🟨 7. egui-android-platform
-
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Проблема: PlatformConfig смешивает ответственность — содержит log_tag и target_fps,
-которые относятся к Runtime, а не к платформе.
-
-Что сделано:
-- `AppConfig` переименован в `RuntimeConfig` (crates/runtime)
-- `PlatformConfig` очищен от `log_tag`/`target_fps`, оставлен только `vsync`
-- `Application::config()` / `config_mut()` возвращают `&RuntimeConfig`
-- Platform-android читает `log_tag`/`target_fps` через `Application::config()`
-- Примеры обновлены: `AppConfig` → `RuntimeConfig`
-
----
-
-🟨 8. egui-android-ui
-
-Проблема: хрупкие layout‑тесты
-Что делать: тестировать только публичный контракт.
-
----
-
-🟨 9. egui-android-platform-android
-
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Проблема: гибридное хранение PlatformState — два источника истины
-(backend + egui::Context::data()).
-
-Что сделано:
-- `PlatformState::store_in_ctx()` / `from_ctx()` — удалены. Единый источник — backend.
-- `theme.rs` — удалён публичный API (`set_clear_color_from`, `current_clear_color`, `current_theme`, `init_system_theme`, `set_theme_override`)
-- `system_bars.rs` — `apply_system_bars_for_theme(ctx)` заменён на `apply_system_bars_for_platform_state(&PlatformState)`
-- `lifecycle.rs` — при InitWindow: вместо `store_in_ctx()` теперь напрямую устанавливает `clear_color` и system_bars через backend
-- `loop.rs` — после `frame()`: чтение `panel_fill` из egui-стиля (установлен Application через `MaterialTheme::apply()`) → `set_clear_color_from()`
-- `lib.rs` — убран `pub mod theme`
-- Примеры — убраны вызовы `set_clear_color_from()` и `apply_system_bars_for_theme()`
-
-Архитектура: Application задаёт тему через egui::Context, platform-android
-сам применяет clear_color и system_bars.
-
----
-
-🟩 Приоритет 4 — низкий
-
-🟩 10. egui-android-runtime — DataLayerHandle
-
-**Статус: ✅ ВЫПОЛНЕНО**
-
-Проблема: `DataLayerHandle::send()` — пустышка, не отправляет команды.
-
-Что сделано:
-- `DataLayerHandle<DataCmd>` — generic-тип поверх `mpsc::Sender<DataCmd>`
-- `send()` реально отправляет команду в data layer
-- `sender()` — получение сырого `mpsc::Sender` для передачи в `ComponentContext`
-- `From<mpsc::Sender<DataCmd>>` для удобной конвертации
-- Убран `Default` (требует Sender)
-
-🟩 11. egui-android-platform-android — патч egui
-
----
-
-## Decompose — что ещё нужно для полной совместимости
-
-### 🆕 2a. Parcelable-сериализация (navigation + platform-android)
-
-**Проблема**: `ChildStack::save()` сохраняет состояние в памяти (`Box<dyn Any + Send>`).
-При process kill (Android убивает процесс) состояние теряется.
-
-**В Decompose**: конфигурации сериализуются в `Parcelable` через `Bundle`,
-переживают перезапуск процесса.
-
-**Что нужно сделать**:
-
-1. Добавить трейт `ConfigSerializer`:
-```rust
-/// Сериализация конфигурации навигации в/из Bundle.
-pub trait ConfigSerializer<C> {
-    fn save(config: &C) -> Vec<i32>;            // или через JNI
-    fn restore(data: &[i32]) -> Option<C>;
-}
+```
+NestedScreen (компонент)
+  ├── stack_layer1: ChildStack<NestedRoute>    ← компонент владеет вручную
+  ├── stack_layer2: ChildStack<NestedLayer2Route> ← компонент владеет вручную
+  ├── save_state_recursive()                    ← компонент пишет вручную
+  └── restore_state_recursive()                 ← компонент пишет вручную
 ```
 
-2. `ChildStack::save_parcelable()` → сериализует весь стек в Bundle
+При добавлении нового вложенного стека нужно:
+1. Добавить поле `ChildStack<NewRoute>`
+2. Обновить `save_state_recursive()` и `restore_state_recursive()`
+3. Обновить структуру состояния
 
-3. `ChildStack::restore_parcelable()` → восстанавливает стек из Bundle
-
-4. `Application::on_save_state()` → вызывает `save_parcelable()` и сохраняет Bundle через JNI
-
-5. `Application::on_restore_state()` → восстанавливает Bundle через JNI
-
-**Зависимости**: JNI (уже есть), `android.os.Bundle`
-
-**Крейт**: `egui-android-navigation` + `egui-android-platform-android`
+**Это нарушает OCP и требует ручной работы на каждом уровне вложенности.**
 
 ---
 
-### 🆕 2b. Router/ComponentFactory слой (navigation)
+### Целевая архитектура (Decompose-style)
 
-**Проблема**: `NavigationHost::create_screen()` содержит `match` по всем Route — нарушение OCP.
+```
+ComponentContext (владелец всего):
+  ├── StateKeeper (дерево состояний)     ← save/restore рекурсивно
+  ├── ChildStackManager<C>               ← управляет стеком, restore автоматически
+  ├── Lifecycle (MergedLifecycle)
+  ├── BackHandler
+  └── InstanceKeeper
 
-**В Decompose**: `Router` — отдельный слой, который по конфигурации создаёт компонент.
-Config может быть сериализован и восстановлен.
+NestedScreen (компонент):
+  └── ctx: ComponentContext     ← делегирует всё контексту
+  └── navigator: ChildStackManager<NestedRoute>  ← создаётся через ctx
 
-**Что нужно сделать**:
-
-1. Создать `ComponentFactory<C>` trait:
-```rust
-/// Фабрика компонентов по маршруту.
-pub trait ComponentFactory<C> {
-    /// Создать компонент для данного маршрута.
-    fn create(&self, config: C) -> Box<dyn ComponentNode>;
-}
+  // save/restore — НЕТ! ComponentContext делает всё автоматически.
 ```
 
-2. `NavigationHost::create_screen()` принимает `&dyn ComponentFactory<Route>`
+Ключевые изменения:
 
-3. Showcase реализует `ComponentFactory<Route>` — без match по всем Route в NavigationHost
+1. **`ComponentContext` становится владельцем `StateKeeper`** — дерева состояний, которое автоматически рекурсивно сохраняется и восстанавливается.
 
-**Крейт**: `egui-android-navigation`
+2. **`ChildStack` уходит из компонента в `ComponentContext`** — компонент больше не владеет стеками напрямую. Вместо этого `ComponentContext` предоставляет методы для навигации, а управление стеком происходит внутри контекста.
+
+3. **`StateKeeper` — рекурсивное дерево**:
+   ```rust
+   // Псевдокод
+   struct StateKeeper {
+       own_state: Option<Box<dyn Any + Send>>,
+       children: HashMap<String, StateKeeper>,  // по ключу — дочерние компоненты
+   }
+   ```
+   - При `save()`: StateKeeper сохраняет своё состояние + рекурсивно все `children`
+   - При `restore()`: StateKeeper восстанавливает себя + рекурсивно всех `children`
+   - Дочерний StateKeeper создаётся через `parent.child(key)` — привязывается к родителю
+
+4. **Компонент регистрирует дочерние контексты через ключи**:
+   ```rust
+   // В Decompose — при создании дочернего компонента:
+   class NestedComponent(
+       componentContext: ComponentContext  // родительский контекст
+   ) : ComponentContext by componentContext {
+   
+       // navigator сам создаёт дочерние ComponentContext с их StateKeeper
+       private val navigator = ChildrenNavigator(
+           source = stackNavigation,
+           initialStack = { listOf(ChildConfig.A) },
+           childFactory = { config, childCtx ->
+               when (config) {
+                   is ChildConfig.A -> SubComponent(childCtx)  // ← дочерний контекст
+               }
+           },
+       )
+   }
+   ```
 
 ---
 
-### 🆕 2c. Рекурсивное сохранение дочерних стеков (navigation)
+### Поток save/restore в целевой архитектуре
 
-**Проблема**: `ChildStack::save()` сохраняет только верхний уровень. Если компонент
-сам содержит `ChildStack` (например, `NestedScreen`), его состояние не сохраняется.
-
-**В Decompose**: каждая компонента сама знает, как сохранить своё состояние,
-включая дочерние стеки. `save()` вызывается рекурсивно.
-
-**Что нужно сделать**:
-
-1. `ComponentNode::save_state()` по умолчанию вызывает `save_state()` на всех дочерних `ChildStack`
-
-2. Добавить в `ComponentNode` метод `save_recursive()`:
-```rust
-fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
-    // сохранить себя + рекурсивно дочерние стеки
-}
 ```
+Application::on_save_state()
+  └── ctx.state_keeper.save()
+      ├── сохраняет своё состояние
+      └── для каждого child:
+          └── child.state_keeper.save()
+              ├── сохраняет своё состояние
+              └── для каждого child:
+                  └── ... рекурсия ...
+
+Application::on_restore_state()
+  └── ctx.state_keeper.restore(saved)
+      ├── восстанавливает своё состояние
+      └── для каждого child по ключу:
+          └── child.state_keeper.restore(child_saved)
+              ├── восстанавливает своё состояние  
+              └── для каждого child:
+                  └── ... рекурсия ...
+```
+
+Весь save/restore — **автоматический, без единой строки кода в компоненте**.
+
+---
+
+### Что меняется в крейтах
+
+**1. `egui-android-core`** — новый крейт `ComponentContext`:
+
+```
+crates/core/src/
+  ├── component_context.rs     ← ComponentContext (владелец StateKeeper)
+  ├── state_keeper.rs          ← StateKeeper (рекурсивное дерево)
+  ├── child_stack_manager.rs   ← ChildStackManager (стек внутри контекста)
+  ├── component_node.rs        ← ComponentNode (упрощается — save/restore уходят)
+  └── ...
+```
+
+**2. `egui-android-navigation`** — упрощается:
+
+```
+crates/navigation/src/
+  ├── child_stack.rs           ← ChildStack (чистый контейнер, без save/restore)
+  ├── component_factory.rs     ← ComponentFactory (остаётся)
+  └── ...
+```
+
+**3. `egui-android-runtime`** — Application получает `RootComponentContext`:
+
+```
+crates/runtime/src/
+  ├── application.rs           ← Application владеет RootComponentContext
+  └── ...
+```
+
+---
+
+### План перехода (Фаза 5)
+
+Переход осуществляется в 4 шага. Каждый шаг — отдельная задача.
+
+#### 🔲 **5a. StateKeeper — рекурсивное дерево состояний** (core)
+
+**Что сделать:**
+1. Создать `StateKeeper`:
+   ```rust
+   pub struct StateKeeper {
+       own_state: Option<Box<dyn Any + Send>>,
+       children: Vec<(String, StateKeeper)>,
+   }
+   ```
+2. `save() -> StateKeeperSnapshot` — рекурсивно
+3. `restore(snapshot)` — рекурсивно
+4. `child(key) -> &mut StateKeeper` — создаёт/возвращает дочерний StateKeeper по ключу
+5. Тесты: дерево 3 уровня, save/restore, частичное восстановление
+
+**Крейт**: `egui-android-core`
+**Зависимости**: нет (чистый core)
+
+---
+
+#### 🔲 **5b. NewComponentContext — владелец StateKeeper** (core)
+
+**Что сделать:**
+1. Создать `ComponentContext`:
+   ```rust
+   pub struct ComponentContext {
+       state_keeper: StateKeeper,
+       // в будущем: lifecycle, back_handler, instance_keeper
+   }
+   ```
+2. Методы:
+   - `save_state()` — делегирует `StateKeeper::save()`
+   - `restore_state(snapshot)` — делегирует `StateKeeper::restore()`
+   - `child(key) -> ComponentContext` — создаёт дочерний контекст с дочерним StateKeeper
+3. `ComponentNode` — больше не содержит `save_state()`/`restore_state()` / `save_state_recursive()` / `restore_state_recursive()`
+4. `ComponentNode.render()` — получает `&ComponentContext` вместо `&DynDispatcher` (или наряду с ним)
+
+**Крейт**: `egui-android-core`
+**Breaking change**: `ComponentNode` теряет save/restore методы. Компоненты больше не пишут save/restore вручную.
+
+---
+
+#### 🔲 **5c. ChildStackManager — навигация через ComponentContext** (core + navigation)
+
+**Что сделать:**
+1. Создать `ChildStackManager<C, M>`:
+   ```rust
+   pub struct ChildStackManager<C, M> {
+       stack: ChildStack<C>,
+       ctx: ComponentContext,
+       factory: Box<dyn ComponentFactory<C, M>>,
+   }
+   ```
+2. `push(config)`, `pop()`, `replace(config)`, `bring_to_front(config)` — управляют стеком + lifecycle
+3. При push — создаёт дочерний `ComponentContext` через `ctx.child(key)`, регистрирует его StateKeeper
+4. `save()` — делегирует `ComponentContext::save_state()` (рекурсивно)
+5. `restore(saved)` — восстанавливает StateKeeper, создаёт компоненты через фабрику
+6. `render(ui, dispatch)` — рендерит активный компонент
 
 **Крейт**: `egui-android-core` + `egui-android-navigation`
 
 ---
 
-### Сводная таблица по Decompose-совместимости
+#### 🔲 **5d. Migration примера на новый ComponentContext** (showcase)
 
-| Возможность | Decompose | У нас | Статус |
-|-------------|-----------|-------|--------|
-| ChildStack с lifecycle | ✅ | ✅ | Готово |
-| ComponentState trait | ✅ | ✅ | Готово |
-| Проверка конфигураций при restore | ✅ | ✅ | Готово |
-| Типобезопасный save/restore | ✅ | ✅ | Готово |
-| Parcelable-сериализация | ✅ | ❌ | 🆕 Задача 2a |
-| Router/ComponentFactory | ✅ | ❌ | 🆕 Задача 2b |
-| Рекурсивное сохранение стеков | ✅ | ❌ | 🆕 Задача 2c |
-| Авто-восстановление после kill | ✅ | ❌ | Нужны 2a + 2b + 2c |
+**Что сделать:**
+1. `NavigationHost` переходит с `ChildStack` на `ChildStackManager`
+2. `NestedScreen` больше не содержит `ChildStack` — только `ChildStackManager<NestedRoute>` и `ChildStackManager<NestedLayer2Route>`
+3. `NestedScreen` не переопределяет save/restore — всё делает контекст
+4. Удалить `NestedScreenState`, `save_state_recursive()`, `restore_state_recursive()`
+5. Проверить: save/restore вложенной навигации без единой строки кода save/restore в компонентах
+
+**Крейт**: `showcase`
 
 ---
 
-📌 Итоговая таблица по крейтам (обновлённая)
-
-| Крейт | Приоритет | Проблемы | Статус |
-|-------|-----------|----------|--------|
-| platform-android | 🟥🟧🟨🟩🆕 | глобальные статики ✅, монолит backend ✅, JNI/EGL утечки, ~~двойное хранение~~ ✅, патч egui, **Parcelable (2a)** | ⚠️ 4 выполнены |
-| platform | 🟨 | ~~PlatformConfig смешивает ответственность~~ ✅ | ✅ Выполнено |
-| runtime | 🟩 | ~~DataLayerHandle заглушка~~ ✅ | ✅ Выполнено |
-| core | 🟥🟧 | type-erasure ✅, ComponentContext сложный | ⚠️ 1 выполнена |
-| navigation | 🟥🟥🟥🆕🆕🆕 | save/restore ✅, **Router (2b)**, **рекурсивное сохранение (2c)** | ⚠️ 1 выполнена |
-| ui | 🟧🟨 | перегруженный Modifier, хрупкие тесты | ❌ |
-| framework | 🟩 | косметика | ❌ |
-
----
-
-## Порядок выполнения (обновлённый)
+### Порядок выполнения (обновлённый)
 
 ```
 ✅ Фаза 1 — Выполнено:
@@ -304,69 +253,43 @@ fn save_recursive(&self) -> Vec<(SomeConfig, Option<Box<dyn Any + Send>>)> {
   🟩 Задача 10: DataLayerHandle (runtime)
   🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
 
-❌ Фаза 3 — Decompose-совместимость навигации:
-  🔲 🆕 Задача 2a: Parcelable-сериализация (navigation + platform-android)
-  🔲 🆕 Задача 2b: Router/ComponentFactory (navigation)
-  🔲 🆕 Задача 2c: Рекурсивное сохранение стеков (core + navigation)
+✅ Фаза 3 — Decompose-совместимость навигации:
+  ✅ 🆕 Задача 2b: Router/ComponentFactory (navigation)
+  ❌ Задача 2a и 2c — отменены (перекрываются Фазой 5)
 
-❌ Фаза 4 — После всего (рефакторинг без изменения логики):
-  🔲 🟧 Задача 6: ComponentContext разделение (core)
-  🔲 🟧 Задача 5: Modifier API (ui)
-  🔲 🟨 Задача 8: Хрупкие тесты (ui)
+🔲 Фаза 4 — Накопившиеся мелкие задачи:
+  🔲 🟧 Задача 6: ComponentContext разделение на подконтексты (core)
+        — Замена: после Фазы 5 новый ComponentContext заменит старый.
+          Пока только минимальные фиксы, если блокируют работу.
+  🔲 🟧 Задача 5: Modifier API (ui) — вынести редкие модификаторы
+  🔲 🟨 Задача 8: Хрупкие тесты (ui) — тестировать только публичный контракт
   🔲 🟩 Задача 11: Патч egui
+  🔲 🟡 Замечание A: Application не наследует LifecycleObserver
+  🔲 🟡 Замечание B: MessageEnvelope мёртвый код
+  🔲 🟡 Замечание C: JNI указатели в публичном API PlatformState
 
----
-
-## Архитектурные замечания по результатам аудита
-
-> Выявлены в ходе проверки кода на соответствие архитектуре. Не являются блокерами,
-> но снижают качество кода и предсказуемость системы.
-
-### 🟡 Замечание A: Application не наследует LifecycleObserver
-
-**Локация**: `crates/runtime/src/application.rs`
-
-`Application` объявляет методы lifecycle напрямую (`on_create`, `on_start`, etc.)\nвместо наследования от `LifecycleObserver` из `egui-android-core`.
-
-**Проблема**: Дублирование контракта. Если `LifecycleObserver` изменится,
-`Application` нужно будет менять вручную.
-
-**Решение**: Наследовать `LifecycleObserver` в `Application`.
-
-**Статус**: 🔲 Не сделано
-
----
-
-### 🟡 Замечание B: MessageEnvelope не используется в DynDispatcher
-
-**Локация**: `crates/runtime/src/message_envelope.rs`, `crates/runtime/src/dyn_dispatcher.rs`
-
-`MessageEnvelope<M>` определён как типобезопасная обёртка, но в `DynDispatcher::wrap()`
-сообщение упаковывается сырым `Box::new(msg)`, а не в `MessageEnvelope`.
-
-**Проблема**: `MessageEnvelope` — мёртвый код. Документация говорит, что он используется,
-но код его игнорирует.
-
-**Решение**: Либо использовать `MessageEnvelope` в `WrappedImpl`, либо удалить тип.
-
-**Статус**: 🔲 Не сделано
-
----
-
-### 🟡 Замечание C: JNI указатели в публичном API PlatformState
-
-**Локация**: `crates/platform-android/src/platform_state.rs`
-
-`vm_ptr()` и `activity_ptr()` возвращают сырые указатели. Любой код, имеющий
-доступ к `PlatformState`, может их использовать.
-
-**Проблема**: Unsafe в публичном API. Нарушение инкапсуляции.
-
-**Решение**: Инкапсулировать JNI-вызовы в backend, не предоставлять сырые указатели.
-
-**Статус**: 🔲 Не сделано
-
----
-
-### 🟢 Есть вопросы? Сверься с полным архитектурным отчётом в `.agents/skills/arch-result/report.md`
+🔲 Фаза 5 — Decompose-style ComponentContext:
+  🔲 Задача 5a: StateKeeper — рекурсивное дерево состояний (core)
+  🔲 Задача 5b: NewComponentContext — владелец StateKeeper (core)
+  🔲 Задача 5c: ChildStackManager — навигация через ComponentContext (core + navigation)
+  🔲 Задача 5d: Migration примера на новый ComponentContext (showcase)
 ```
+
+---
+
+### Что отменено и почему
+
+| Задача | Решение | Причина |
+|--------|---------|---------|
+| 2a. Parcelable-сериализация | ❌ Отменена | В Фазе 5 сериализация будет на уровне StateKeeper, не ChildStack. Реализовывать сейчас — делать двойную работу. |
+| 2c. Рекурсивное сохранение стеков | ❌ Отменена (текущая реализация некорректна) | Текущая реализация — ручная, не рекурсивная. Правильное рекурсивное сохранение = StateKeeper из Фазы 5. |
+
+---
+
+### Архитектурные замечания (временные)
+
+> Не блокируют Фазу 5, но будут исправлены после неё.
+
+1. **Application не наследует LifecycleObserver** — будет исправлено после редизайна Application.
+2. **MessageEnvelope мёртвый код** — удалить после стабилизации DynDispatcher.
+3. **JNI указатели в публичном API PlatformState** — будет исправлено при рефакторинге platform-android.
