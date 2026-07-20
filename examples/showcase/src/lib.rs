@@ -9,6 +9,7 @@
 #![allow(clippy::new_without_default)]
 
 pub mod app;
+pub mod factory;
 pub mod navigation;
 pub mod navigation_host;
 pub mod screens;

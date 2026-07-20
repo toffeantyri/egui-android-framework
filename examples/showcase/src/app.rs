@@ -9,6 +9,7 @@ use egui_android_framework::{
     ui::theme::MaterialTheme,
 };
 
+use crate::factory::ShowcaseFactory;
 use crate::navigation_host::{NavigationHost, RootMsg};
 
 /// Корневое состояние приложения.
@@ -42,7 +43,8 @@ impl Application for ShowcaseApplication {
         });
         let (_statechanged_tx, statechanged_rx) = mpsc::channel::<()>();
 
-        let root = NavigationHost::new(store.clone_state());
+        let factory = Box::new(ShowcaseFactory);
+        let root = NavigationHost::new(store.clone_state(), factory);
 
         Self {
             root,

@@ -1,10 +1,17 @@
 //! NavigationHost — хост навигации с ChildStack.
 //!
 //! Координатор между Application и экранами.
-//! Владеет корневым ChildStack, создаёт экраны по маршруту,
-//! делегирует сообщения активному компоненту через `ComponentNode::handle_dyn()`.
+//! Владеет корневым ChildStack, создаёт экраны по маршруту
+//! через [`ComponentFactory`], делегирует сообщения активному
+//! компоненту через `ComponentNode::handle_dyn()`.
 //!
 //! Не реализует Component трейт — рендер через render_dyn.
+//!
+//! # ComponentFactory
+//!
+//! `NavigationHost` принимает `Box<dyn ComponentFactory<Route>>` при создании.
+//! Это позволяет реализовать OCP: при добавлении нового экрана не нужно
+//! менять `NavigationHost` — достаточно новой фабрики.
 //!
 //! # Обработка сообщений через handle_dyn
 //!
@@ -26,18 +33,14 @@
 //! 3. Если стек не изменился — завершение.
 
 use egui_android_framework::{
-    core::{ComponentContext, ComponentNode, LifecycleObserver, UiWrapper},
-    navigation::ChildStack,
+    core::{ComponentContext, LifecycleObserver, UiWrapper},
+    navigation::{ChildStack, ComponentFactory},
     runtime::{DynDispatcher, StateStore},
 };
 
 use crate::app::AppState;
 use crate::navigation::Route;
-use crate::screens::{
-    animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
-    home::HomeScreen, modifier_value::ModifierValueScreen, nested::NestedScreen,
-    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
-};
+use crate::screens::themes::ThemesScreen;
 
 /// Сообщения навигации.
 #[derive(Clone, Debug)]
@@ -60,10 +63,17 @@ pub struct NavigationHost {
     store: StateStore<AppState>,
     /// Контекст — центр навигации и обработки Back.
     pub context: ComponentContext<RootMsg, (), AppState>,
+    /// Фабрика компонентов (создание экранов по маршруту).
+    factory: Box<dyn ComponentFactory<Route>>,
 }
 
 impl NavigationHost {
-    pub fn new(store: StateStore<AppState>) -> Self {
+    /// Создать NavigationHost.
+    ///
+    /// Принимает:
+    /// - `store` — StateStore для доступа к общему состоянию
+    /// - `factory` — фабрика компонентов (создание экранов по маршруту)
+    pub fn new(store: StateStore<AppState>, factory: Box<dyn ComponentFactory<Route>>) -> Self {
         let (navevent_tx, _navevent_rx) = std::sync::mpsc::channel();
         let ctx = ComponentContext::new(None, navevent_tx, store.clone_state());
 
@@ -73,12 +83,13 @@ impl NavigationHost {
             stack,
             store,
             context: ctx,
+            factory,
         };
 
         // Добавляем Home в корневой стек
         instance
             .stack
-            .push(Route::Home, Self::create_screen(&Route::Home));
+            .push(Route::Home, instance.factory.create(Route::Home));
 
         // Устанавливаем back_fallback.
         // stack — Box, указатель на данные в куче стабилен при любых перемещениях Self.
@@ -108,20 +119,6 @@ impl NavigationHost {
         instance.context.back_fallback = Some(callback);
 
         instance
-    }
-
-    fn create_screen(route: &Route) -> Box<dyn ComponentNode> {
-        match route {
-            Route::Home => Box::new(HomeScreen::new()),
-            Route::Widgets => Box::new(WidgetsScreen::new()),
-            Route::Containers => Box::new(ContainersScreen::new()),
-            Route::Themes => Box::new(ThemesScreen::new()),
-            Route::State => Box::new(StateScreen::new()),
-            Route::Animations => Box::new(AnimationsScreen::new()),
-            Route::ModifierValue => Box::new(ModifierValueScreen::new()),
-            Route::Nested => Box::new(NestedScreen::new()),
-            Route::BackCustom => Box::new(BackCustomScreen::new()),
-        }
     }
 
     pub fn sync_from_store(&mut self) {
@@ -168,7 +165,7 @@ impl NavigationHost {
     pub fn handle_msg(&mut self, msg: RootMsg) {
         match msg {
             RootMsg::Navigate(route) => {
-                self.stack.push(route.clone(), Self::create_screen(&route));
+                self.stack.push(route.clone(), self.factory.create(route));
             }
             RootMsg::Back => {
                 self.on_back();

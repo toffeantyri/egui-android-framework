@@ -8,7 +8,9 @@
 //! НЕ знает про runtime, platform.
 
 pub mod child_stack;
+pub mod component_factory;
 pub mod component_state;
 
 pub use child_stack::ChildStack;
+pub use component_factory::{create_component, ComponentFactory};
 pub use component_state::ComponentState;
