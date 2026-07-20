@@ -35,7 +35,7 @@
 use egui_android_framework::{
     core::{ComponentContext, LifecycleObserver, UiWrapper},
     navigation::{ChildStack, ComponentFactory},
-    runtime::{DynDispatcher, StateStore},
+    runtime::{DynDispatcher, SavedStack, StateStore},
 };
 
 use crate::app::AppState;
@@ -91,32 +91,8 @@ impl NavigationHost {
             .stack
             .push(Route::Home, instance.factory.create(Route::Home));
 
-        // Устанавливаем back_fallback.
-        // stack — Box, указатель на данные в куче стабилен при любых перемещениях Self.
-        struct RawStack(*mut ChildStack<Route>);
-        unsafe impl Send for RawStack {}
-
-        let ptr = &mut *instance.stack as *mut ChildStack<Route>;
-        let raw = Box::new(RawStack(ptr));
-        let mut raw = Some(raw);
-
-        let callback: Box<dyn FnMut() -> bool + Send> = Box::new(move || {
-            let raw = raw.as_mut().unwrap();
-            let stack = unsafe { &mut *raw.0 };
-
-            if stack.is_empty() {
-                return false;
-            }
-
-            if stack.len() == 1 {
-                return false;
-            }
-
-            stack.pop();
-            true
-        });
-
-        instance.context.back_fallback = Some(callback);
+        // Настраиваем back_fallback
+        instance.setup_back_fallback();
 
         instance
     }
@@ -184,6 +160,42 @@ impl NavigationHost {
         if let Some(active) = self.stack.active() {
             active.render(ui, uidynmsg_tx);
         }
+    }
+
+    // --- Сохранение/восстановление (Decompose-style) ---
+
+    /// Сохранить состояние стека навигации.
+    pub fn save(&self) -> SavedStack<Route> {
+        self.stack.save()
+    }
+
+    /// Восстановить состояние навигации из сохранённого.
+    /// Пересоздаёт компоненты через фабрику.
+    pub fn restore(&mut self, saved: SavedStack<Route>) {
+        log::info!(
+            "NavigationHost::restore: восстанавливаем {} элементов",
+            saved.items.len()
+        );
+        self.stack.restore_from_saved(saved, &*self.factory);
+        self.setup_back_fallback();
+    }
+
+    fn setup_back_fallback(&mut self) {
+        let ptr = &mut *self.stack as *mut ChildStack<Route>;
+        struct RawStack(*mut ChildStack<Route>);
+        unsafe impl Send for RawStack {}
+        let raw = Box::new(RawStack(ptr));
+        let mut raw = Some(raw);
+        let cb: Box<dyn FnMut() -> bool + Send> = Box::new(move || {
+            let raw = raw.as_mut().unwrap();
+            let s = unsafe { &mut *raw.0 };
+            if s.is_empty() || s.len() == 1 {
+                return false;
+            }
+            s.pop();
+            true
+        });
+        self.context.back_fallback = Some(cb);
     }
 }
 

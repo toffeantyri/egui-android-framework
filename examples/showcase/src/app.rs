@@ -5,11 +5,15 @@ use std::sync::mpsc;
 use egui_android_framework::{
     core::{LifecycleObserver, UiWrapper},
     platform::Waker,
-    runtime::{Application, DynDispatcher, RuntimeConfig, RuntimeContext, StateStore},
+    runtime::{
+        Application, DynDispatcher, RuntimeConfig, RuntimeContext, SavedStack, SavedState,
+        StateStore,
+    },
     ui::theme::MaterialTheme,
 };
 
 use crate::factory::ShowcaseFactory;
+use crate::navigation::Route;
 use crate::navigation_host::{NavigationHost, RootMsg};
 
 /// Корневое состояние приложения.
@@ -80,8 +84,35 @@ impl Application for ShowcaseApplication {
     }
 
     fn request_destroy(&mut self) -> bool {
-        // Завершаем приложение только если стек пуст или finish_requested выставлен
         self.root.context.finish_requested || self.root.stack.is_empty()
+    }
+
+    fn on_save_state(&mut self) -> SavedState {
+        let saved = self.root.save();
+        let bytes = bincode::serialize(&saved).expect("Ошибка сериализации SavedStack");
+        log::info!(
+            "on_save_state: сохранено {} элементов стека ({} байт)",
+            saved.items.len(),
+            bytes.len()
+        );
+        Some(bytes)
+    }
+
+    fn on_restore_state(&mut self, state: SavedState) {
+        if let Some(bytes) = state {
+            match bincode::deserialize::<SavedStack<Route>>(&bytes) {
+                Ok(saved) => {
+                    log::info!(
+                        "on_restore_state: восстанавливаем {} элементов",
+                        saved.items.len()
+                    );
+                    self.root.restore(saved);
+                }
+                Err(e) => {
+                    log::error!("on_restore_state: ошибка десериализации: {}", e);
+                }
+            }
+        }
     }
 
     fn frame(&mut self, egui_ctx: &egui::Context, raw_input: egui::RawInput) -> egui::FullOutput {

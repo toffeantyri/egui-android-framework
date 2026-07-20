@@ -17,9 +17,11 @@
 //! потом в `NestedLayer2Msg`. Какой подошёл — тот и обрабатывается.
 //! Это позволяет добавлять новые слои без изменения существующего кода.
 
-use egui_android_framework::core::{Component, ComponentNode, LifecycleObserver, UiWrapper};
-use egui_android_framework::navigation::ChildStack;
-use egui_android_framework::runtime::{Dispatcher, DynDispatcher};
+use egui_android_framework::core::{
+    Component, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+};
+use egui_android_framework::navigation::{ChildStack, ComponentFactory};
+use egui_android_framework::runtime::{Dispatcher, DynDispatcher, SavedStack};
 use egui_android_framework::ui::{
     containers::Column,
     modifier::{Modifier, ModifierDsl},
@@ -28,6 +30,7 @@ use egui_android_framework::ui::{
 };
 
 use crate::navigation::{NestedLayer2Msg, NestedLayer2Route, NestedMsg, NestedRoute};
+use serde::{Deserialize, Serialize};
 
 // ─── SubScreen ─────────────────────────────────────────────────────────────
 
@@ -161,6 +164,56 @@ impl NestedScreen {
 }
 
 impl LifecycleObserver for NestedScreen {}
+
+// ─── Сохраняемое состояние (для рекурсивного save/restore) ──────────────
+
+#[derive(Serialize, Deserialize)]
+pub struct NestedSavedState {
+    layer1: SavedStack<NestedRoute>,
+    layer2: SavedStack<NestedLayer2Route>,
+    layer2_open: bool,
+}
+
+impl PersistentState for NestedScreen {
+    type State = NestedSavedState;
+
+    fn save(&self) -> Self::State {
+        NestedSavedState {
+            layer1: self.stack_layer1.save(),
+            layer2: self.stack_layer2.save(),
+            layer2_open: self.layer2_open,
+        }
+    }
+
+    fn restore(&mut self, state: Self::State) {
+        // Фабрики для пересоздания компонентов
+        struct Layer1Factory;
+        impl ComponentFactory<NestedRoute> for Layer1Factory {
+            fn create(&self, config: NestedRoute) -> Box<dyn ComponentNode> {
+                Box::new(Layer1Sub::from_route(&config))
+            }
+        }
+        struct Layer2Factory;
+        impl ComponentFactory<NestedLayer2Route> for Layer2Factory {
+            fn create(&self, config: NestedLayer2Route) -> Box<dyn ComponentNode> {
+                Box::new(Layer2Sub::from_route(&config))
+            }
+        }
+
+        self.stack_layer1.clear();
+        self.stack_layer2.clear();
+
+        // Пересоздаём слой 1 из сохранённых конфигураций
+        self.stack_layer1
+            .restore_from_saved(state.layer1, &Layer1Factory);
+
+        // Пересоздаём слой 2 из сохранённых конфигураций
+        self.stack_layer2
+            .restore_from_saved(state.layer2, &Layer2Factory);
+
+        self.layer2_open = state.layer2_open;
+    }
+}
 
 impl ComponentNode for NestedScreen {
     fn render(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
@@ -311,5 +364,13 @@ impl ComponentNode for NestedScreen {
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        PersistentState::save_to_boxed(self)
+    }
+
+    fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
+        PersistentState::restore_from_boxed(self, state);
     }
 }

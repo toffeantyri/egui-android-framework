@@ -1,7 +1,9 @@
 //! Маршруты навигации для showcase-приложения.
 
+use serde::{Deserialize, Serialize};
+
 /// Основной маршрут (экран) в приложении.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Route {
     /// Главный экран со списком демо.
     Home,
@@ -56,7 +58,7 @@ impl Route {
 }
 
 /// Маршруты вложенной навигации внутри NestedScreen.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NestedRoute {
     A,
     B,
@@ -96,7 +98,7 @@ pub enum NestedMsg {
 ///
 /// Демонстрирует, что каждый вложенный стек имеет свой enum маршрутов
 /// и свой тип сообщений, независимый от других стеков.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NestedLayer2Route {
     X,
     Y,
