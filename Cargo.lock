@@ -331,6 +331,7 @@ dependencies = [
  "android_logger",
  "bincode",
  "egui",
+ "egui-android-core",
  "egui-android-framework",
  "log",
  "serde",

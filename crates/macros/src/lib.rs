@@ -115,7 +115,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[derive(::serde::Serialize, ::serde::Deserialize, Clone, Debug)]
         #[allow(non_camel_case_types)]
-        struct #saved_state_name {
+        pub struct #saved_state_name {
             #(#field_defs,)*
         }
     };

@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 egui-android-framework = { path = "../../crates/framework" }
+egui-android-core = { path = "../../crates/core" }
 egui = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }

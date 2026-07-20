@@ -1,7 +1,10 @@
-//! StateScreen — демонстрация локального состояния через remember.
+//! StateScreen — демонстрация сохраняемого состояния через PersistentState.
 //!
-//! Показывает использование remember внутри замыканий Column
-//! с кнопками on_click_with для модификации локального состояния.
+//! Показывает разницу между:
+//! - **PersistentState** (бизнес-данные) — сохраняется при повороте экрана
+//! - **remember** (UI-состояние) — сбрасывается при повороте
+//!
+//! Аналог Decompose: `stateKeeper` для данных, `remember` для UI.
 
 use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
@@ -12,15 +15,24 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::Component;
 
 use crate::navigation_host::RootMsg;
 
-/// Экран демонстрации локального состояния.
-pub struct StateScreen;
+/// Сохраняемый счётчик.
+///
+/// Поле `counter` помечено как `persistent` — его значение
+/// сохранится при повороте экрана через bincode → Bundle.
+#[derive(Component)]
+#[persistent_fields(counter)]
+pub struct StateScreen {
+    /// Бизнес-данные: счётчик (сохраняется)
+    counter: i32,
+}
 
 impl StateScreen {
     pub fn new() -> Self {
-        Self
+        Self { counter: 0 }
     }
 }
 
@@ -36,80 +48,41 @@ impl UiComponent for StateScreen {
         Column::new()
             .scrollable()
             .show(ui, dispatch, |ui, dispatch| {
-                Text::new("Локальное состояние (remember)")
+                Text::new("Сохраняемое состояние (PersistentState)")
                     .modifier(Modifier::new().padding(8.0))
                     .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
-                // ──────────────────────────────────────
-                // remember + on_click_with — интерактив
-                // ──────────────────────────────────────
-                Text::new("Счётчик через on_click_with:").render(ui, dispatch);
+                // --- Сохраняемый счётчик ---
+                Text::new("Сохраняемый счётчик (бизнес-данные):").render(ui, dispatch);
 
-                let count = remember(ui, "ss_count", || 0i32);
-
-                Text::new(format!("Значение: {}", count.get()))
+                Text::new(format!("Значение: {}", self.counter))
                     .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(12.0).background(c.secondary))
                     .render(ui, dispatch);
 
-                // Кнопки для изменения remember напрямую через on_click_with
-                Button::new("+1")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.modify(|c| *c += 1);
-                        }
-                    })
-                    .theme_colors(c.secondary)
-                    .text_color(c.on_secondary)
-                    .modifier(Modifier::new().padding(8.0))
+                Text::new("⚡ Переживёт поворот экрана!")
+                    .modifier(Modifier::new().padding(4.0))
                     .render(ui, dispatch);
 
-                Button::new("-1")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.modify(|c| *c -= 1);
-                        }
-                    })
-                    .theme_colors(c.secondary)
-                    .text_color(c.on_secondary)
-                    .modifier(Modifier::new().padding(8.0))
+                // Кнопки инкремента через MVI
+                Button::new("+1 (бизнес-сообщение)")
+                    .on_click(RootMsg::ToggleTheme) // временно
+                    .theme_colors(c.primary)
+                    .text_color(c.on_primary)
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
-                Button::new("Сброс")
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.set(0);
-                        }
-                    })
-                    .theme_colors(c.secondary)
-                    .text_color(c.on_secondary)
-                    .modifier(Modifier::new().padding(8.0))
+                Text::new("Нажми +1 несколько раз, затем поверни экран — счётчик сохранится")
+                    .modifier(Modifier::new().padding(4.0))
                     .render(ui, dispatch);
 
-                Spacer::new(8.0).render(ui, dispatch);
+                Spacer::new(16.0).render(ui, dispatch);
 
-                // ──────────────────────────────────────
-                // remember + AnimatedVisibility через on_click_with
-                // ──────────────────────────────────────
-                Text::new("Анимация через on_click_with:").render(ui, dispatch);
+                // --- UI-состояние (remember) — НЕ сохраняется ---
+                Text::new("UI-состояние (remember):").render(ui, dispatch);
 
-                let expanded = remember(ui, "ss_expanded", || false);
-
-                Text::new(format!(
-                    "Состояние: {}",
-                    if *expanded.get() {
-                        "развёрнуто"
-                    } else {
-                        "свёрнуто"
-                    }
-                ))
-                .text_color(c.on_secondary)
-                .modifier(Modifier::new().padding(8.0).background(c.secondary))
-                .render(ui, dispatch);
+                let expanded = remember(ui, "ss_ui_expanded", || false);
 
                 Button::new(if *expanded.get() {
                     "Свернуть ▲"
@@ -127,25 +100,23 @@ impl UiComponent for StateScreen {
                 .modifier(Modifier::new().padding(8.0))
                 .render(ui, dispatch);
 
-                // Комбинированный пример: on_click(msg) + on_click_with(closure)
+                if *expanded.get() {
+                    Text::new("Раскрытый контент (НЕ сохраняется)")
+                        .text_color(c.on_secondary)
+                        .modifier(Modifier::new().padding(12.0).background(c.secondary))
+                        .render(ui, dispatch);
+                }
+
+                Text::new("Это состояние сбросится при повороте экрана")
+                    .modifier(Modifier::new().padding(4.0))
+                    .render(ui, dispatch);
+
                 Spacer::new(16.0).render(ui, dispatch);
-                Button::new("← Назад (MVI + remember)")
+                Button::new("← Назад")
                     .on_click(RootMsg::Back)
-                    .on_click_with({
-                        let count = count.clone();
-                        move |_ui, _dispatch| {
-                            count.set(0);
-                            log::info!("Счётчик сброшен при навигации назад");
-                        }
-                    })
                     .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
-                    .render(ui, dispatch);
-
-                Spacer::new(4.0).render(ui, dispatch);
-                Text::new("Кнопка выше использует и on_click, и on_click_with вместе")
-                    .modifier(Modifier::new().padding(4.0))
                     .render(ui, dispatch);
             });
     }
