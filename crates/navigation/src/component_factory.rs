@@ -21,6 +21,7 @@
 //! }
 //! ```
 
+use egui_android_core::component_context2::ComponentContext2;
 use egui_android_core::ComponentNode;
 
 /// Фабрика компонентов по конфигурации.
@@ -36,6 +37,18 @@ use egui_android_core::ComponentNode;
 pub trait ComponentFactory<C> {
     /// Создать компонент для данной конфигурации.
     fn create(&self, config: C) -> Box<dyn ComponentNode>;
+}
+
+/// Фабрика компонентов с передачей ComponentContext2.
+///
+/// Отличается от [`ComponentFactory`] тем, что передаёт в компонент
+/// [`ComponentContext2`] при создании. Это позволяет компоненту
+/// получить доступ к StateKeeper для рекурсивного save/restore.
+///
+/// Используется с [`super::child_stack_manager::ChildStackManager`].
+pub trait ComponentFactory2<C> {
+    /// Создать компонент с контекстом.
+    fn create(&self, config: C, ctx: ComponentContext2) -> Box<dyn ComponentNode>;
 }
 
 /// Создаёт компонент через `ComponentFactory` и оборачивает его с lifecycle-вызовами.
