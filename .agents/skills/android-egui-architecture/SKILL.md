@@ -73,7 +73,67 @@ Data Layer никогда не взаимодействует с UI.
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
 | Navigation | `egui-android-navigation` | ChildStack, save/restore состояния |
 | Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, RuntimeContext, каналы |
+| Macros | `egui-android-macros` | #[derive(Component)] — генерация PersistentState |
 | Umbrella | `egui-android-framework` | Re-export всех крейтов |
+
+---
+
+## Saved State (Decompose-style)
+
+### PersistentState
+
+**Крейт**: `egui-android-core`
+
+Трейт `PersistentState` — аналог `StateKeeper` в Decompose. Реализуется компонентом
+для сохранения кастомных данных при пересоздании Activity.
+
+```rust
+pub trait PersistentState {
+    type State: Serialize + DeserializeOwned + Send + 'static;
+    fn save(&self) -> Self::State;
+    fn restore(&mut self, state: Self::State);
+
+    // Хелперы: сериализация/десериализация через bincode
+    fn save_to_boxed(&self) -> Option<Box<dyn Any + Send>>;
+    fn restore_from_boxed(&mut self, state: Box<dyn Any + Send>);
+}
+```
+
+### Макрос #[derive(Component)]
+
+**Крейт**: `egui-android-macros`
+
+Генерирует `PersistentState` автоматически по `#[persistent_fields(...)]`:
+
+```rust
+#[derive(Component)]
+#[persistent_fields(counter, label)]
+struct MyScreen {
+    counter: i32,   // ← сохраняется
+    label: String,  // ← сохраняется
+    expanded: bool, // ← НЕ сохраняется (UI-состояние)
+}
+```
+
+Генерирует скрытую структуру `__MyScreenPersistentState` с `Serialize/Deserialize`
+и `impl PersistentState for MyScreen`.
+
+### SavedStack<C>
+
+**Крейт**: `egui-android-runtime`
+
+Сериализуемое представление стека навигации. `ChildStack::save()` возвращает
+`SavedStack<C>`, который сериализуется через `bincode` в `Vec<u8>`.
+
+### Поток save/restore
+
+```
+Android lifecycle:
+  Stop → onSaveInstanceState → Application::on_save_state() → SavedStack → bincode → Vec<u8>
+  InitWindow → Application::on_restore_state(bytes) → bincode → SavedStack → ChildStack::restore_from_saved()
+```
+
+`restore_from_saved()` пересоздаёт компоненты через фабрику (как в Decompose) и восстанавливает их состояние через `ComponentNode::restore_state()`.
 
 ---
 

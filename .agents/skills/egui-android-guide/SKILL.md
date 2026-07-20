@@ -275,8 +275,21 @@ Message = и событие, и семантика
 - `save(&self) -> Self::State` — сохранить состояние.
 - `restore(&mut self, state: Self::State)` — восстановить состояние.
 - Компонент реализует `ComponentState` (вместе с `Component`) для типобезопасного save/restore.
-- `ComponentNode::save_state()`/`restore_state()` имеют дефолтную реализацию (`None`/пусто).
-  Blanket-impl НЕ переопределяет их — компонент может переопределить напрямую.
+`save_state()`/`restore_state()` имеют дефолтную реализацию (`None`/пусто).
+Blanket-impl НЕ переопределяет их — компонент может переопределить напрямую.
+
+### `PersistentState` — `egui-android-core`
+- Трейт для бизнес-данных (аналог `StateKeeper` в Decompose).
+- `type State: Serialize + DeserializeOwned + Send + 'static`.
+- `save_to_boxed()/restore_from_boxed()` — хелперы с bincode.
+
+### `#[derive(Component)]` — `egui-android-macros`
+- Генерирует `PersistentState` по `#[persistent_fields(f1, f2)]`.
+- Поля без persistent_fields = UI-состояние, не сохраняются.
+
+### `SavedStack<C>` — `egui-android-runtime`
+- `ChildStack::save() -> SavedStack<C>`, `restore_from_saved()`.
+- bincode для Bundle, пересоздание через фабрику.
 
 ### `MessageEnvelope<M>` — `egui-android-runtime`
 - Типобезопасная обёртка сообщения.
@@ -543,11 +556,14 @@ if let Some(active) = self.stack.active_mut() {
 | Событие | Действие |
 |---|---|
 | `InitWindow` (первый) | `backend.init()` + `init_graphics()`, `update_system_insets()`, `on_restore_state()`, инициализация `RuntimeContext`. Устанавливает clear_color и system_bars через backend. |
-| `InitWindow` (повторный) | `recreate_surface()`, не трогать display/context/painter |
+| `InitWindow` (повторный) | `recreate_surface()`, **`on_restore_state()`** (восстановление после поворота) |
 | `Resume` | `app_instance.on_resume()` |
 | `Pause` | `app_instance.on_pause()` |
-| `Stop` | `app_instance.on_stop()` — не чистить EGL |
-| `Destroy` | `on_save_state()`, `app_instance.on_destroy()`, destroy painter/EGL, `break` |
+| `Stop` | **`app_instance.on_save_state()`** (сохранение навигации), `app_instance.on_stop()` |
+| `Destroy` | `app_instance.on_save_state()`, `app_instance.on_destroy()`, destroy EGL, `break` |
+
+**Важно:** `configChanges="orientation|screenSize|uiMode|density"` в манифесте
+предотвращает kill процесса. `saved_state` в `RunState` переживает Pause/Resume циклы.
 
 ### Завершение приложения
 
@@ -641,8 +657,12 @@ loop {
 │   │       ├── view.rs             — type ViewFn<S, M>
 │   │       ├── widget.rs           — trait Widget<M: Send>
 │   │       ├── ui_wrapper.rs       — UiWrapper (обёртка над egui::Ui с Constraints)
-│   │       ├── constraints.rs      — Constraints { min/max width/height }
-│   │       └── back_dispatcher.rs  — BackDispatcher + BackCallback
+│   │       ├── constraints.rs      — Constraints
+│   │       ├── persistent_state.rs — trait PersistentState
+│   │       └── back_dispatcher.rs  — BackDispatcher
+│   │
+│   ├── macros/             — egui-android-macros
+│   │       └── src/lib.rs  — #[derive(Component)]
 │   │
 │   ├── navigation/         — egui-android-navigation
 │   │   └── src/
