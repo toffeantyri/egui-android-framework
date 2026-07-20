@@ -53,7 +53,7 @@ pub fn handle_lifecycle_event<A: Application>(
         }
         LifecycleEvent::Resume => handle_resume(app_instance),
         LifecycleEvent::Pause => handle_pause(app_instance),
-        LifecycleEvent::Stop => handle_stop(app_instance),
+        LifecycleEvent::Stop => handle_stop(app_instance, saved_state),
         LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested, saved_state),
     }
 }
@@ -80,6 +80,8 @@ fn handle_init_window<A: Application>(
 
     if has_egl {
         // InitWindow после Pause/Resume — пересоздаём surface
+        // и восстанавливаем состояние навигации
+        // (как в Decompose: restoreState при каждом создании контекста)
         if let Err(e) = backend.recreate_surface() {
             log::error!("Ошибка пересоздания EGL surface: {}", e);
             if let Some(ref mut g) = graphics {
@@ -88,7 +90,6 @@ fn handle_init_window<A: Application>(
             *graphics = None;
             backend.destroy_graphics();
         } else {
-            // Повторно инициализируем painter с новым surface
             if let Some(ref mut g) = graphics {
                 unsafe {
                     use glow::HasContext;
@@ -98,6 +99,9 @@ fn handle_init_window<A: Application>(
                 }
             }
         }
+        // Восстанавливаем состояние навигации после пересоздания
+        let state = saved_state.take();
+        app_instance.on_restore_state(state);
     } else {
         // Первый InitWindow — инициализируем EGL
         backend.init().ok();
@@ -105,7 +109,6 @@ fn handle_init_window<A: Application>(
             log::error!("Ошибка инициализации EGL: {}", e);
         }
         // Восстанавливаем состояние навигации после пересоздания
-        // (как в Decompose: savedInstanceState → restoreState)
         let state = saved_state.take();
         app_instance.on_restore_state(state);
     }
@@ -135,27 +138,26 @@ fn handle_pause<A: Application>(app_instance: &mut A) {
 }
 
 /// Обработать Stop — приложение остановлено.
-fn handle_stop<A: Application>(app_instance: &mut A) {
+///
+/// Сохраняет состояние навигации (аналог Android onSaveInstanceState).
+/// Это нужно для восстановления при повороте экрана (конфигурационных изменениях).
+fn handle_stop<A: Application>(app_instance: &mut A, saved_state: &mut Option<Vec<u8>>) {
     log::info!("Lifecycle: Stop");
+    *saved_state = app_instance.on_save_state();
     app_instance.on_stop();
 }
 
 /// Обработать Destroy — приложение уничтожается.
 ///
-/// Сохраняет состояние навигации в `saved_state` (аналог `onSaveInstanceState`)
-/// и устанавливает флаг завершения.
-///
-/// # Поток
-///
-/// 1. `app_instance.on_save_state()` — приложение сохраняет навигацию
-/// 2. Сохраняем результат в `saved_state`
-/// 3. Устанавливаем `destroy_requested = true`
+/// Сохраняет состояние и устанавливает флаг завершения.
+/// (onSaveInstanceState уже вызван в Stop)
 fn handle_destroy<A: Application>(
     app_instance: &mut A,
     destroy_requested: &mut bool,
     saved_state: &mut Option<Vec<u8>>,
 ) {
     log::info!("Lifecycle: Destroy");
+    // Сохраняем ещё раз на случай если Stop не был вызван
     *saved_state = app_instance.on_save_state();
     *destroy_requested = true;
 }

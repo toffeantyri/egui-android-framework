@@ -17,16 +17,17 @@ use egui_android_framework::ui::{
 };
 use egui_android_framework::Component;
 
-use crate::navigation_host::RootMsg;
+/// Сообщения экрана состояния.
+#[derive(Clone, Debug)]
+pub enum StateScreenMsg {
+    Increment,
+    Decrement,
+    Reset,
+}
 
-/// Сохраняемый счётчик.
-///
-/// Поле `counter` помечено как `persistent` — его значение
-/// сохранится при повороте экрана через bincode → Bundle.
 #[derive(Component)]
 #[persistent_fields(counter)]
 pub struct StateScreen {
-    /// Бизнес-данные: счётчик (сохраняется)
     counter: i32,
 }
 
@@ -40,7 +41,7 @@ impl LifecycleObserver for StateScreen {}
 
 impl UiComponent for StateScreen {
     type State = ();
-    type Message = RootMsg;
+    type Message = StateScreenMsg;
 
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
         let c = &Theme::current_from_ui(ui).colors;
@@ -53,7 +54,6 @@ impl UiComponent for StateScreen {
                     .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
-                // --- Сохраняемый счётчик ---
                 Text::new("Сохраняемый счётчик (бизнес-данные):").render(ui, dispatch);
 
                 Text::new(format!("Значение: {}", self.counter))
@@ -65,16 +65,25 @@ impl UiComponent for StateScreen {
                     .modifier(Modifier::new().padding(4.0))
                     .render(ui, dispatch);
 
-                // Кнопки инкремента через MVI
-                Button::new("+1 (бизнес-сообщение)")
-                    .on_click(RootMsg::ToggleTheme) // временно
+                Button::new("+1")
+                    .on_click(StateScreenMsg::Increment)
                     .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
-                Text::new("Нажми +1 несколько раз, затем поверни экран — счётчик сохранится")
-                    .modifier(Modifier::new().padding(4.0))
+                Button::new("-1")
+                    .on_click(StateScreenMsg::Decrement)
+                    .theme_colors(c.primary)
+                    .text_color(c.on_primary)
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .render(ui, dispatch);
+
+                Button::new("Сброс")
+                    .on_click(StateScreenMsg::Reset)
+                    .theme_colors(c.secondary)
+                    .text_color(c.on_secondary)
+                    .modifier(Modifier::new().fill_max_width().padding(8.0))
                     .render(ui, dispatch);
 
                 Spacer::new(16.0).render(ui, dispatch);
@@ -113,7 +122,7 @@ impl UiComponent for StateScreen {
 
                 Spacer::new(16.0).render(ui, dispatch);
                 Button::new("← Назад")
-                    .on_click(RootMsg::Back)
+                    .on_click(StateScreenMsg::Reset)
                     .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
@@ -121,7 +130,13 @@ impl UiComponent for StateScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, msg: Self::Message) {
+        match msg {
+            StateScreenMsg::Increment => self.counter += 1,
+            StateScreenMsg::Decrement => self.counter -= 1,
+            StateScreenMsg::Reset => self.counter = 0,
+        }
+    }
 
     fn state(&self) -> &Self::State {
         &()

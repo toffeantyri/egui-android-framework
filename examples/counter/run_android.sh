@@ -96,6 +96,7 @@ cat > "$ANDROID_DIR/app/src/main/AndroidManifest.xml" << EOF
             android:name="com.example.egui_android.EguiActivity"
             android:exported="true"
             android:label="${APP_LABEL}"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density"
             android:theme="@style/AppTheme">
             <meta-data android:name="android.app.lib_name" android:value="${APP_LIB_NAME}" />
             <intent-filter>
