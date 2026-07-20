@@ -12,4 +12,6 @@ egui = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
 egui-android-platform = { version = "0.4.0-alpha.1", path = "../platform" }

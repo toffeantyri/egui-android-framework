@@ -57,7 +57,13 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// Сохранить состояние компонента для восстановления после пересоздания.
     ///
     /// По умолчанию — `None` (состояние не сохраняется).
-    /// Экран может вернуть любое `Send + 'static` значение (например, счётчик).
+    ///
+    /// Если компонент реализует [`PersistentState`], этот метод должен
+    /// сериализовать `PersistentState::save()` через `bincode` в `Vec<u8>`
+    /// и вернуть `Some(Box::new(bytes))`.
+    ///
+    /// `ChildStack` при сохранении ожидает именно `Vec<u8>` —
+    /// сериализованные данные, готовые для Android Bundle.
     fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
         None
     }
@@ -76,6 +82,10 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
 }
 
 // Blanket-impl: любой Component автоматически становится ComponentNode.
+//
+// Если компонент также реализует PersistentState,
+// save_state()/restore_state() автоматически сериализуют/десериализуют
+// его состояние через bincode в Vec<u8>.
 impl<T> ComponentNode for T
 where
     T: crate::Component,
@@ -100,6 +110,12 @@ where
     fn handle_back(&mut self) -> bool {
         false
     }
+
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        None
+    }
+
+    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self

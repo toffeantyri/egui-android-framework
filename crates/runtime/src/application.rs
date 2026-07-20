@@ -33,6 +33,7 @@
 use egui_android_platform::Waker;
 
 use crate::runtime_context::RuntimeContext;
+use crate::saved_state::SavedState;
 
 use std::sync::mpsc;
 
@@ -151,19 +152,33 @@ pub trait Application: Sized + 'static {
 
     // ─── Сохранение/восстановление состояния ───────────────────────────
 
-    /// Сохранить состояние навигации перед уничтожением Activity.
+    /// Сохранить состояние навигации и компонентов перед уничтожением Activity.
     ///
     /// Вызывается из platform-android при Lifecycle::Destroy.
-    /// Приложение может вызвать `ChildStack::save()` для сохранения стека.
-    /// Реализация по умолчанию — заглушка.
-    fn on_save_state(&mut self) {}
-
-    /// Восстановить состояние навигации после пересоздания Activity.
+    /// Приложение должно вызвать `ChildStack::save()`, сериализовать результат
+    /// через `bincode` и вернуть как `SavedState`.
     ///
-    /// Вызывается из platform-android при первом InitWindow после Resume.
-    /// Приложение может вызвать `ChildStack::restore()` для восстановления стека.
-    /// Реализация по умолчанию — заглушка.
-    fn on_restore_state(&mut self) {}
+    /// Возвращает:
+    /// - `None` — состояние не сохранялось (нечего сохранять).
+    /// - `Some(Vec<u8>)` — сериализованные данные для Android Bundle.
+    ///
+    /// Реализация по умолчанию возвращает `None`.
+    fn on_save_state(&mut self) -> SavedState {
+        None
+    }
+
+    /// Восстановить состояние навигации и компонентов после пересоздания Activity.
+    ///
+    /// Вызывается из platform-android при первом InitWindow (после Resume).
+    /// Приложение должно десериализовать `state` через `bincode`
+    /// и вызвать `ChildStack::restore()`.
+    ///
+    /// Принимает:
+    /// - `None` — первый запуск, нечего восстанавливать.
+    /// - `Some(Vec<u8>)` — сериализованные данные из Android Bundle.
+    ///
+    /// Реализация по умолчанию — ничего не делает.
+    fn on_restore_state(&mut self, _state: SavedState) {}
 }
 
 // ─── RuntimeConfig ──────────────────────────────────────────────────────────────

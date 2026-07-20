@@ -1,295 +1,636 @@
-Это — актуальная дорожная карта для выхода фреймворка на продакшн‑уровень.
+--- Задача ---
+Архитектура Decompose и наше соответствие
+
+### Ключевые сущности Decompose → Наш аналог
+
+| Decompose | Наш аналог | Статус |
+|---|---|---|
+| `Parcelable` конфигурация | `C: Clone + Debug + Serialize + Deserialize` | Нужно добавить serde |
+| `ChildStack<C, T>` | `ChildStack<C>` (хранит `Box<dyn ComponentNode>`) | ✅ Есть |
+| `ComponentContext` | `ComponentContext<NavEvent, DataCmd, State>` | ✅ Есть |
+| `StateKeeper` (регистрируется в контексте) | `ComponentNode::save_state()` + `restore_state()` | ✅ Есть |
+| `StateKeeperDispatcher` | `ChildStack::save()` / `restore()` — рекурсивный обход | ✅ Есть, но не подключён |
+| `SavedState` (Parcelable контейнер) | `Vec<u8>` через bincode | Нужно создать |
+| `GenericComponentContext` (корень) | `NavigationHost` (корневой компонент) | ✅ Есть |
+| `onSaveInstanceState(Bundle)` | `Application::on_save_state() -> SavedState` | Нужно реализовать |
+| `onCreate(Bundle?)` | `Application::on_restore_state(SavedState)` | Нужно реализовать |
+| `RootComponent` | `NavigationHost` (не реализует Component) | ✅ Есть |
 
 ---
 
-## Статус выполнения (закрытые задачи)
+### Как работает Decompose при Save
 
-| Задача | Статус | Дата |
-|--------|--------|------|
-| 🟥 1. Глобальные статики — удалены | ✅ **Выполнено** | До 2026-07-19 |
-| 🟥 2. save/restore навигации | ✅ **Выполнено** (базовый) | 2026-07-19 |
-| 🟥 3. type-erasure через dyn Any | ✅ **Выполнено** | 2026-07-19 |
-| 🟧 4. Монолитный backend | ✅ **Выполнено** | 2026-07-19 |
-| 🟨 7. PlatformConfig/AppConfig дублирование | ✅ **Выполнено** | 2026-07-19 |
-| 🟨 9. Гибридное хранение PlatformState | ✅ **Выполнено** | 2026-07-19 |
-| 🟩 10. DataLayerHandle заглушка | ✅ **Выполнено** | 2026-07-19 |
-| 🆕 2b. Router/ComponentFactory слой | ✅ **Выполнено** | 2026-07-20 |
+```
+Activity.onSaveInstanceState(outState)
+  ↓
+ComponentContext.saveState(outState)
+  ↓
+StateKeeperDispatcher.save()
+  │
+  ├── Для Child Stack:
+  │   1. Сохранить конфигурации всех элементов стека
+  │   2. Для каждого элемента → Component.saveState()
+  │      └── Внутри компонента: все зарегистрированные StateKeeper-ы
+  │         сохраняют свои данные
+  │
+  └── Все данные → SavedState (Parcelable) → outState
+```
+
+### Как работает Decompose при Restore
+
+```
+Activity.onCreate(savedInstanceState)
+  ↓
+savedInstanceState?.getParcelable<SavedState>()
+  ↓
+ComponentContext.restoreState(savedState)
+  ↓
+StateKeeperDispatcher.restore(data)
+  │
+  ├── Для Child Stack:
+  │   1. Извлечь сохранённые конфигурации
+  │   2. Пересоздать компоненты заново (factory.create(config))
+  │   3. Для каждого → Component.restoreState()
+  │      └── Внутри: StateKeeper-ы восстанавливают данные
+```
+
+**Критически важно:** при restore компоненты **пересоздаются**, не "чинятся". Конфигурация — единственный источник истины для структуры стека.
 
 ---
 
-## Целевая архитектура: Decompose-style ComponentContext
-
-Текущая архитектура отличается от Decompose в ключевом моменте: **компонент сам владеет ChildStack, сам вызывает save/restore на своих стеках**. В Decompose этой ответственности у компонента нет — всем управляет ComponentContext.
-
-Ниже — целевая архитектура, к которой мы движемся.
-
----
-
-### Проблема текущей архитектуры
-
-Сейчас:
+### Три слоя сохранения (как в Decompose)
 
 ```
-NestedScreen (компонент)
-  ├── stack_layer1: ChildStack<NestedRoute>    ← компонент владеет вручную
-  ├── stack_layer2: ChildStack<NestedLayer2Route> ← компонент владеет вручную
-  ├── save_state_recursive()                    ← компонент пишет вручную
-  └── restore_state_recursive()                 ← компонент пишет вручную
-```
-
-При добавлении нового вложенного стека нужно:
-1. Добавить поле `ChildStack<NewRoute>`
-2. Обновить `save_state_recursive()` и `restore_state_recursive()`
-3. Обновить структуру состояния
-
-**Это нарушает OCP и требует ручной работы на каждом уровне вложенности.**
-
----
-
-### Целевая архитектура (Decompose-style)
-
-```
-ComponentContext (владелец всего):
-  ├── StateKeeper (дерево состояний)     ← save/restore рекурсивно
-  ├── ChildStackManager<C>               ← управляет стеком, restore автоматически
-  ├── Lifecycle (MergedLifecycle)
-  ├── BackHandler
-  └── InstanceKeeper
-
-NestedScreen (компонент):
-  └── ctx: ComponentContext     ← делегирует всё контексту
-  └── navigator: ChildStackManager<NestedRoute>  ← создаётся через ctx
-
-  // save/restore — НЕТ! ComponentContext делает всё автоматически.
-```
-
-Ключевые изменения:
-
-1. **`ComponentContext` становится владельцем `StateKeeper`** — дерева состояний, которое автоматически рекурсивно сохраняется и восстанавливается.
-
-2. **`ChildStack` уходит из компонента в `ComponentContext`** — компонент больше не владеет стеками напрямую. Вместо этого `ComponentContext` предоставляет методы для навигации, а управление стеком происходит внутри контекста.
-
-3. **`StateKeeper` — рекурсивное дерево**:
-   ```rust
-   // Псевдокод
-   struct StateKeeper {
-       own_state: Option<Box<dyn Any + Send>>,
-       children: HashMap<String, StateKeeper>,  // по ключу — дочерние компоненты
-   }
-   ```
-   - При `save()`: StateKeeper сохраняет своё состояние + рекурсивно все `children`
-   - При `restore()`: StateKeeper восстанавливает себя + рекурсивно всех `children`
-   - Дочерний StateKeeper создаётся через `parent.child(key)` — привязывается к родителю
-
-4. **Компонент регистрирует дочерние контексты через ключи**:
-   ```rust
-   // В Decompose — при создании дочернего компонента:
-   class NestedComponent(
-       componentContext: ComponentContext  // родительский контекст
-   ) : ComponentContext by componentContext {
-   
-       // navigator сам создаёт дочерние ComponentContext с их StateKeeper
-       private val navigator = ChildrenNavigator(
-           source = stackNavigation,
-           initialStack = { listOf(ChildConfig.A) },
-           childFactory = { config, childCtx ->
-               when (config) {
-                   is ChildConfig.A -> SubComponent(childCtx)  // ← дочерний контекст
-               }
-           },
-       )
-   }
-   ```
-
----
-
-### Поток save/restore в целевой архитектуре
-
-```
-Application::on_save_state()
-  └── ctx.state_keeper.save()
-      ├── сохраняет своё состояние
-      └── для каждого child:
-          └── child.state_keeper.save()
-              ├── сохраняет своё состояние
-              └── для каждого child:
-                  └── ... рекурсия ...
-
-Application::on_restore_state()
-  └── ctx.state_keeper.restore(saved)
-      ├── восстанавливает своё состояние
-      └── для каждого child по ключу:
-          └── child.state_keeper.restore(child_saved)
-              ├── восстанавливает своё состояние  
-              └── для каждого child:
-                  └── ... рекурсия ...
-```
-
-Весь save/restore — **автоматический, без единой строки кода в компоненте**.
-
----
-
-### Что меняется в крейтах
-
-**1. `egui-android-core`** — новый крейт `ComponentContext`:
-
-```
-crates/core/src/
-  ├── component_context.rs     ← ComponentContext (владелец StateKeeper)
-  ├── state_keeper.rs          ← StateKeeper (рекурсивное дерево)
-  ├── child_stack_manager.rs   ← ChildStackManager (стек внутри контекста)
-  ├── component_node.rs        ← ComponentNode (упрощается — save/restore уходят)
-  └── ...
-```
-
-**2. `egui-android-navigation`** — упрощается:
-
-```
-crates/navigation/src/
-  ├── child_stack.rs           ← ChildStack (чистый контейнер, без save/restore)
-  ├── component_factory.rs     ← ComponentFactory (остаётся)
-  └── ...
-```
-
-**3. `egui-android-runtime`** — Application получает `RootComponentContext`:
-
-```
-crates/runtime/src/
-  ├── application.rs           ← Application владеет RootComponentContext
-  └── ...
+Слой 1: Android Bundle
+  └── Parcelable byte array → Vec<u8>
+      │
+      Слой 2: StateKeeperDispatcher (ChildStack::save/restore)
+      │
+      ├── Стек: список конфигураций
+      └── Состояния компонентов: Vec<u8> для каждого
+          │
+          Слой 3: Компоненты (ComponentNode::save_state/restore_state)
+          │
+          ├── Примитивные данные (счётчики, текст)
+          ├── Вложенные ChildStack (рекурсивно!)
+          └── Any кастомные данные
 ```
 
 ---
 
-### План перехода (Фаза 5)
+## Задача: полная реализация
 
-Переход осуществляется в 4 шага. Каждый шаг — отдельная задача.
+### Что должно быть на выходе
 
-#### 🔲 **5a. StateKeeper — рекурсивное дерево состояний** (core)
-
-**Что сделать:**
-1. Создать `StateKeeper`:
-   ```rust
-   pub struct StateKeeper {
-       own_state: Option<Box<dyn Any + Send>>,
-       children: Vec<(String, StateKeeper)>,
-   }
-   ```
-2. `save() -> StateKeeperSnapshot` — рекурсивно
-3. `restore(snapshot)` — рекурсивно
-4. `child(key) -> &mut StateKeeper` — создаёт/возвращает дочерний StateKeeper по ключу
-5. Тесты: дерево 3 уровня, save/restore, частичное восстановление
-
-**Крейт**: `egui-android-core`
-**Зависимости**: нет (чистый core)
+1. **Поворот экрана:** пользователь на экране State (счётчик = 5) → поворот → счётчик всё ещё 5, экран тот же
+2. **Вложенная навигация:** пользователь на Nested → Экран B → поворот → Nested → Экран B
+3. **Kill/Restore процесса:** система убила процесс → перезапуск → открывается тот же стек с теми же данными
+4. **Произвольные данные:** любой компонент может сохранить любые `Serialize + Deserialize` данные
 
 ---
 
-#### 🔲 **5b. NewComponentContext — владелец StateKeeper** (core)
+## Пошаговый план реализации
 
-**Что сделать:**
-1. Создать `ComponentContext`:
-   ```rust
-   pub struct ComponentContext {
-       state_keeper: StateKeeper,
-       // в будущем: lifecycle, back_handler, instance_keeper
-   }
-   ```
-2. Методы:
-   - `save_state()` — делегирует `StateKeeper::save()`
-   - `restore_state(snapshot)` — делегирует `StateKeeper::restore()`
-   - `child(key) -> ComponentContext` — создаёт дочерний контекст с дочерним StateKeeper
-3. `ComponentNode` — больше не содержит `save_state()`/`restore_state()` / `save_state_recursive()` / `restore_state_recursive()`
-4. `ComponentNode.render()` — получает `&ComponentContext` вместо `&DynDispatcher` (или наряду с ним)
+### Шаг 0. Добавить зависимости
 
-**Крейт**: `egui-android-core`
-**Breaking change**: `ComponentNode` теряет save/restore методы. Компоненты больше не пишут save/restore вручную.
+**Крейт: `egui-android-runtime`**
+- В `Cargo.toml` добавить `serde` с derive, `bincode`
+
+**Крейт: `egui-android-navigation`**
+- В `Cargo.toml` добавить `serde`, `bincode`
+
+**Крейт: `egui-android-core`**
+- В `Cargo.toml` добавить `serde`
 
 ---
 
-#### 🔲 **5c. ChildStackManager — навигация через ComponentContext** (core + navigation)
+### Шаг 1. Тип `SavedState` в `egui-android-runtime`
 
-**Что сделать:**
-1. Создать `ChildStackManager<C, M>`:
-   ```rust
-   pub struct ChildStackManager<C, M> {
-       stack: ChildStack<C>,
-       ctx: ComponentContext,
-       factory: Box<dyn ComponentFactory<C, M>>,
-   }
-   ```
-2. `push(config)`, `pop()`, `replace(config)`, `bring_to_front(config)` — управляют стеком + lifecycle
-3. При push — создаёт дочерний `ComponentContext` через `ctx.child(key)`, регистрирует его StateKeeper
-4. `save()` — делегирует `ComponentContext::save_state()` (рекурсивно)
-5. `restore(saved)` — восстанавливает StateKeeper, создаёт компоненты через фабрику
-6. `render(ui, dispatch)` — рендерит активный компонент
+**Файл: `crates/runtime/src/saved_state.rs`** (новый)
 
-**Крейт**: `egui-android-core` + `egui-android-navigation`
-
----
-
-#### 🔲 **5d. Migration примера на новый ComponentContext** (showcase)
-
-**Что сделать:**
-1. `NavigationHost` переходит с `ChildStack` на `ChildStackManager`
-2. `NestedScreen` больше не содержит `ChildStack` — только `ChildStackManager<NestedRoute>` и `ChildStackManager<NestedLayer2Route>`
-3. `NestedScreen` не переопределяет save/restore — всё делает контекст
-4. Удалить `NestedScreenState`, `save_state_recursive()`, `restore_state_recursive()`
-5. Проверить: save/restore вложенной навигации без единой строки кода save/restore в компонентах
-
-**Крейт**: `showcase`
-
----
-
-### Порядок выполнения (обновлённый)
-
+```rust
+/// Сохранённое состояние приложения.
+/// Это аналог `SavedState` из Decompose — контейнер Parcelable-данных.
+/// Сериализуется через bincode и сохраняется в Android Bundle как byte array.
+pub type SavedState = Option<Vec<u8>>;
 ```
-✅ Фаза 1 — Выполнено:
-  🟥 Задача 1: Глобальные статики — удалены
-  🟧 Задача 4: Монолитный backend → модульная архитектура
 
-✅ Фаза 2 — Выполнено:
-  🟨 Задача 7: PlatformConfig/AppConfig дублирование (platform + runtime)
-  🟩 Задача 10: DataLayerHandle (runtime)
-  🟨 Задача 9: Гибридное хранение PlatformState (platform-android)
+**Файл: `crates/runtime/src/lib.rs`** — добавить модуль, реэкспорт типа.
 
-✅ Фаза 3 — Decompose-совместимость навигации:
-  ✅ 🆕 Задача 2b: Router/ComponentFactory (navigation)
-  ❌ Задача 2a и 2c — отменены (перекрываются Фазой 5)
+---
 
-🔲 Фаза 4 — Накопившиеся мелкие задачи:
-  🔲 🟧 Задача 6: ComponentContext разделение на подконтексты (core)
-        — Замена: после Фазы 5 новый ComponentContext заменит старый.
-          Пока только минимальные фиксы, если блокируют работу.
-  🔲 🟧 Задача 5: Modifier API (ui) — вынести редкие модификаторы
-  🔲 🟨 Задача 8: Хрупкие тесты (ui) — тестировать только публичный контракт
-  🔲 🟩 Задача 11: Патч egui
-  🔲 🟡 Замечание A: Application не наследует LifecycleObserver
-  🔲 🟡 Замечание B: MessageEnvelope мёртвый код
-  🔲 🟡 Замечание C: JNI указатели в публичном API PlatformState
+### Шаг 2. Расширить `Application` trait
 
-🔲 Фаза 5 — Decompose-style ComponentContext:
-  🔲 Задача 5a: StateKeeper — рекурсивное дерево состояний (core)
-  🔲 Задача 5b: NewComponentContext — владелец StateKeeper (core)
-  🔲 Задача 5c: ChildStackManager — навигация через ComponentContext (core + navigation)
-  🔲 Задача 5d: Migration примера на новый ComponentContext (showcase)
+**Файл: `crates/runtime/src/application.rs`**
+
+```rust
+pub trait Application {
+    // ... существующие методы ...
+
+    /// Сохранить состояние навигации и компонентов.
+    /// Возвращает сериализованные данные для Android Bundle.
+    /// 
+    /// Вызывается из platform-android при Lifecycle::Destroy.
+    fn on_save_state(&mut self) -> SavedState { None }
+
+    /// Восстановить состояние навигации и компонентов.
+    /// 
+    /// Вызывается из platform-android при первом InitWindow.
+    fn on_restore_state(&mut self, _state: SavedState) {}
+}
 ```
 
 ---
 
-### Что отменено и почему
+### Шаг 3. Platform-android: хранить и пробрасывать SavedState
 
-| Задача | Решение | Причина |
-|--------|---------|---------|
-| 2a. Parcelable-сериализация | ❌ Отменена | В Фазе 5 сериализация будет на уровне StateKeeper, не ChildStack. Реализовывать сейчас — делать двойную работу. |
-| 2c. Рекурсивное сохранение стеков | ❌ Отменена (текущая реализация некорректна) | Текущая реализация — ручная, не рекурсивная. Правильное рекурсивное сохранение = StateKeeper из Фазы 5. |
+**Файл: `crates/platform-android/src/loop.rs`** — `RunState`
+
+Добавить поле:
+```rust
+pub struct RunState {
+    // ... существующие поля ...
+    /// Сохранённое состояние навигации.
+    /// Сохраняется при Destroy, передаётся в on_restore_state при InitWindow.
+    pub saved_state: Option<Vec<u8>>,
+}
+```
+
+**Файл: `crates/platform-android/src/lifecycle.rs`**
+
+Изменить `handle_destroy`:
+```rust
+fn handle_destroy<A: Application>(
+    app_instance: &mut A,
+    destroy_requested: &mut bool,
+) -> SavedState {
+    let saved = app_instance.on_save_state();
+    *destroy_requested = true;
+    saved
+}
+```
+
+Изменить `handle_init_window`:
+```rust
+fn handle_init_window<A: Application>(
+    backend: &mut dyn AndroidBackend,
+    app_instance: &mut A,
+    egui_ctx: &egui::Context,
+    graphics: &mut Option<GraphicsPipeline>,
+    saved_state: &mut Option<Vec<u8>>,
+) {
+    if !has_egl {
+        // Первый InitWindow
+        backend.init().ok();
+        backend.init_graphics().ok();
+        
+        // Восстанавливаем сохранённое состояние
+        let state = saved_state.take();
+        app_instance.on_restore_state(state);
+    } else {
+        backend.recreate_surface().ok();
+    }
+    // ...
+}
+```
+
+Изменить `handle_lifecycle_event` — добавить параметр `saved_state` и возвращать `SavedState` из Destroy.
+
+**Файл: `crates/platform-android/src/loop.rs`** — `tick()`
+
+```rust
+// При Destroy:
+BackendEvent::Lifecycle(ev) => {
+    let saved = crate::lifecycle::handle_lifecycle_event(
+        ev, backend, app_instance, egui_ctx,
+        &mut self.graphics, &mut self.destroy_requested,
+        &mut self.saved_state,
+    );
+    if let Some(bytes) = saved {
+        self.saved_state = Some(bytes);
+    }
+}
+```
 
 ---
 
-### Архитектурные замечания (временные)
+### Шаг 4. Сделать `C` (конфигурацию) сериализуемой в `ChildStack`
 
-> Не блокируют Фазу 5, но будут исправлены после неё.
+**Файл: `crates/navigation/src/child_stack.rs`**
 
-1. **Application не наследует LifecycleObserver** — будет исправлено после редизайна Application.
-2. **MessageEnvelope мёртвый код** — удалить после стабилизации DynDispatcher.
-3. **JNI указатели в публичном API PlatformState** — будет исправлено при рефакторинге platform-android.
+Изменить bound на `C`:
+```rust
+// Было:
+C: Clone + PartialEq + std::fmt::Debug,
+
+// Стало:
+C: Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned,
+```
+
+Добавить метод `save_serializable()`:
+```rust
+/// Сохранить стек с сериализованными состояниями компонентов.
+/// Использует bincode для сериализации ComponentNode::save_state().
+pub fn save_serializable(&self) -> Vec<(C, Option<Vec<u8>>)> {
+    self.items
+        .iter()
+        .map(|item| {
+            let state_bytes = item.component.save_state()
+                .and_then(|state| {
+                    // Пробуем сериализовать через bincode
+                    // Но save_state() возвращает Box<dyn Any + Send>,
+                    // а не Serialize. Нужен другой подход — см. Шаг 7.
+                    None
+                });
+            (item.config.clone(), state_bytes)
+        })
+        .collect()
+}
+```
+
+**Проблема:** `save_state()` возвращает `Box<dyn Any + Send>`, который нельзя сериализовать через bincode. Нужно либо:
+- Изменить сигнатуру на `Box<dyn SerializableState>` (новый trait)
+- Или сериализовать компонентом отдельно через trait `PersistentState`
+
+**Решение (как в Decompose):** Ввести трейт `PersistentState` + метод `save_to_bytes()`.
+
+---
+
+### Шаг 5. Трейт `PersistentState` в `egui-android-core`
+
+**Файл: `crates/core/src/persistent_state.rs`** (новый)
+
+```rust
+use serde::{Serialize, Deserialize};
+
+/// Трейт для типобезопасного сохранения/восстановления состояния.
+/// Аналог `StateKeeper` в Decompose.
+///
+/// Компонент реализует этот трейт, если хочет сохранять кастомные данные
+/// при пересоздании Activity (поворот экрана, kill/restore).
+pub trait PersistentState {
+    /// Тип сохраняемого состояния.
+    /// Должен быть Serializable + Deserializable + Send.
+    type State: Serialize + DeserializeOwned + Send + 'static;
+
+    /// Сохранить текущее состояние.
+    fn save(&self) -> Self::State;
+
+    /// Восстановить состояние из ранее сохранённого.
+    fn restore(&mut self, state: Self::State);
+}
+```
+
+---
+
+### Шаг 6. Связать `ComponentNode::save_state()` с `PersistentState`
+
+**Вариант A (blanket-impl):** если компонент реализует `PersistentState`, то `save_state()`/`restore_state()` автоматически сериализуют через bincode.
+
+```rust
+impl<T: PersistentState + ComponentNode> ComponentNodeExt for T {
+    fn save_state(&self) -> Option<Box<dyn Any + Send>> {
+        let data = self.save();
+        let bytes = bincode::serialize(&data).ok()?;
+        Some(Box::new(bytes))
+    }
+}
+```
+
+**Вариант Б (явный в `ComponentNode`):** добавить методы `save_to_bytes()` / `restore_from_bytes()`:
+
+```rust
+pub trait ComponentNode {
+    // ... существующие методы ...
+
+    /// Сохранить состояние компонента как сериализованные байты.
+    fn save_state(&self) -> Option<Box<dyn Any + Send>> { None }
+    
+    // Существующий restore_state остаётся
+}
+```
+
+И в `ChildStack::save()` сериализовать через bincode если тип реализует `Serialize`.
+
+**Решение:** идём по пути **Варианта А** — вводим `PersistentState` как отдельный трейт и делаем blanket-impl для `ComponentNode`, который автоматически конвертирует `Serialize` данные в `Vec<u8>`.
+
+---
+
+### Шаг 7. `ChildStack` — сериализуемое сохранение/восстановление
+
+**Файл: `crates/navigation/src/child_stack.rs`**
+
+Добавить struct для сохранённых данных:
+
+```rust
+/// Сохранённое представление стека.
+#[derive(Serialize, Deserialize)]
+pub struct SavedStack<C> {
+    /// Элементы стека: конфигурация + сериализованное состояние компонента.
+    pub items: Vec<(C, Option<Vec<u8>>)>,
+}
+```
+
+Изменить `save()` — возвращать `SavedStack<C>`:
+```rust
+pub fn save(&self) -> SavedStack<C> {
+    let items = self.items.iter().map(|item| {
+        let state_bytes = item.component.save_state()
+            .and_then(|boxed| {
+                // downcast to Vec<u8> (если компонент реализует PersistentState)
+                boxed.downcast::<Vec<u8>>().ok().map(|v| *v)
+            });
+        (item.config.clone(), state_bytes)
+    }).collect();
+    SavedStack { items }
+}
+```
+
+Переделать `restore()` — принимать `SavedStack<C>`:
+```rust
+/// Восстановить стек из сохранённого состояния.
+/// Компоненты пересоздаются через фабрику, затем восстанавливают состояние.
+/// Аналог Decompose: пересоздание компонентов + restoreState.
+pub fn restore_from_saved(
+    &mut self,
+    saved: SavedStack<C>,
+    factory: &dyn ComponentFactory<C>,
+) {
+    self.clear();
+    for (config, state_bytes) in saved.items {
+        let mut component = factory.create(config.clone());
+        if let Some(bytes) = state_bytes {
+            component.restore_state(Box::new(bytes));
+        }
+        self.push(config, component);
+    }
+}
+```
+
+---
+
+### Шаг 8. `NavigationHost` — save/restore (showcase)
+
+**Файл: `examples/showcase/src/navigation_host.rs`**
+
+Добавить методы:
+
+```rust
+use egui_android_runtime::saved_state::SavedStack;
+
+impl NavigationHost {
+    /// Сохранить состояние всей навигации.
+    pub fn save(&self) -> SavedStack<Route> {
+        self.stack.save()
+    }
+
+    /// Восстановить навигацию из сохранённого состояния.
+    pub fn restore(&mut self, saved: SavedStack<Route>) {
+        self.stack.restore_from_saved(saved, &*self.factory);
+    }
+}
+```
+
+---
+
+### Шаг 9. `ShowcaseApplication` — подключить save/restore
+
+**Файл: `examples/showcase/src/app.rs`**
+
+```rust
+use egui_android_runtime::saved_state::{SavedState, SavedStack};
+
+impl Application for ShowcaseApplication {
+    // ... существующие методы ...
+
+    fn on_save_state(&mut self) -> SavedState {
+        let saved = self.root.save();
+        let bytes = bincode::serialize(&saved)
+            .expect("Ошибка сериализации SavedStack");
+        log::info!("on_save_state: сохранено {} элементов стека", saved.items.len());
+        Some(bytes)
+    }
+
+    fn on_restore_state(&mut self, state: SavedState) {
+        if let Some(bytes) = state {
+            match bincode::deserialize::<SavedStack<Route>>(&bytes) {
+                Ok(saved) => {
+                    log::info!("on_restore_state: восстановлено {} элементов", saved.items.len());
+                    self.root.restore(saved);
+                }
+                Err(e) => {
+                    log::error!("on_restore_state: ошибка десериализации: {}", e);
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+### Шаг 10. Рекурсивное сохранение вложенных стеков
+
+**Файл: `examples/showcase/src/screens/nested.rs`**
+
+`NestedScreen` должен реализовать `PersistentState` (или переопределить `save_state`/`restore_state`), чтобы сохранять свои `stack_layer1`, `stack_layer2` и `layer2_open`.
+
+```rust
+// Сохраняемая структура
+#[derive(Serialize, Deserialize)]
+struct NestedSavedState {
+    layer1: SavedStack<NestedRoute>,
+    layer2: SavedStack<NestedLayer2Route>,
+    layer2_open: bool,
+}
+
+impl PersistentState for NestedScreen {
+    type State = NestedSavedState;
+
+    fn save(&self) -> Self::State {
+        NestedSavedState {
+            layer1: self.stack_layer1.save(),
+            layer2: self.stack_layer2.save(),
+            layer2_open: self.layer2_open,
+        }
+    }
+
+    fn restore(&mut self, state: Self::State) {
+        // ВАЖНО: пересоздаём компоненты через фабрики
+        struct Layer1Factory;
+        impl ComponentFactory<NestedRoute> for Layer1Factory {
+            fn create(&self, config: NestedRoute) -> Box<dyn ComponentNode> {
+                Box::new(Layer1Sub::from_route(&config))
+            }
+        }
+        struct Layer2Factory;
+        impl ComponentFactory<NestedLayer2Route> for Layer2Factory {
+            fn create(&self, config: NestedLayer2Route) -> Box<dyn ComponentNode> {
+                Box::new(Layer2Sub::from_route(&config))
+            }
+        }
+
+        // Очищаем и пересоздаём
+        self.stack_layer1.clear();
+        self.stack_layer2.clear();
+
+        // Восстанавливаем слой 1
+        let mut new_stack1 = ChildStack::new();
+        new_stack1.restore_from_saved(state.layer1, &Layer1Factory);
+        self.stack_layer1 = new_stack1;
+
+        // Восстанавливаем слой 2
+        let mut new_stack2 = ChildStack::new();
+        new_stack2.restore_from_saved(state.layer2, &Layer2Factory);
+        self.stack_layer2 = new_stack2;
+
+        self.layer2_open = state.layer2_open;
+    }
+}
+```
+
+---
+
+### Шаг 11. Пример кастомных данных компонента (StateScreen)
+
+**Файл: `examples/showcase/src/screens/state_screen.rs`**
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct StateScreenSavedState {
+    counter: i32,
+    expanded: bool,
+}
+
+// StateScreen получает поля для хранения между пересозданиями
+pub struct StateScreen {
+    counter: i32,
+    expanded: bool,
+}
+
+impl PersistentState for StateScreen {
+    type State = StateScreenSavedState;
+
+    fn save(&self) -> Self::State {
+        StateScreenSavedState {
+            counter: self.counter,
+            expanded: self.expanded,
+        }
+    }
+
+    fn restore(&mut self, state: Self::State) {
+        self.counter = state.counter;
+        self.expanded = state.expanded;
+    }
+}
+```
+
+---
+
+### Шаг 12. Тесты
+
+**Файл: `crates/navigation/src/child_stack.rs`** — добавить тесты:
+
+```rust
+#[test]
+fn test_save_restore_stack() {
+    let mut stack = ChildStack::<TestRoute>::new();
+    stack.push(TestRoute::A, Box::new(TestComp::new(42)));
+    stack.push(TestRoute::B, Box::new(TestComp::new(99)));
+
+    let saved = stack.save();
+    assert_eq!(saved.items.len(), 2);
+    assert_eq!(saved.items[0].0, TestRoute::A);
+    assert_eq!(saved.items[1].0, TestRoute::B);
+
+    // Пересоздаём стек из сохранённого
+    let mut restored = ChildStack::new();
+    restored.restore_from_saved(saved, &TestFactory);
+    assert_eq!(restored.len(), 2);
+
+    // Проверяем, что состояние компонентов восстановилось
+    // (нужен TestComp с PersistentState и сохранённым значением)
+}
+```
+
+**Файл: `crates/runtime/src/saved_state.rs`** — тесты сериализации/десериализации `SavedStack`.
+
+---
+
+### Шаг 13. Документация
+
+Обновить:
+- `SKILL.md` в `egui-android-guide` — добавить раздел "Сохранение состояния"
+- `SKILL.md` в `android-egui-architecture` — добавить слой "SavedStateRegistry"
+- Комментарии в коде — на русском языке
+
+---
+
+## Результирующая файловая структура (новые/изменённые файлы)
+
+```
+crates/
+├── runtime/src/
+│   ├── saved_state.rs       ← НОВЫЙ: SavedState тип, SavedStack, утилиты
+│   ├── application.rs       ← ИЗМЕНИТЬ: on_save_state/on_restore_state с SavedState
+│   └── lib.rs               ← ИЗМЕНИТЬ: pub mod saved_state
+│
+├── core/src/
+│   ├── persistent_state.rs  ← НОВЫЙ: трейт PersistentState
+│   ├── component_node.rs    ← ИЗМЕНИТЬ: blanket-impl для PersistentState
+│   └── lib.rs               ← ИЗМЕНИТЬ: pub mod persistent_state
+│
+├── navigation/src/
+│   ├── child_stack.rs       ← ИЗМЕНИТЬ: SavedStack, save/restore через bincode
+│   └── lib.rs               ← ИЗМЕНИТЬ: pub use SavedStack
+│
+├── platform-android/src/
+│   ├── loop.rs              ← ИЗМЕНИТЬ: RunState.saved_state
+│   ├── lifecycle.rs         ← ИЗМЕНИТЬ: проброс saved_state
+│   └── run.rs               ← ИЗМЕНИТЬ: передача saved_state в lifecycle
+│
+└── framework/src/
+    └── lib.rs               ← ИЗМЕНИТЬ: re-export нового API
+```
+
+---
+
+## Итоговая проверка: все правила Decompose соблюдены
+
+| Принцип Decompose | Как реализовано |
+|---|---|
+| Конфигурация = источник истины | `C: Serialize + Deserialize` используется для пересоздания компонентов |
+| Компоненты пересоздаются при restore | `ComponentFactory::create(config)` + затем `restore_state()` |
+| Рекурсивное сохранение | `NestedScreen` сохраняет свои `ChildStack` через `PersistentState` |
+| Единый контейнер (SavedState) | `SavedStack<C>` — одно значение, сериализуемое в Bundle |
+| Android Bundle как транспорт | `Vec<u8>` → `Bundle.putByteArray()` |
+| StateKeeper регистрируется/отписывается | `ComponentNode::save_state()` вызывается только для живых компонентов в стеке |
+
+---
+
+## Порядок выполнения
+
+**Шаги идут строго последовательно из-за зависимостей:**
+
+```
+0. dep: serde, bincode в runtime, core, navigation
+   ↓
+1. saved_state.rs (новый модуль в runtime)
+   ↓
+2. application.rs (расширить trait)
+   ↓
+3. loop.rs + lifecycle.rs (platform-android)
+   ↓
+4. child_stack.rs (добавить Serialize bound, SavedStack, новые методы)
+5. persistent_state.rs (новый трейт в core)
+   ↓
+6. component_node.rs (blanket-impl PersistentState → ComponentNode)
+   ↓
+7. navigation_host.rs (save/restore в showcase)
+8. app.rs (подключить в ShowcaseApplication)
+   ↓
+9. nested.rs (рекурсивное сохранение)
+10. state_screen.rs (пример кастомных данных)
+   ↓
+11. Тесты (child_stack, saved_state, integration)
+12. Документация (обновить SKILL.md)

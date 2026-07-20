@@ -12,6 +12,8 @@ crate-type = ["cdylib"]
 egui-android-framework = { path = "../../crates/framework" }
 egui = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { workspace = true }

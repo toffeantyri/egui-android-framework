@@ -88,6 +88,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,9 +219,11 @@ dependencies = [
 name = "egui-android-core"
 version = "0.4.0-alpha.1"
 dependencies = [
+ "bincode",
  "egui",
  "egui-android-runtime",
  "log",
+ "serde",
 ]
 
 [[package]]
@@ -231,6 +242,7 @@ name = "egui-android-framework"
 version = "0.4.0-alpha.1"
 dependencies = [
  "egui-android-core",
+ "egui-android-macros",
  "egui-android-navigation",
  "egui-android-platform",
  "egui-android-platform-android",
@@ -239,14 +251,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-android-macros"
+version = "0.4.0-alpha.1"
+dependencies = [
+ "bincode",
+ "egui-android-core",
+ "egui-android-runtime",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
+]
+
+[[package]]
 name = "egui-android-navigation"
 version = "0.4.0-alpha.1"
 dependencies = [
+ "bincode",
  "egui",
  "egui-android-core",
  "egui-android-runtime",
  "egui-android-ui",
  "log",
+ "serde",
 ]
 
 [[package]]
@@ -277,9 +304,11 @@ dependencies = [
 name = "egui-android-runtime"
 version = "0.4.0-alpha.1"
 dependencies = [
+ "bincode",
  "egui",
  "egui-android-platform",
  "log",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -300,9 +329,11 @@ version = "0.1.0"
 dependencies = [
  "android-activity",
  "android_logger",
+ "bincode",
  "egui",
  "egui-android-framework",
  "log",
+ "serde",
 ]
 
 [[package]]
@@ -937,6 +968,16 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+dependencies = [
+ "serde_core",
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_core"

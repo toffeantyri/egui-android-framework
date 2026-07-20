@@ -16,6 +16,7 @@ pub mod dyn_dispatcher;
 pub mod error;
 pub mod message_envelope;
 pub mod runtime_context;
+pub mod saved_state;
 pub mod store;
 pub mod ui_notifier;
 
@@ -25,5 +26,6 @@ pub use dyn_dispatcher::*;
 pub use error::*;
 pub use message_envelope::MessageEnvelope;
 pub use runtime_context::RuntimeContext;
+pub use saved_state::{SavedStack, SavedState};
 pub use store::*;
 pub use ui_notifier::*;

@@ -10,6 +10,8 @@ description = "Navigation layer — ChildStack, Router"
 [dependencies]
 egui = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
 
 egui-android-core = { version = "0.4.0-alpha.1", path = "../core" }
 egui-android-runtime = { version = "0.4.0-alpha.1", path = "../runtime" }
