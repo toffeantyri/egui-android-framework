@@ -634,3 +634,225 @@ crates/
    ↓
 11. Тесты (child_stack, saved_state, integration)
 12. Документация (обновить SKILL.md)
+
+---
+
+## Шаг 13. JNI-мост для kill/restore процесса
+
+### Задача
+
+Передавать Vec<u8> (сериализованный SavedStack<C>) между Rust и Android Bundle
+через JNI, чтобы пережить убийство процесса.
+
+### Архитектура (два сценария)
+
+**Config Change (поворот) — процесс жив:**
+- InitWindow → on_restore_state(None)
+- Application берёт из self.saved_state (своё поле)
+- PlatformState buffer НЕ используется
+
+**Kill/Restore — процесс пересоздан:**
+- onCreate → JNI → PlatformState.set_saved_state(bytes)
+- InitWindow → PlatformState.take_saved_state() → app.on_restore_state(Some(bytes))
+
+### Пошаговый план
+
+#### 13.1. Kotlin — EguiActivity.kt
+
+Файлы:
+- examples/showcase/android/.../EguiActivity.kt
+- examples/counter/android/.../EguiActivity.kt
+- crates/platform-android/kotlin/EguiActivity.kt
+
+Добавить native-методы nativeGetSavedState()/nativeSetSavedState(),
+onSaveInstanceState/onCreate.
+
+#### 13.2. Rust — PlatformState buffer
+
+Файл: crates/platform-android/src/platform_state.rs
+
+Добавить saved_state_buffer: Option<Vec<u8>>.
+Методы set_saved_state/take_saved_state.
+
+#### 13.3. Rust — JNI-функции (#[no_mangle])
+
+Файл: crates/platform-android/src/saved_state_jni.rs (НОВЫЙ)
+
+Глобальный OnceLock<PlatformState> для доступа из UI thread.
+Функции nativeGetSavedState/nativeSetSavedState.
+
+#### 13.4. Rust — lifecycle связка
+
+Файл: crates/platform-android/src/lifecycle.rs
+
+- handle_stop/destroy: после on_save_state() → platform_state.set_saved_state(bytes)
+- handle_init_window: platform_state.take_saved_state() → app.on_restore_state(Some(bytes))
+- Добавить параметр &PlatformState в lifecycle-функции
+
+#### 13.5. Rust — главный цикл
+
+Файл: crates/platform-android/src/loop.rs
+
+Проброс &PlatformState в handle_lifecycle_event.
+
+#### 13.6. Application — проверка
+
+Файл: examples/showcase/src/app.rs
+
+Изменений не требуется: on_restore_state(Some(bytes)) и on_save_state() уже готовы.
+
+#### 13.7. Тестирование на устройстве с логами
+
+1. Собрать showcase APK
+2. Запустить, перейти на State Screen, изменить counter
+3. Повернуть экран — проверить логи
+4. adb shell am kill com.example.egui_android — убить процесс
+5. Перезапустить — проверить логи
+
+Логи для верификации:
+  on_save_state: сохранено N элементов (M байт)
+  PlatformState: set_saved_state, M байт
+  JNI: nativeGetSavedState M байт
+
+После kill:
+  JNI: nativeSetSavedState M байт
+  PlatformState: take_saved_state M байт
+  on_restore_state: восстанавливаем N элементов
+
+#### 13.8. Документация
+
+Обновить SKILL.md. Описать JNI-мост и kill/restore поток.
+
+### Результирующая файловая структура (шаг 13)
+
+```
+crates/platform-android/
+  src/
+    saved_state_jni.rs     ← NEW: JNI-функции
+    platform_state.rs      ← CHANGE: поле saved_state_buffer
+    lifecycle.rs           ← CHANGE: связка буфера
+    loop.rs                ← CHANGE: проброс PlatformState
+    lib.rs                 ← CHANGE: pub mod saved_state_jni
+  kotlin/
+    EguiActivity.kt        ← CHANGE: native-методы
+
+examples/
+  showcase/android/.../EguiActivity.kt  ← CHANGE: JNI-методы
+  counter/android/.../EguiActivity.kt   ← CHANGE: JNI-методы
+```
+
+### Порядок подшагов
+
+```
+13.1 Kotlin: EguiActivity.kt
+        ↓
+13.2 Rust: PlatformState buffer
+        ↓
+13.3 Rust: JNI #[no_mangle] функции
+        ↓
+13.4 Rust: lifecycle связка
+        ↓
+13.5 Rust: loop.rs связка
+        ↓
+13.6 Rust: Application (проверка, без изменений)
+        ↓
+13.7 Тестирование на устройстве
+        ↓
+13.8 Документация
+```
+
+### Критические уточнения
+
+#### OnceLock для PlatformState
+
+JNI-функции вызываются из UI thread в onCreate (до создания backend'а).
+PlatformState нужно инициализировать в глобальный OnceLock:
+
+```rust
+// platform_state.rs
+use std::sync::OnceLock;
+static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
+
+impl PlatformState {
+    pub fn new() -> Self {
+        let state = Self { inner: Arc::new(Mutex::new(PlatformStateInner::default())) };
+        GLOBAL_PLATFORM_STATE.set(state.clone()).ok();
+        state
+    }
+    pub fn set_saved_state(&self, bytes: Option<Vec<u8>>) { ... }
+    pub fn take_saved_state(&self) -> Option<Vec<u8>> { ... }
+}
+
+// saved_state_jni.rs: JNI-функции используют GLOBAL_PLATFORM_STATE.get()
+```
+
+#### Связка on_save_state() -> PlatformState
+
+handle_stop и handle_destroy перестают игнорировать результат on_save_state(),
+а передают его в PlatformState:
+
+```rust
+fn handle_stop<A: Application>(app_instance: &mut A, ps: &PlatformState) {
+    let saved = app_instance.on_save_state(); // SavedState = Option<Vec<u8>>
+    ps.set_saved_state(saved);                // buffer for JNI/kill/restore
+    app_instance.on_stop();
+}
+```
+
+#### Связка handle_init_window -> PlatformState.take_saved_state()
+
+handle_init_window берёт bytes из PlatformState вместо жёсткого None:
+
+```rust
+fn handle_init_window<A: Application>(..., ps: &PlatformState) {
+    // ... EGL init ...
+    let saved = ps.take_saved_state();
+    app_instance.on_restore_state(saved);
+}
+```
+
+### Проверка ShowcaseApplication
+
+on_restore_state уже написан по паттерну:
+  let bytes = state.or_else(|| self.saved_state.take());
+
+Покрывает оба сценария:
+- Config change: state = Some(bytes) из PlatformState, использует напрямую
+- Kill/restore: state = Some(bytes) из PlatformState (JNI), использует напрямую
+- Первый запуск: state = None, fallback на self.saved_state (None), ничего
+
+### Полная схема Rust-части
+
+```
+Создание (run.rs):
+  backend создаёт PlatformState::new()
+  -> PlatformState сохраняется в GLOBAL_PLATFORM_STATE (OnceLock)
+
+Главный цикл (loop.rs):
+  tick(...) -> handle_lifecycle_event(ev, ..., &platform_state)
+
+Lifecycle (lifecycle.rs):
+  Stop:
+    saved = app.on_save_state()           -> Vec<u8>
+    ps.set_saved_state(Some(saved))       -> buffer
+    app.on_stop()
+
+  Destroy:
+    saved = app.on_save_state()           -> Vec<u8>
+    ps.set_saved_state(Some(saved))       -> buffer
+
+  InitWindow:
+    saved = ps.take_saved_state()         <- buffer
+    app.on_restore_state(saved)           -> Application
+
+JNI (saved_state_jni.rs):
+  onSaveInstanceState:
+    ps = GLOBAL_PLATFORM_STATE.get()
+    bytes = ps.take_saved_state()         -> Vec<u8>
+    return byteArray -> Kotlin Bundle
+
+  onCreate:
+    byteArray -> Vec<u8>
+    ps = GLOBAL_PLATFORM_STATE.get()
+    ps.set_saved_state(Some(bytes))       -> buffer
+```
