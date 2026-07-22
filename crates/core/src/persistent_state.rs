@@ -100,15 +100,29 @@ pub trait PersistentState {
     }
 }
 
-/// Обёртка, реализующая `ComponentNode` через `Component` + `PersistentState`.
+/// Структурная обёртка, реализующая `ComponentNode` через `Component` + `PersistentState`.
 ///
 /// Используется для компонентов, которые хотят автоматическое
 /// сохранение/восстановление состояния через `PersistentState`.
 ///
+/// В отличие от blanket-impl (который вернул бы `save_state = None`),
+/// эта обёртка явно реализует `ComponentNode` и делегирует
+/// `save_state`/`restore_state` в `PersistentState::save_to_boxed`.
+///
+/// # Почему не blanket-impl
+///
+/// Rust запрещает два blanket-impl для одного трейта на пересекающихся типах.
+/// Мы не можем сделать:
+/// ```ignore
+/// impl<T: Component> ComponentNode for T { /* save_state = None */ }
+/// impl<T: Component + PersistentState> ComponentNode for T { /* save_state = Some(...) */ } // ❌ конфликт
+/// ```
+/// `PersistentComponent<T>` — compositional solution, не конфликтующий с blanket-impl.
+///
 /// # Пример
 ///
 /// ```ignore
-/// // StateScreen: Component + PersistentState
+/// // StateScreen: Component + PersistentState (через #[derive(Component)])
 /// // В фабрике:
 /// Box::new(PersistentComponent::new(StateScreen::new()))
 /// ```

@@ -99,6 +99,25 @@ pub trait PersistentState {
 }
 ```
 
+### PersistentComponent<T>
+
+**Крейт**: `egui-android-core`
+
+Структурная обёртка, реализующая `ComponentNode` для любого `T: Component + PersistentState`.
+Используется в фабрике для автоматического save/restore:
+
+```rust
+// В фабрике (ShowcaseFactory):
+Route::State => Box::new(PersistentComponent::new(StateScreen::new())),
+```
+
+`PersistentComponent<T>` делегирует `render()`, `handle_dyn()`, `as_any()` внутреннему `T`,
+и переопределяет `save_state()`/`restore_state()` через `PersistentState::save_to_boxed()`.
+
+**Почему не blanket-impl?** Rust запрещает два blanket-impl для одного трейта.
+`PersistentComponent<T>` — compositional solution: обёртка не конфликтует
+с blanket-impl `ComponentNode` для `Component`.
+
 ### Макрос #[derive(Component)]
 
 **Крейт**: `egui-android-macros`
@@ -118,6 +137,8 @@ struct MyScreen {
 Генерирует скрытую структуру `__MyScreenPersistentState` с `Serialize/Deserialize`
 и `impl PersistentState for MyScreen`.
 
+Обязательно обернуть в `PersistentComponent<T>` в фабрике для активации save/restore.
+
 ### SavedStack<C>
 
 **Крейт**: `egui-android-runtime`
@@ -128,12 +149,32 @@ struct MyScreen {
 ### Поток save/restore
 
 ```
-Android lifecycle:
-  Stop → onSaveInstanceState → Application::on_save_state() → SavedStack → bincode → Vec<u8>
-  InitWindow → Application::on_restore_state(bytes) → bincode → SavedStack → ChildStack::restore_from_saved()
+Stop/Destroy:
+  Platform → app.on_save_state()
+  Application → root.save() → SavedStack<C> → bincode → Vec<u8>
+  Application → self.saved_state = Some(bytes)  ← Application хранит состояние
+  Platform не хранит состояние
+
+InitWindow:
+  Platform → app.on_restore_state(None)  ← Platform не имеет данных
+  Application → bytes = self.saved_state.take()  ← из своего поля
+  Application → bincode → SavedStack<C> → ChildStack::restore_from_saved()
 ```
 
-`restore_from_saved()` пересоздаёт компоненты через фабрику (как в Decompose) и восстанавливает их состояние через `ComponentNode::restore_state()`.
+**Архитектурное правило:** Platform не хранит состояние приложения.
+`RunState` не содержит `saved_state`. Application владеет состоянием.
+
+`restore_from_saved()` пересоздаёт компоненты через фабрику (как в Decompose)
+и восстанавливает их состояние через `ComponentNode::restore_state()`.
+Для `PersistentComponent<T>` — через `PersistentState::restore_from_boxed()`.
+
+### Правила использования
+
+1. Компонент реализует `Component + PersistentState` (через `#[derive(Component)]` или вручную)
+2. В фабрике компонент оборачивается в `PersistentComponent::new(...)`
+3. `ChildStack::save()` → вызывает `save_state()` на `PersistentComponent` → `PersistentState::save_to_boxed()` → `Vec<u8>`
+4. `ChildStack::restore_from_saved()` → создаёт компонент через фабрику → вызывает `restore_state()`
+5. **При kill/restore процесса** нужен JNI-мост (отдельная задача)
 
 ---
 
