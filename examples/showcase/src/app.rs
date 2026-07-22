@@ -23,12 +23,17 @@ pub struct AppState {
 }
 
 /// Приложение-витрина.
+///
+/// Хранит `saved_state` для восстановления навигации
+/// при повороте экрана (config change).
 pub struct ShowcaseApplication {
     root: NavigationHost,
     config: RuntimeConfig,
     state: StateStore<AppState>,
     _statechanged_rx: mpsc::Receiver<()>,
     prev_dark_mode: Option<bool>,
+    /// Сохранённое состояние навигации (для config change).
+    saved_state: Option<Vec<u8>>,
 }
 
 impl LifecycleObserver for ShowcaseApplication {}
@@ -56,6 +61,7 @@ impl Application for ShowcaseApplication {
             state: store,
             _statechanged_rx: statechanged_rx,
             prev_dark_mode: None,
+            saved_state: None,
         }
     }
 
@@ -95,11 +101,16 @@ impl Application for ShowcaseApplication {
             saved.items.len(),
             bytes.len()
         );
+        // Сохраняем в своём поле для config change (поворот экрана)
+        self.saved_state = Some(bytes.clone());
+        // Возвращаем для будущего JNI-моста (kill/restore процесса)
         Some(bytes)
     }
 
     fn on_restore_state(&mut self, state: SavedState) {
-        if let Some(bytes) = state {
+        // Приоритет: 1) данные от Platform (из Bundle), 2) своё поле (config change)
+        let bytes = state.or_else(|| self.saved_state.take());
+        if let Some(bytes) = bytes {
             match bincode::deserialize::<SavedStack<Route>>(&bytes) {
                 Ok(saved) => {
                     log::info!(

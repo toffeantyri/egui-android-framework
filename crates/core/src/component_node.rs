@@ -83,9 +83,9 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
 
 // Blanket-impl: любой Component автоматически становится ComponentNode.
 //
-// Если компонент также реализует PersistentState,
-// save_state()/restore_state() автоматически сериализуют/десериализуют
-// его состояние через bincode в Vec<u8>.
+// Для сохранения/восстановления состояния используйте обёртку
+// `PersistentComponent<T>` (из `persistent_state`), которая реализует
+// ComponentNode с корректными save_state/restore_state.
 impl<T> ComponentNode for T
 where
     T: crate::Component,

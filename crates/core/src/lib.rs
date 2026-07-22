@@ -32,7 +32,7 @@ pub use component_context2::*;
 pub use component_node::*;
 pub use constraints::Constraints;
 pub use lifecycle::*;
-pub use persistent_state::PersistentState;
+pub use persistent_state::{PersistentComponent, PersistentState};
 pub use state_keeper::{StateKeeper, StateKeeperSnapshot};
 pub use ui_wrapper::UiWrapper;
 pub use view::*;

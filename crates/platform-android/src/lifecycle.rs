@@ -12,11 +12,12 @@
 //!
 //! # Сохранение состояния (Decompose-style)
 //!
-//! `RunState` хранит `saved_state: Option<Vec<u8>>` между жизненными циклами.
-//! - При `Destroy`: `app_instance.on_save_state()` → сохраняется в `RunState.saved_state`
-//! - При `InitWindow`: `saved_state.take()` → `app_instance.on_restore_state()`
+//! Platform только передаёт lifecycle-события.
+//! Application сам владеет состоянием: `on_save_state()` сохраняет,
+//! `on_restore_state(None)` восстанавливает из внутреннего поля.
 //!
-//! Это позволяет восстановить навигацию при повороте экрана и пересоздании Activity.
+//! Это позволяет восстановить навигацию при повороте экрана (config change)
+//! и при пересоздании Activity (kill/restore через JNI в будущем).
 
 #![cfg(target_os = "android")]
 
@@ -37,7 +38,7 @@ use egui_android_runtime::Application;
 /// * `egui_ctx` — контекст egui
 /// * `graphics` — опциональный GraphicsPipeline (для InitWindow: пересоздание surface)
 /// * `destroy_requested` — флаг завершения (устанавливается при Destroy)
-/// * `saved_state` — сохранённое состояние навигации (заполняется при Destroy, передаётся в InitWindow)
+/// Application сам владеет состоянием (хранит в своём поле `saved_state`).
 pub fn handle_lifecycle_event<A: Application>(
     event: LifecycleEvent,
     backend: &mut dyn AndroidBackend,
@@ -45,16 +46,13 @@ pub fn handle_lifecycle_event<A: Application>(
     egui_ctx: &egui::Context,
     graphics: &mut Option<GraphicsPipeline>,
     destroy_requested: &mut bool,
-    saved_state: &mut Option<Vec<u8>>,
 ) {
     match event {
-        LifecycleEvent::InitWindow => {
-            handle_init_window(backend, app_instance, egui_ctx, graphics, saved_state)
-        }
+        LifecycleEvent::InitWindow => handle_init_window(backend, app_instance, egui_ctx, graphics),
         LifecycleEvent::Resume => handle_resume(app_instance),
         LifecycleEvent::Pause => handle_pause(app_instance),
-        LifecycleEvent::Stop => handle_stop(app_instance, saved_state),
-        LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested, saved_state),
+        LifecycleEvent::Stop => handle_stop(app_instance),
+        LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested),
     }
 }
 
@@ -64,14 +62,13 @@ pub fn handle_lifecycle_event<A: Application>(
 ///
 /// 1. Проверяет, был ли уже создан EGL (через surface_handle).
 /// 2. Если EGL есть — пересоздаёт surface (Pause/Resume cycle).
-/// 3. Если EGL нет — инициализирует с нуля + вызывает on_restore_state().
+/// 3. Если EGL нет — инициализирует с нуля + вызывает on_restore_state(None).
 /// 4. В любом случае обновляет insets, DPI и сохраняет PlatformState в egui::Context.
 fn handle_init_window<A: Application>(
     backend: &mut dyn AndroidBackend,
     app_instance: &mut A,
     egui_ctx: &egui::Context,
     graphics: &mut Option<GraphicsPipeline>,
-    saved_state: &mut Option<Vec<u8>>,
 ) {
     log::info!("Lifecycle: InitWindow");
 
@@ -100,8 +97,8 @@ fn handle_init_window<A: Application>(
             }
         }
         // Восстанавливаем состояние навигации после пересоздания
-        let state = saved_state.take();
-        app_instance.on_restore_state(state);
+        // Application сам восстановит из своего поля saved_state
+        app_instance.on_restore_state(None);
     } else {
         // Первый InitWindow — инициализируем EGL
         backend.init().ok();
@@ -109,8 +106,9 @@ fn handle_init_window<A: Application>(
             log::error!("Ошибка инициализации EGL: {}", e);
         }
         // Восстанавливаем состояние навигации после пересоздания
-        let state = saved_state.take();
-        app_instance.on_restore_state(state);
+        // Application сам восстановит из своего поля saved_state
+        // (None означает: используй своё поле, если оно есть)
+        app_instance.on_restore_state(None);
     }
 
     // Обновляем системные отступы через JNI
@@ -139,25 +137,22 @@ fn handle_pause<A: Application>(app_instance: &mut A) {
 
 /// Обработать Stop — приложение остановлено.
 ///
-/// Сохраняет состояние навигации (аналог Android onSaveInstanceState).
-/// Это нужно для восстановления при повороте экрана (конфигурационных изменениях).
-fn handle_stop<A: Application>(app_instance: &mut A, saved_state: &mut Option<Vec<u8>>) {
+/// Вызывает `on_save_state()` — Application сам сохраняет состояние
+/// в своё поле для восстановления при повороте экрана.
+/// Platform не хранит результат.
+fn handle_stop<A: Application>(app_instance: &mut A) {
     log::info!("Lifecycle: Stop");
-    *saved_state = app_instance.on_save_state();
+    let _ = app_instance.on_save_state();
     app_instance.on_stop();
 }
 
 /// Обработать Destroy — приложение уничтожается.
 ///
-/// Сохраняет состояние и устанавливает флаг завершения.
-/// (onSaveInstanceState уже вызван в Stop)
-fn handle_destroy<A: Application>(
-    app_instance: &mut A,
-    destroy_requested: &mut bool,
-    saved_state: &mut Option<Vec<u8>>,
-) {
+/// Вызывает `on_save_state()` (на случай если Stop не был вызван)
+/// и устанавливает флаг завершения.
+/// Platform не хранит результат — Application сам управляет состоянием.
+fn handle_destroy<A: Application>(app_instance: &mut A, destroy_requested: &mut bool) {
     log::info!("Lifecycle: Destroy");
-    // Сохраняем ещё раз на случай если Stop не был вызван
-    *saved_state = app_instance.on_save_state();
+    let _ = app_instance.on_save_state();
     *destroy_requested = true;
 }

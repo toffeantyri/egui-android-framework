@@ -28,12 +28,6 @@ pub struct RunState {
     pub rt_ctx: Option<RuntimeContext>,
     pub rt_ctx_initialized: bool,
     pub destroy_requested: bool,
-    /// Сохранённое состояние навигации и компонентов.
-    ///
-    /// Устанавливается при `Lifecycle::Destroy` через `Application::on_save_state()`.
-    /// Передаётся в `Application::on_restore_state()` при следующем `InitWindow`.
-    /// Аналог `savedInstanceState` в Android Activity.
-    pub saved_state: Option<Vec<u8>>,
 }
 
 impl RunState {
@@ -46,7 +40,6 @@ impl RunState {
             rt_ctx: None,
             rt_ctx_initialized: false,
             destroy_requested: false,
-            saved_state: None,
         }
     }
 
@@ -87,7 +80,6 @@ impl RunState {
                         egui_ctx,
                         &mut self.graphics,
                         &mut self.destroy_requested,
-                        &mut self.saved_state,
                     );
                 }
                 other => {

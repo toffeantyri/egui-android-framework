@@ -154,30 +154,49 @@ pub trait Application: Sized + 'static {
 
     /// Сохранить состояние навигации и компонентов перед уничтожением Activity.
     ///
-    /// Вызывается из platform-android при Lifecycle::Destroy.
-    /// Приложение должно вызвать `ChildStack::save()`, сериализовать результат
-    /// через `bincode` и вернуть как `SavedState`.
+    /// Вызывается из platform-android при Lifecycle::Stop/Destroy.
+    /// Application **может** сохранить `SavedState` в своё поле
+    /// для восстановления при повороте экрана (config change),
+    /// когда Rust-процесс не пересоздаётся.
+    ///
+    /// Для kill/restore процесса данные должны быть переданы
+    /// через Android Bundle (будущий JNI-мост).
     ///
     /// Возвращает:
     /// - `None` — состояние не сохранялось (нечего сохранять).
     /// - `Some(Vec<u8>)` — сериализованные данные для Android Bundle.
     ///
     /// Реализация по умолчанию возвращает `None`.
+    ///
+    /// # Архитектура
+    ///
+    /// Platform не хранит возвращённое значение — Application
+    /// сам отвечает за хранение состояния. Platform только
+    /// передаёт lifecycle-событие.
     fn on_save_state(&mut self) -> SavedState {
         None
     }
 
     /// Восстановить состояние навигации и компонентов после пересоздания Activity.
     ///
-    /// Вызывается из platform-android при первом InitWindow (после Resume).
-    /// Приложение должно десериализовать `state` через `bincode`
-    /// и вызвать `ChildStack::restore()`.
+    /// Вызывается из platform-android при InitWindow.
     ///
     /// Принимает:
-    /// - `None` — первый запуск, нечего восстанавливать.
-    /// - `Some(Vec<u8>)` — сериализованные данные из Android Bundle.
+    /// - `None` — platform не имеет данных из Bundle (первый запуск
+    ///   или config change без Bundle). Application должен попробовать
+    ///   восстановить из своего поля `saved_state`.
+    /// - `Some(Vec<u8>)` — данные из Android Bundle (kill/restore).
     ///
     /// Реализация по умолчанию — ничего не делает.
+    ///
+    /// # Рекомендуемый паттерн
+    ///
+    /// ```ignore
+    /// fn on_restore_state(&mut self, state: SavedState) {
+    ///     let bytes = state.or_else(|| self.saved_state.take());
+    ///     if let Some(bytes) = bytes { /* восстановить */ }
+    /// }
+    /// ```
     fn on_restore_state(&mut self, _state: SavedState) {}
 }
 

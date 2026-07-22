@@ -6,7 +6,10 @@
 //! Теперь `NavigationHost` не знает про конкретные экраны — он принимает
 //! фабрику через `Box<dyn ComponentFactory<Route>>`.
 
-use egui_android_framework::{core::ComponentNode, navigation::ComponentFactory};
+use egui_android_framework::{
+    core::{ComponentNode, PersistentComponent},
+    navigation::ComponentFactory,
+};
 
 use crate::navigation::Route;
 use crate::screens::{
@@ -25,7 +28,10 @@ impl ComponentFactory<Route> for ShowcaseFactory {
             Route::Widgets => Box::new(WidgetsScreen::new()),
             Route::Containers => Box::new(ContainersScreen::new()),
             Route::Themes => Box::new(ThemesScreen::new()),
-            Route::State => Box::new(StateScreen::new()),
+            Route::State => {
+                // StateScreen использует PersistentComponent для save/restore
+                Box::new(PersistentComponent::new(StateScreen::new()))
+            }
             Route::Animations => Box::new(AnimationsScreen::new()),
             Route::ModifierValue => Box::new(ModifierValueScreen::new()),
             Route::Nested => Box::new(NestedScreen::new()),

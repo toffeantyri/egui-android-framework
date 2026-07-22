@@ -50,6 +50,8 @@
 //! }
 //! ```
 
+use crate::{Component, ComponentNode, UiWrapper};
+use egui_android_runtime::DynDispatcher;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Трейт для типобезопасного сохранения/восстановления состояния компонента.
@@ -82,13 +84,6 @@ pub trait PersistentState {
 
     /// Хелпер: сериализовать состояние в `Box<dyn Any + Send>`
     /// для использования в `ComponentNode::save_state()`.
-    ///
-    /// Пример:
-    /// ```ignore
-    /// fn save_state(&self) -> Option<Box<dyn Any + Send>> {
-    ///     PersistentState::save_to_boxed(self)
-    /// }
-    /// ```
     fn save_to_boxed(&self) -> Option<Box<dyn std::any::Any + Send>> {
         let state = self.save();
         let bytes = bincode::serialize(&state).ok()?;
@@ -96,18 +91,76 @@ pub trait PersistentState {
     }
 
     /// Хелпер: десериализовать состояние из `Box<dyn Any + Send>`.
-    ///
-    /// Пример:
-    /// ```ignore
-    /// fn restore_state(&mut self, state: Box<dyn Any + Send>) {
-    ///     PersistentState::restore_from_boxed(self, state);
-    /// }
-    /// ```
     fn restore_from_boxed(&mut self, state: Box<dyn std::any::Any + Send>) {
         if let Ok(bytes) = state.downcast::<Vec<u8>>() {
             if let Ok(saved) = bincode::deserialize::<Self::State>(&bytes) {
                 self.restore(saved);
             }
         }
+    }
+}
+
+/// Обёртка, реализующая `ComponentNode` через `Component` + `PersistentState`.
+///
+/// Используется для компонентов, которые хотят автоматическое
+/// сохранение/восстановление состояния через `PersistentState`.
+///
+/// # Пример
+///
+/// ```ignore
+/// // StateScreen: Component + PersistentState
+/// // В фабрике:
+/// Box::new(PersistentComponent::new(StateScreen::new()))
+/// ```
+pub struct PersistentComponent<T> {
+    pub inner: T,
+}
+
+impl<T> PersistentComponent<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: crate::LifecycleObserver> crate::LifecycleObserver for PersistentComponent<T> {}
+
+impl<T> ComponentNode for PersistentComponent<T>
+where
+    T: Component + PersistentState,
+    T::Message: 'static + Send,
+{
+    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher) {
+        let typed = dispatch.wrap::<T::Message>();
+        Component::render(&self.inner, ui, &typed);
+    }
+
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+        if let Ok(typed) = msg.downcast::<T::Message>() {
+            Component::handle(&mut self.inner, *typed);
+        } else {
+            log::error!(
+                "PersistentComponent::handle_dyn: ожидался {}, получен неизвестный",
+                std::any::type_name::<T::Message>()
+            );
+        }
+    }
+
+    fn handle_back(&mut self) -> bool {
+        false
+    }
+
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        PersistentState::save_to_boxed(&self.inner)
+    }
+
+    fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
+        PersistentState::restore_from_boxed(&mut self.inner, state);
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

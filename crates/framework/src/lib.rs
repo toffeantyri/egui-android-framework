@@ -24,7 +24,8 @@ pub use egui_android_macros::Component;
 // Удобный prelude
 pub mod prelude {
     pub use egui_android_core::{
-        Component, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+        Component, ComponentNode, LifecycleObserver, PersistentComponent, PersistentState,
+        UiWrapper,
     };
     pub use egui_android_macros::component;
     pub use egui_android_macros::Component as ComponentDerive;
