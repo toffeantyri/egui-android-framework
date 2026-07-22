@@ -9,6 +9,7 @@
             android:name="com.example.egui_android.EguiActivity"
             android:exported="true"
             android:label="Counter"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density"
             android:theme="@style/AppTheme">
             <meta-data android:name="android.app.lib_name" android:value="egui_android_counter" />
             <intent-filter>

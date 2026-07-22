@@ -17,6 +17,8 @@ set -euo pipefail
 #   ./run_android.sh                  # сборка
 #   ./run_android.sh --run           # сборка + установка + логи
 #   ./run_android.sh --release       # release-сборка
+#
+# Поддерживает: Linux, macOS, Windows (Git Bash / MSYS2 / WSL)
 # ============================================================
 
 # ═══════════════════════════════════════════════════════════════
@@ -36,8 +38,33 @@ PROJECT_CARGO="Cargo.toml"
 # >>> НАСТРОЙКИ СБОРКИ <<<
 # ═══════════════════════════════════════════════════════════════
 
+# Автоопределение ANDROID_HOME (SDK) для Linux/macOS/Windows (Git Bash / WSL)
+if [ -z "${ANDROID_HOME:-}" ]; then
+    case "$(uname -s)" in
+        Linux*)   ANDROID_HOME="${HOME}/Android/Sdk" ;;
+        Darwin*)  ANDROID_HOME="${HOME}/Library/Android/sdk" ;;
+        MINGW*|MSYS*|CYGWIN*)
+            WIN_USER="${USERNAME:-$(whoami 2>/dev/null)}"
+            ANDROID_HOME="/c/Users/${WIN_USER}/AppData/Local/Android/Sdk"
+            ;;
+        *)        ANDROID_HOME="${HOME}/Android/Sdk" ;;
+    esac
+fi
+export ANDROID_HOME
+
 # Путь к NDK (можно через ANDROID_NDK_HOME)
-NDK_PATH="${ANDROID_NDK_HOME:-/usr/lib/android-sdk/ndk/27.3.13750724}"
+if [ -n "${ANDROID_NDK_HOME:-}" ]; then
+    NDK_PATH="${ANDROID_NDK_HOME}"
+else
+    NDK_SEARCH="${ANDROID_HOME}/ndk"
+    if [ -d "$NDK_SEARCH" ]; then
+        NDK_VERSION="$(ls -1 "$NDK_SEARCH" 2>/dev/null | sort -V | tail -1)"
+        if [ -n "$NDK_VERSION" ]; then
+            NDK_PATH="${NDK_SEARCH}/${NDK_VERSION}"
+        fi
+    fi
+    NDK_PATH="${NDK_PATH:-${ANDROID_HOME}/ndk/27.3.13750724}"
+fi
 
 # Целевая архитектура (arm64-v8a, armeabi-v7a, x86_64)
 TARGET="arm64-v8a"
@@ -108,6 +135,12 @@ cat > "$ANDROID_DIR/app/src/main/AndroidManifest.xml" << EOF
 
 </manifest>
 EOF
+
+# Создаём local.properties, если его нет (указываем SDK для Gradle)
+if [ ! -f "$ANDROID_DIR/local.properties" ]; then
+    echo "sdk.dir=${ANDROID_HOME}" > "$ANDROID_DIR/local.properties"
+    echo "  Создан local.properties: sdk.dir=${ANDROID_HOME}"
+fi
 
 # ─── 2. Сборка .so ───────────────────────────────────────────
 echo "=== 2/4: Сборка .so ($CARGO_PROFILE) ==="
