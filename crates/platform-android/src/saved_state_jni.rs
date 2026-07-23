@@ -39,6 +39,19 @@ use std::sync::OnceLock;
 
 /// Глобальная ссылка на PlatformState для доступа из JNI-функций.
 ///
+/// # Архитектурное обоснование
+///
+/// JNI-функции (`nativeGetSavedState`, `nativeSetSavedState`) вызываются
+/// Kotlin-кодом (`EguiActivity`) на UI-потоке и не имеют доступа к локальному
+/// состоянию главного цикла (RunState / backend). Единственный способ передать
+/// им указатель на PlatformState глобальная статика.
+///
+/// Это **единственное** глобальное состояние в проекте. Оно оправдано, потому что:
+/// 1. JNI-протокол не позволяет передавать контекст через параметры
+/// 2. Platform хранит только raw bytes для транспорта между Bundle и Application
+/// 3. Platform не знает про навигацию, ChildStack, SavedStack, компоненты
+/// 4. Буфер очищается после каждого чтения (`take_saved_state`)
+///
 /// Инициализируется в `run_with_backend()` после создания backend'а.
 static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
 
