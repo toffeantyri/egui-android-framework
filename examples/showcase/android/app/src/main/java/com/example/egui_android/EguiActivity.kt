@@ -2,6 +2,7 @@ package com.example.egui_android
 
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.enableEdgeToEdge
 import com.google.androidgamesdk.GameActivity
 
 /**
@@ -31,6 +32,9 @@ import com.google.androidgamesdk.GameActivity
 class EguiActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Android 16: обязательный edge-to-edge режим
+        enableEdgeToEdge()
 
         // Перехватываем системный Back — не даём GameActivity
         // завершить Activity. Rust-код сам решит, когда выйти.

@@ -334,6 +334,8 @@ impl AndroidBackend for GlBackend {
 
     fn set_theme_override(&mut self, theme: Option<SystemTheme>) {
         self.platform_state.set_theme_override(theme);
+        // Обновляем системные бары при смене темы
+        crate::system_bars::apply_system_bars_for_platform_state(&self.platform_state);
     }
 
     fn init_platform_state_jni(&mut self) {

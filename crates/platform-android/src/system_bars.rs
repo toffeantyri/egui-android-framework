@@ -8,9 +8,11 @@
 //! 1. ANativeWindow_setBuffersGeometry с WINDOW_FORMAT_RGBA_8888
 //! 2. EGL конфиг с EGL_ALPHA_SIZE = 8
 //! 3. Window.setStatusBarColor(Color.TRANSPARENT) / setNavigationBarColor(Color.TRANSPARENT)
-//! 4. DecorView.setSystemUiVisibility с флагами LAYOUT_*
+//! 4. WindowInsetsController.setSystemBarsAppearance() для цвета иконок
 //! 5. glClearColor(0, 0, 0, 0) перед каждым кадром
 //! 6. egui_glow::Painter не перетирает прозрачность
+//!
+//! setSystemUiVisibility и setBackgroundDrawable удалены — deprecated в Android 16.
 
 #![cfg(target_os = "android")]
 
@@ -104,63 +106,6 @@ mod inner {
                 Ok(_) => log::info!("set_transparent_system_bars: NavigationBar → TRANSPARENT"),
                 Err(e) => {
                     log::warn!("setNavigationBarColor: {:?}", e);
-                }
-            }
-
-            // --- Шаг 4: DecorView.setSystemUiVisibility ---
-            // setSystemUiVisibility deprecated с API 30, на Android 16 может бросать исключение.
-            // Безопасно пробуем, при ошибке очищаем pending exception и продолжаем.
-            if let Ok(decor_view) = env
-                .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
-                .and_then(|v| v.l())
-            {
-                let layout_stable = 0x0000_0100;
-                let layout_hide_nav = 0x0000_0200;
-                let layout_fullscreen = 0x0000_0400;
-                let flags = layout_stable | layout_hide_nav | layout_fullscreen;
-
-                match env.call_method(
-                    &decor_view,
-                    "setSystemUiVisibility",
-                    "(I)V",
-                    &[jni::objects::JValue::Int(flags)],
-                ) {
-                    Ok(_) => log::info!("set_transparent_system_bars: setSystemUiVisibility OK"),
-                    Err(e) => {
-                        log::warn!("setSystemUiVisibility: {:?}", e);
-                        // Очищаем pending exception, чтобы не уронить следующий JNI-вызов
-                        let _ = env.exception_check().and_then(|has| {
-                            if has {
-                                env.exception_clear()
-                            } else {
-                                Ok(())
-                            }
-                        });
-                    }
-                }
-            } else {
-                log::warn!("set_transparent_system_bars: getDecorView недоступен");
-            }
-
-            // --- Шаг 5: Убираем фон Window (setBackgroundDrawable(null)) ---
-            // setBackgroundDrawable тоже deprecated с API 23 (замена: Window.setBackgroundDrawableResource).
-            // Безопасно пробуем, при ошибке очищаем pending exception.
-            match env.call_method(
-                &window,
-                "setBackgroundDrawable",
-                "(Landroid/graphics/drawable/Drawable;)V",
-                &[jni::objects::JValue::Object(&jni::objects::JObject::null())],
-            ) {
-                Ok(_) => log::info!("set_transparent_system_bars: BackgroundDrawable → null"),
-                Err(e) => {
-                    log::warn!("setBackgroundDrawable(null): {:?}", e);
-                    let _ = env.exception_check().and_then(|has| {
-                        if has {
-                            env.exception_clear()
-                        } else {
-                            Ok(())
-                        }
-                    });
                 }
             }
         }

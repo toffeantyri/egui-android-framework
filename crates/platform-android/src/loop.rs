@@ -188,6 +188,15 @@ impl RunState {
                 let style = egui_ctx.style_of(egui::Theme::Light).as_ref().clone();
                 let bg = style.visuals.panel_fill;
                 backend.platform_state().set_clear_color_from(bg);
+
+                // Определяем тему по яркости фона и обновляем системные бары
+                let is_dark = (bg.r() as u32) + (bg.g() as u32) + (bg.b() as u32) < 384;
+                let theme = if is_dark {
+                    egui_android_platform::SystemTheme::Dark
+                } else {
+                    egui_android_platform::SystemTheme::Light
+                };
+                backend.set_theme_override(Some(theme));
             }
 
             // Рендеринг через GraphicsPipeline
