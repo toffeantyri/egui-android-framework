@@ -157,6 +157,35 @@ where
             }
         }
     }
+
+    /// Обработать системный Back.
+    ///
+    /// Цепочка (как в Decompose):
+    /// 1. `active.handle_back()` — даём активному компоненту перехватить
+    ///    (NestedScreen, BackCustomScreen). Если вернул `true` — Back обработан.
+    /// 2. Если стек > 1 — делаем `pop()`. Back обработан.
+    /// 3. Если стек = 1 (Home) — возвращаем `false`.
+    ///    Вызывающий (`NavigationHost`) должен установить `finish_requested = true`.
+    ///
+    /// Возвращает `true`, если Back обработан (шаг 1 или 2).
+    /// Возвращает `false`, если нужно завершить приложение (шаг 3).
+    pub fn on_back(&mut self) -> bool {
+        // Шаг 1: активный компонент может сам обработать Back
+        if let Some(active) = self.items.last_mut() {
+            if active.component.handle_back() {
+                return true;
+            }
+        }
+
+        // Шаг 2: стандартное поведение — pop из стека
+        if self.items.len() > 1 {
+            self.pop();
+            return true;
+        }
+
+        // Шаг 3: Home — завершение приложения
+        false
+    }
 }
 
 // ─── Методы сохранения/восстановления (требуют Serialize + Deserialize) ───
@@ -314,6 +343,123 @@ mod tests {
     #[test]
     fn test_active_mut_empty() {
         assert!(ChildStack::<&str>::new().active_mut().is_none());
+    }
+
+    // ─── on_back tests ──────────────────────────────────────────────
+
+    /// Компонент, который перехватывает Back.
+    /// Реализует ComponentNode напрямую (не Component), чтобы переопределить handle_back.
+    struct BackComp {
+        /// Что вернуть из handle_back()
+        pub handle_back_result: bool,
+        /// Был ли вызван handle_back
+        pub back_called: bool,
+    }
+
+    impl BackComp {
+        fn new_intercepting() -> Self {
+            Self {
+                handle_back_result: true,
+                back_called: false,
+            }
+        }
+        fn new_passthrough() -> Self {
+            Self {
+                handle_back_result: false,
+                back_called: false,
+            }
+        }
+    }
+
+    impl LifecycleObserver for BackComp {}
+
+    impl egui_android_core::ComponentNode for BackComp {
+        fn render(&self, _ui: &mut UiWrapper, _dispatch: &egui_android_runtime::DynDispatcher) {}
+        fn handle_dyn(&mut self, _msg: Box<dyn std::any::Any + Send>) {}
+        fn handle_back(&mut self) -> bool {
+            self.back_called = true;
+            self.handle_back_result
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn on_back_empty_stack_returns_false() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        assert!(!s.on_back(), "Пустой стек: on_back должен вернуть false");
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn on_back_single_item_returns_false() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        assert_eq!(s.len(), 1);
+        assert!(
+            !s.on_back(),
+            "Один элемент (Home): on_back должен вернуть false"
+        );
+        assert_eq!(s.len(), 1, "Стек не должен измениться");
+    }
+
+    #[test]
+    fn on_back_multiple_items_pops() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("details", Box::new(BackComp::new_passthrough()));
+        assert_eq!(s.len(), 2);
+        assert!(s.on_back(), "Стек > 1: on_back должен вернуть true");
+        assert_eq!(s.len(), 1, "Должен остаться 1 элемент");
+        assert_eq!(s.active_config(), Some(&"home"));
+    }
+
+    #[test]
+    fn on_back_active_component_intercepts() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        let intercepting = Box::new(BackComp::new_intercepting());
+        s.push("custom", intercepting);
+        assert_eq!(s.len(), 2);
+
+        let result = s.on_back();
+        assert!(
+            result,
+            "Компонент перехватил Back: on_back должен вернуть true"
+        );
+        assert_eq!(
+            s.len(),
+            2,
+            "Стек не должен измениться (компонент перехватил)"
+        );
+
+        // Проверяем, что handle_back действительно был вызван
+        let active = s.active().unwrap();
+        let comp = active.as_any().downcast_ref::<BackComp>().unwrap();
+        assert!(comp.back_called, "handle_back должен быть вызван");
+    }
+
+    #[test]
+    fn on_back_active_passthrough_then_pop() {
+        // Первый компонент перехватывает (диалог внутри экрана),
+        // после его pop следующий пропускает → pop ещё раз
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("screen", Box::new(BackComp::new_passthrough()));
+        assert_eq!(s.len(), 2);
+
+        // Первый Back: экран пропускает → pop до home
+        assert!(s.on_back());
+        assert_eq!(s.len(), 1);
+        assert_eq!(s.active_config(), Some(&"home"));
+
+        // Второй Back: home пропускает → false (завершение)
+        assert!(!s.on_back());
+        assert_eq!(s.len(), 1, "Home не удаляется");
     }
 }
 

@@ -51,6 +51,14 @@ pub struct BackDispatcher {
     callbacks: Vec<BackCallback>,
 }
 
+impl std::fmt::Debug for BackDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackDispatcher")
+            .field("callbacks_count", &self.callbacks.len())
+            .finish()
+    }
+}
+
 impl BackDispatcher {
     /// Создать пустой диспетчер.
     pub fn new() -> Self {
