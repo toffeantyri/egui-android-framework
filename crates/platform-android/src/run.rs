@@ -71,18 +71,9 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     app_instance.on_start();
     app_instance.on_resume();
 
-    // --- Создаём backend и настраиваем системные бары ---
-    // System bars (setStatusBarColor/setNavigationBarColor) — только на UI thread.
-    // Захватываем указатели до перемещения app в backend.
-    let vm_ptr = app.vm_as_ptr() as usize;
-    let activity_ptr = app.activity_as_ptr() as usize;
-    app.run_on_java_main_thread(Box::new(move || {
-        let vm = vm_ptr as *mut std::ffi::c_void;
-        let activity = activity_ptr as *mut std::ffi::c_void;
-        if !vm.is_null() && !activity.is_null() {
-            crate::system_bars::set_transparent_system_bars(vm, activity);
-        }
-    }));
+    // Системные бары настраиваются в handle_init_window()
+    // после инициализации backend'а, когда PlatformState уже
+    // содержит валидные JNI GlobalRef.
 
     let mut backend: Box<dyn AndroidBackend> = match kind {
         AndroidBackendKind::Gl => {

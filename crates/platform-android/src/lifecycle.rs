@@ -144,10 +144,18 @@ fn handle_init_window<A: Application>(
     // Обновляем системные отступы через JNI
     backend.update_system_insets();
 
-    // Применяем clear_color и system_bars при старте
+    // Настраиваем системные бары: прозрачность + цвет
+    let state = backend.platform_state();
+    let vm = state.vm_ptr();
+    let activity = state.activity_ptr();
+    if !vm.is_null() && !activity.is_null() {
+        crate::system_bars::set_transparent_system_bars(vm, activity);
+    }
+    crate::system_bars::apply_system_bars_for_platform_state(state);
+
+    // Применяем clear_color при старте
     let clear = egui::Color32::from_rgb(0x33, 0x33, 0x33);
     backend.platform_state().set_clear_color_from(clear);
-    crate::system_bars::apply_system_bars_for_platform_state(backend.platform_state());
 
     // Обновляем DPI
     egui_ctx.set_pixels_per_point(backend.dpi());

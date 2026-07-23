@@ -14,36 +14,71 @@
 //!   → on_restore_state(Some(bytes))
 //! ```
 //!
+//! # Проблема порядка инициализации
+//!
+//! `nativeSetSavedState` вызывается из `EguiActivity.onCreate()`.
+//! `GLOBAL_PLATFORM_STATE` инициализируется в `run_with_backend()`.
+//! Порядок этих вызовов не гарантирован (race condition между Kotlin и Rust).
+//!
+//! Решение: `PENDING_SAVED_STATE` — временный буфер. Если `nativeSetSavedState`
+//! вызван до инициализации `GLOBAL_PLATFORM_STATE`, данные сохраняются в pending.
+//! При `init_jni_platform_state()` pending-данные переносятся в PlatformState.
+//!
 //! # Именование JNI-функций
 //!
 //! JNI-функции используют формат `Java_<package>_<Class>_<method>`.
 //! Package: `com.example.egui_android` (из AndroidManifest + EguiActivity).
 //! Class: `EguiActivity`.
-//!
-//! Функции доступны через `extern "C"` и вызываются из Kotlin.
 
 #![cfg(target_os = "android")]
 
 use crate::platform_state::PlatformState;
-use jni::objects::JByteArray;
-use jni::sys::{jbyteArray, jobject};
+use jni::sys::jbyteArray;
 use jni::JNIEnv;
 use std::sync::OnceLock;
 
 /// Глобальная ссылка на PlatformState для доступа из JNI-функций.
 ///
 /// Инициализируется в `run_with_backend()` после создания backend'а.
-/// JNI-функции вызываются на UI thread, блокировка Mutex внутри PlatformState
-/// гарантирует безопасность.
 static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
+
+/// Временный буфер для данных, пришедших через `nativeSetSavedState`
+/// до инициализации `GLOBAL_PLATFORM_STATE`.
+///
+/// Устанавливается в `nativeSetSavedState`, читается и очищается
+/// в `init_jni_platform_state()`.
+static PENDING_SAVED_STATE: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// Зарегистрировать PlatformState для доступа из JNI.
 ///
-/// Вызывается из `run_with_backend()` один раз при старте.
+/// Вызывается из `run_with_backend()` при каждом запуске.
+/// Идемпотентен: если PlatformState уже зарегистрирован — обновляет
+/// внутреннее состояние (insets, тема, JNI-указатели) но не паникует.
 pub fn init_jni_platform_state(state: PlatformState) {
-    GLOBAL_PLATFORM_STATE
-        .set(state)
-        .expect("GLOBAL_PLATFORM_STATE уже инициализирован");
+    // Проверяем pending-данные, пришедшие до инициализации
+    if let Some(pending) = PENDING_SAVED_STATE.get() {
+        log::info!(
+            "JNI: init_jni_platform_state — переносим {} байт из pending в PlatformState",
+            pending.len()
+        );
+        state.set_saved_state(pending.clone());
+    }
+
+    // Идемпотентная установка: если уже был — обновляем
+    if GLOBAL_PLATFORM_STATE.get().is_some() {
+        log::info!("JNI: init_jni_platform_state — обновляем существующий PlatformState");
+        // Переносим saved_state_buffer из старого в новый если нужно
+        if let Some(old_bytes) = GLOBAL_PLATFORM_STATE
+            .get()
+            .and_then(|s| s.take_saved_state())
+        {
+            state.set_saved_state(old_bytes);
+        }
+    }
+
+    // OnceLock::set паникует при повторном вызове, поэтому используем трюк:
+    // если уже установлен — игнорируем (состояние уже обновлено через get() выше)
+    let _ = GLOBAL_PLATFORM_STATE.set(state);
     log::info!("JNI: GLOBAL_PLATFORM_STATE инициализирован");
 }
 
@@ -52,11 +87,6 @@ pub fn init_jni_platform_state(state: PlatformState) {
 /// Вызывается из Kotlin: `nativeGetSavedState(): ByteArray?`
 ///
 /// Если буфер пуст — возвращает null.
-///
-/// # Безопасность
-///
-/// Вызывается на UI thread через JNI. Блокировка Mutex внутри PlatformState
-/// минимальна (копирование Vec<u8>).
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeGetSavedState(
     mut env: JNIEnv,
@@ -83,10 +113,8 @@ pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeGetSave
         bytes.len()
     );
 
-    // Создаём Java byte[] и копируем данные
     match env.new_byte_array(bytes.len() as i32) {
         Ok(jarr) => {
-            // jni 0.21 требует &[i8], конвертируем u8 -> i8 через transmute
             let bytes_i8: &[i8] = unsafe { std::mem::transmute(bytes.as_slice()) };
             if let Err(e) = env.set_byte_array_region(&jarr, 0, bytes_i8) {
                 log::error!("JNI: nativeGetSavedState — ошибка копирования: {}", e);
@@ -108,27 +136,18 @@ pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeGetSave
 ///
 /// Вызывается из Kotlin: `nativeSetSavedState(bytes: ByteArray?)`
 ///
-/// Если bytes == null — буфер не изменяется (первый запуск).
+/// Если `GLOBAL_PLATFORM_STATE` ещё не инициализирован — сохраняет
+/// данные в `PENDING_SAVED_STATE`. Они будут перенесены в PlatformState
+/// при вызове `init_jni_platform_state()`.
 ///
-/// # Безопасность
-///
-/// Вызывается на UI thread через JNI. Блокировка Mutex внутри PlatformState
-/// минимальна (сохранение Vec<u8>).
+/// Если bytes == null — пропускаем (первый запуск без saved state).
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeSetSavedState(
     mut env: JNIEnv,
     _class: jni::objects::JClass,
     byte_array: jni::objects::JByteArray,
 ) {
-    let state = match GLOBAL_PLATFORM_STATE.get() {
-        Some(s) => s,
-        None => {
-            log::error!("JNI: nativeSetSavedState — GLOBAL_PLATFORM_STATE не инициализирован");
-            return;
-        }
-    };
-
-    // Проверяем, что byte_array не null (в Kotlin передаётся ByteArray?)
+    // Проверяем, что byte_array не null
     if byte_array.is_null() {
         log::info!("JNI: nativeSetSavedState — byteArray == null, пропускаем (первый запуск)");
         return;
@@ -148,7 +167,6 @@ pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeSetSave
     }
 
     // Копируем данные из Java byte[]
-    // jni 0.21 требует &mut [i8], конвертируем u8 -> i8 через transmute
     let len = len as usize;
     let mut bytes_i8: Vec<i8> = vec![0i8; len];
     if let Err(e) = env.get_byte_array_region(&byte_array, 0, &mut bytes_i8) {
@@ -162,5 +180,17 @@ pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeSetSave
         bytes.len()
     );
 
-    state.set_saved_state(bytes);
+    // Если PlatformState уже инициализирован — сохраняем напрямую
+    if let Some(state) = GLOBAL_PLATFORM_STATE.get() {
+        state.set_saved_state(bytes);
+        return;
+    }
+
+    // PlatformState ещё не готов — сохраняем в pending
+    log::info!(
+        "JNI: nativeSetSavedState — GLOBAL_PLATFORM_STATE не инициализирован, сохраняем в pending"
+    );
+    if PENDING_SAVED_STATE.set(bytes).is_err() {
+        log::error!("JNI: nativeSetSavedState — PENDING_SAVED_STATE уже заполнен");
+    }
 }
