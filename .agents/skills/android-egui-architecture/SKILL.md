@@ -288,6 +288,23 @@ Runtime никогда не принимает решений.
 
 Он только соединяет Platform и UI.
 
+### Dispatcher и DynDispatcher
+
+**Крейт**: `egui-android-runtime`
+
+`Dispatcher<M>` — типизированная обёртка над `mpsc::Sender<M>`.
+Создаётся каждый кадр в `frame()`, живёт один кадр.
+View вызывает `dispatch(msg)` в момент события, не возвращает список сообщений.
+
+`DynDispatcher` — type-erased версия:
+- Хранит `mpsc::Sender<Box<dyn Any + Send>>`
+- `DynDispatcher::wrap::<M>()` создаёт `Dispatcher<M>`, упаковывающий M в `Box<dyn Any + Send>`
+- Используется в `ComponentNode::render()` для передачи `Dispatcher<M>` разнотипным экранам
+- При ошибке downcast логирует ожидаемый тип
+
+**Важно:** `Dispatcher<M>` — это тип-обёртка, не канал. Канал — это `mpsc::Sender<M>` внутри.
+Имена переменных (`ui_msg_tx`, `ui_dynmsg_tx`) следуют правилам именования каналов.
+
 ---
 
 ### UI Layer
