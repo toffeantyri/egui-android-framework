@@ -7,6 +7,23 @@
 //! Первый, кто вернул `true`, перехватывает Back.
 //! Если никто не перехватил — `handle()` возвращает `false`, и вызывающий
 //! решает, что делать (pop из ChildStack или завершение приложения).
+//!
+//! # Безопасность (висячие callbacks)
+//!
+//! Callback в BackDispatcher может пережить зарегистрировавший его компонент,
+//! если компонент удалён из стека (pop), но callback не был отписан. Это
+//! приводит к вызову освобождённой памяти (use-after-free) — undefined behavior.
+//!
+//! **Правило:** Всегда вызывать `unregister()` или `unregister_all()` при
+//! `on_destroy()` компонента. `ChildStack::pop()` вызывает `on_destroy()`
+//! автоматически, но компонент должен сам очистить свои callback'и.
+//!
+//! Поскольку текущая архитектура не хранит `BackDispatcher` внутри
+//! `ComponentNode`, ответственность за очистку лежит на компоненте,
+//! который зарегистрировал callback — через `ComponentContext`.
+//!
+//! **Лучшая практика:** Для экранов с кастомной обработкой Back используйте
+//! `handle_back()` напрямую (он определён в `ComponentNode`), а не `BackDispatcher`.
 
 /// Результат обработки BackPressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +96,11 @@ impl BackDispatcher {
     /// Удалить все обработчики с указанным приоритетом.
     pub fn unregister(&mut self, priority: u32) {
         self.callbacks.retain(|c| c.priority != priority);
+    }
+
+    /// Удалить все обработчики (полная очистка).
+    pub fn unregister_all(&mut self) {
+        self.callbacks.clear();
     }
 
     /// Обработать Back.
@@ -209,5 +231,23 @@ mod tests {
 
         d.unregister(10);
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn test_unregister_all() {
+        let mut d = BackDispatcher::new();
+        d.register(BackCallback {
+            priority: 10,
+            handler: Box::new(|| false),
+        });
+        d.register(BackCallback {
+            priority: 20,
+            handler: Box::new(|| false),
+        });
+        assert_eq!(d.len(), 2);
+
+        d.unregister_all();
+        assert!(d.is_empty());
+        assert!(!d.handle());
     }
 }
