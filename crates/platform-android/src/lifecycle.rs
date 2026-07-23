@@ -57,7 +57,7 @@ pub fn handle_lifecycle_event<A: Application>(
             handle_init_window(backend, app_instance, egui_ctx, graphics, platform_state)
         }
         LifecycleEvent::Resume => handle_resume(app_instance),
-        LifecycleEvent::Pause => handle_pause(app_instance),
+        LifecycleEvent::Pause => handle_pause(app_instance, platform_state),
         LifecycleEvent::Stop => handle_stop(app_instance, platform_state),
         LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested, platform_state),
     }
@@ -144,14 +144,31 @@ fn handle_init_window<A: Application>(
     // Обновляем системные отступы через JNI
     backend.update_system_insets();
 
-    // Настраиваем системные бары: прозрачность + цвет
+    // Save JNI pointers in PlatformState for lifecycle access
+    backend.init_platform_state_jni();
+
+    // Определяем системную тему (Light/Dark) и сохраняем в PlatformState.
+    // При has_egl тема уже определена, повторный JNI-вызов может упасть.
     let state = backend.platform_state();
     let vm = state.vm_ptr();
     let activity = state.activity_ptr();
-    if !vm.is_null() && !activity.is_null() {
-        crate::system_bars::set_transparent_system_bars(vm, activity);
+    if !has_egl {
+        if !vm.is_null() && !activity.is_null() {
+            if let Some(theme) = crate::system_bars::detect_system_theme_jni(vm, activity) {
+                state.set_system_theme(theme);
+            }
+        }
     }
-    crate::system_bars::apply_system_bars_for_platform_state(state);
+
+    // Настраиваем системные бары только при первом запуске.
+    // При has_egl (Pause/Resume) бары уже настроены, повторная настройка
+    // может упасть из-за переходного состояния окна.
+    if !has_egl {
+        crate::system_bars::apply_system_bars_for_platform_state(state);
+        if !vm.is_null() && !activity.is_null() {
+            crate::system_bars::set_transparent_system_bars(vm, activity);
+        }
+    }
 
     // Применяем clear_color при старте
     let clear = egui::Color32::from_rgb(0x33, 0x33, 0x33);
@@ -168,26 +185,28 @@ fn handle_resume<A: Application>(app_instance: &mut A) {
 }
 
 /// Обработать Pause — приложение приостановлено.
-fn handle_pause<A: Application>(app_instance: &mut A) {
+///
+/// Вызывает `on_save_state()` ДО `onSaveInstanceState` (Kotlin),
+/// чтобы данные были готовы к моменту вызова `nativeGetSavedState`.
+/// Android гарантирует порядок: onPause → onSaveInstanceState → onStop.
+fn handle_pause<A: Application>(app_instance: &mut A, platform_state: &PlatformState) {
     log::info!("Lifecycle: Pause");
+    let saved = app_instance.on_save_state();
+    if let Some(bytes) = saved {
+        log::info!(
+            "Lifecycle: Pause — сохраняем {} байт в platform_state",
+            bytes.len()
+        );
+        platform_state.set_saved_state(bytes);
+    }
     app_instance.on_pause();
 }
 
 /// Обработать Stop — приложение остановлено.
 ///
-/// Вызывает `on_save_state()` — результат сохраняется в `platform_state`
-/// для JNI-моста (kill/restore через Bundle).
-/// Application также сохраняет в своё поле для config change.
-fn handle_stop<A: Application>(app_instance: &mut A, platform_state: &PlatformState) {
+/// Состояние уже сохранено в handle_pause.
+fn handle_stop<A: Application>(app_instance: &mut A, _platform_state: &PlatformState) {
     log::info!("Lifecycle: Stop");
-    let saved = app_instance.on_save_state();
-    if let Some(bytes) = saved {
-        log::info!(
-            "Lifecycle: Stop — сохраняем {} байт в platform_state",
-            bytes.len()
-        );
-        platform_state.set_saved_state(bytes);
-    }
     app_instance.on_stop();
 }
 

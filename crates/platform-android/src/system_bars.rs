@@ -108,37 +108,43 @@ mod inner {
             }
 
             // --- Шаг 4: DecorView.setSystemUiVisibility ---
-            let decor_view = match env
+            // setSystemUiVisibility deprecated с API 30, на Android 16 может бросать исключение.
+            // Безопасно пробуем, при ошибке очищаем pending exception и продолжаем.
+            if let Ok(decor_view) = env
                 .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])
                 .and_then(|v| v.l())
             {
-                Ok(v) => v,
-                Err(e) => {
-                    log::error!("set_transparent_system_bars: getDecorView: {:?}", e);
-                    return;
-                }
-            };
+                let layout_stable = 0x0000_0100;
+                let layout_hide_nav = 0x0000_0200;
+                let layout_fullscreen = 0x0000_0400;
+                let flags = layout_stable | layout_hide_nav | layout_fullscreen;
 
-            // Флаги: SYSTEM_UI_FLAG_LAYOUT_STABLE | SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            // | SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            let layout_stable = 0x0000_0100;
-            let layout_hide_nav = 0x0000_0200;
-            let layout_fullscreen = 0x0000_0400;
-            let flags = layout_stable | layout_hide_nav | layout_fullscreen;
-
-            match env.call_method(
-                &decor_view,
-                "setSystemUiVisibility",
-                "(I)V",
-                &[jni::objects::JValue::Int(flags)],
-            ) {
-                Ok(_) => log::info!("set_transparent_system_bars: setSystemUiVisibility OK"),
-                Err(e) => {
-                    log::warn!("setSystemUiVisibility: {:?}", e);
+                match env.call_method(
+                    &decor_view,
+                    "setSystemUiVisibility",
+                    "(I)V",
+                    &[jni::objects::JValue::Int(flags)],
+                ) {
+                    Ok(_) => log::info!("set_transparent_system_bars: setSystemUiVisibility OK"),
+                    Err(e) => {
+                        log::warn!("setSystemUiVisibility: {:?}", e);
+                        // Очищаем pending exception, чтобы не уронить следующий JNI-вызов
+                        let _ = env.exception_check().and_then(|has| {
+                            if has {
+                                env.exception_clear()
+                            } else {
+                                Ok(())
+                            }
+                        });
+                    }
                 }
+            } else {
+                log::warn!("set_transparent_system_bars: getDecorView недоступен");
             }
 
             // --- Шаг 5: Убираем фон Window (setBackgroundDrawable(null)) ---
+            // setBackgroundDrawable тоже deprecated с API 23 (замена: Window.setBackgroundDrawableResource).
+            // Безопасно пробуем, при ошибке очищаем pending exception.
             match env.call_method(
                 &window,
                 "setBackgroundDrawable",
@@ -148,6 +154,13 @@ mod inner {
                 Ok(_) => log::info!("set_transparent_system_bars: BackgroundDrawable → null"),
                 Err(e) => {
                     log::warn!("setBackgroundDrawable(null): {:?}", e);
+                    let _ = env.exception_check().and_then(|has| {
+                        if has {
+                            env.exception_clear()
+                        } else {
+                            Ok(())
+                        }
+                    });
                 }
             }
         }
@@ -369,6 +382,46 @@ mod inner {
                 "(I)V",
                 &[jni::objects::JValue::Int(color)],
             );
+
+            // --- Управление цветом иконок системных баров ---
+            // WindowInsetsController.setSystemBarsAppearance() — API 30+
+            // APPEARANCE_LIGHT_STATUS_BARS = 0x0000_0008: тёмные иконки (для светлого фона)
+            // APPEARANCE_LIGHT_NAVIGATION_BARS = 0x0000_0010: тёмные кнопки навбара
+            // По умолчанию (0) — светлые иконки (для тёмного фона)
+            let insets_controller = env
+                .call_method(
+                    &window,
+                    "getInsetsController",
+                    "()Landroid/view/WindowInsetsController;",
+                    &[],
+                )
+                .and_then(|v| v.l());
+
+            if let Ok(controller) = insets_controller {
+                let appearance: i32 = match theme {
+                    SystemTheme::Light => 0x0000_0008 | 0x0000_0010, // тёмные иконки
+                    SystemTheme::Dark => 0, // светлые иконки (по умолчанию)
+                };
+                let mask: i32 = 0x0000_0008 | 0x0000_0010; // оба флага в маске
+                let _ = env.call_method(
+                    &controller,
+                    "setSystemBarsAppearance",
+                    "(II)V",
+                    &[
+                        jni::objects::JValue::Int(appearance),
+                        jni::objects::JValue::Int(mask),
+                    ],
+                );
+                log::info!(
+                    "apply_system_bars_color_jni: setSystemBarsAppearance appearance={:#x} mask={:#x}",
+                    appearance,
+                    mask,
+                );
+            } else {
+                log::warn!(
+                    "apply_system_bars_color_jni: getInsetsController недоступен (API < 30?)"
+                );
+            }
 
             log::info!(
                 "apply_system_bars_color_jni: theme={:?} color=#{:06x}",

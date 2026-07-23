@@ -130,6 +130,12 @@ pub trait AndroidBackend {
     /// Настроить стиль системных баров.
     fn set_system_bars_style(&mut self, style: SystemBarsStyle);
 
+    /// Сохранить JNI-указатели (JavaVM, Activity) в PlatformState.
+    ///
+    /// Должен вызываться при InitWindow, чтобы lifecycle мог использовать
+    /// JNI-вызовы (системные бары, тема, insets).
+    fn init_platform_state_jni(&mut self);
+
     /// Обменять буферы (EGL swap buffers).
     /// Вызывается после каждого кадра рендеринга.
     fn swap_buffers(&mut self) -> Result<(), String>;
@@ -233,6 +239,10 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn set_system_bars_style(&mut self, style: SystemBarsStyle) {
         (**self).set_system_bars_style(style)
+    }
+
+    fn init_platform_state_jni(&mut self) {
+        (**self).init_platform_state_jni()
     }
 
     fn swap_buffers(&mut self) -> Result<(), String> {

@@ -336,6 +336,14 @@ impl AndroidBackend for GlBackend {
         self.platform_state.set_theme_override(theme);
     }
 
+    fn init_platform_state_jni(&mut self) {
+        let vm = self.app.vm_as_ptr();
+        let activity = self.app.activity_as_ptr();
+        if !vm.is_null() && !activity.is_null() {
+            self.platform_state.set_jni_pointers(vm, activity);
+        }
+    }
+
     fn set_system_bars_style(&mut self, style: SystemBarsStyle) {
         let vm = self.app.vm_as_ptr();
         let activity = self.app.activity_as_ptr();
