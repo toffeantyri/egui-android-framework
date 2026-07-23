@@ -148,21 +148,77 @@ struct MyScreen {
 
 ### Поток save/restore
 
+**Config change (поворот экрана, без kill процесса):**
+
 ```
 Stop/Destroy:
-  Platform → app.on_save_state()
-  Application → root.save() → SavedStack<C> → bincode → Vec<u8>
-  Application → self.saved_state = Some(bytes)  ← Application хранит состояние
-  Platform не хранит состояние
+  Platform -> lifecycle::handle_stop()
+  -> app.on_save_state() -> SavedStack<C> -> bincode -> Vec<u8>
+  -> platform_state.set_saved_state(bytes) <- Platform хранит raw bytes
+  -> Application также сохраняет в своё поле self.saved_state
 
 InitWindow:
-  Platform → app.on_restore_state(None)  ← Platform не имеет данных
-  Application → bytes = self.saved_state.take()  ← из своего поля
-  Application → bincode → SavedStack<C> → ChildStack::restore_from_saved()
+  Platform -> lifecycle::handle_init_window()
+  -> platform_state.take_saved_state() <- буфер пуст (ещё не заполнялся из Bundle)
+  -> app.on_restore_state(None)
+  -> Application: self.saved_state.take() -> ChildStack::restore_from_saved()
 ```
 
-**Архитектурное правило:** Platform не хранит состояние приложения.
+**Kill/restore процесса (система убила процесс):**
+
+```
+Stop/Destroy (старый процесс):
+  Platform -> lifecycle::handle_stop()
+  -> app.on_save_state() -> SavedStack<C> -> bincode -> Vec<u8>
+  -> platform_state.set_saved_state(bytes)
+
+onSaveInstanceState (Kotlin, старый процесс):
+  EguiActivity.onSaveInstanceState(outState)
+  -> nativeGetSavedState() <- JNI -> PlatformState.take_saved_state()
+  -> Bundle.putByteArray("egui_saved_state", bytes)
+
+onCreate (Kotlin, новый процесс):
+  EguiActivity.onCreate(savedInstanceState)
+  -> Bundle.getByteArray("egui_saved_state")
+  -> nativeSetSavedState(bytes) <- JNI -> PlatformState.set_saved_state(bytes)
+
+InitWindow (новый процесс):
+  Platform -> lifecycle::handle_init_window()
+  -> platform_state.take_saved_state() <- данные из Bundle
+  -> app.on_restore_state(Some(bytes))
+  -> bincode -> SavedStack<C> -> ChildStack::restore_from_saved()
+```
+
+### JNI-мост kill/restore
+
+**Крейт**: `egui-android-platform-android` (модуль `saved_state_jni.rs`)
+
+JNI-функции `nativeGetSavedState`/`nativeSetSavedState` передают
+`Vec<u8>` между Rust `PlatformState` и Android `Bundle`.
+
+- `PlatformState` содержит `saved_state_buffer: Option<Vec<u8>>` — raw bytes,
+  Platform не знает про ChildStack/SavedStack
+- JNI-функции вызываются из Kotlin `EguiActivity` на UI thread
+- Глобальный `OnceLock<PlatformState>` даёт JNI-функциям доступ к состоянию
+
+**Архитектурное правило:** Platform не хранит состояние приложения
+(не знает про навигацию). Platform хранит только буфер raw bytes
+для транспорта между Bundle и Application.
+
 `RunState` не содержит `saved_state`. Application владеет состоянием.
+
+**Поток данных в Kotlin:**
+
+```
+EguiActivity (Kotlin)
+  ├── onCreate(savedInstanceState)
+  │     -> savedBytes = savedInstanceState?.getByteArray("egui_saved_state")
+  │     -> nativeSetSavedState(savedBytes)  <- JNI
+  │
+  └── onSaveInstanceState(outState)
+        -> bytes = nativeGetSavedState()    <- JNI
+        -> outState.putByteArray("egui_saved_state", bytes)
+```
 
 `restore_from_saved()` пересоздаёт компоненты через фабрику (как в Decompose)
 и восстанавливает их состояние через `ComponentNode::restore_state()`.
@@ -174,7 +230,7 @@ InitWindow:
 2. В фабрике компонент оборачивается в `PersistentComponent::new(...)`
 3. `ChildStack::save()` → вызывает `save_state()` на `PersistentComponent` → `PersistentState::save_to_boxed()` → `Vec<u8>`
 4. `ChildStack::restore_from_saved()` → создаёт компонент через фабрику → вызывает `restore_state()`
-5. **При kill/restore процесса** нужен JNI-мост (отдельная задача)
+5. JNI-мост автоматически передаёт SavedStack<C> между процессами при kill/restore
 
 ---
 

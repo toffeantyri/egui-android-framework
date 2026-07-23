@@ -16,14 +16,18 @@
 //! Application сам владеет состоянием: `on_save_state()` сохраняет,
 //! `on_restore_state(None)` восстанавливает из внутреннего поля.
 //!
-//! Это позволяет восстановить навигацию при повороте экрана (config change)
-//! и при пересоздании Activity (kill/restore через JNI в будущем).
+//! Для kill/restore процесса данные проходят через PlatformState → JNI → Bundle:
+//! - Stop/Destroy: `on_save_state()` → `platform_state.set_saved_state()`
+//!   → Kotlin `onSaveInstanceState` → JNI `nativeGetSavedState` → Bundle
+//! - InitWindow: Bundle → JNI `nativeSetSavedState` → `platform_state.set_saved_state()`
+//!   → `on_restore_state(Some(bytes))`
 
 #![cfg(target_os = "android")]
 
 use crate::backend::AndroidBackend;
 use crate::event::LifecycleEvent;
 use crate::graphics::GraphicsPipeline;
+use crate::platform_state::PlatformState;
 use egui_android_runtime::Application;
 
 /// Обработать событие жизненного цикла.
@@ -38,7 +42,7 @@ use egui_android_runtime::Application;
 /// * `egui_ctx` — контекст egui
 /// * `graphics` — опциональный GraphicsPipeline (для InitWindow: пересоздание surface)
 /// * `destroy_requested` — флаг завершения (устанавливается при Destroy)
-/// Application сам владеет состоянием (хранит в своём поле `saved_state`).
+/// * `platform_state` — состояние платформы (буфер для JNI-моста kill/restore)
 pub fn handle_lifecycle_event<A: Application>(
     event: LifecycleEvent,
     backend: &mut dyn AndroidBackend,
@@ -46,13 +50,16 @@ pub fn handle_lifecycle_event<A: Application>(
     egui_ctx: &egui::Context,
     graphics: &mut Option<GraphicsPipeline>,
     destroy_requested: &mut bool,
+    platform_state: &PlatformState,
 ) {
     match event {
-        LifecycleEvent::InitWindow => handle_init_window(backend, app_instance, egui_ctx, graphics),
+        LifecycleEvent::InitWindow => {
+            handle_init_window(backend, app_instance, egui_ctx, graphics, platform_state)
+        }
         LifecycleEvent::Resume => handle_resume(app_instance),
         LifecycleEvent::Pause => handle_pause(app_instance),
-        LifecycleEvent::Stop => handle_stop(app_instance),
-        LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested),
+        LifecycleEvent::Stop => handle_stop(app_instance, platform_state),
+        LifecycleEvent::Destroy => handle_destroy(app_instance, destroy_requested, platform_state),
     }
 }
 
@@ -64,11 +71,20 @@ pub fn handle_lifecycle_event<A: Application>(
 /// 2. Если EGL есть — пересоздаёт surface (Pause/Resume cycle).
 /// 3. Если EGL нет — инициализирует с нуля + вызывает on_restore_state(None).
 /// 4. В любом случае обновляет insets, DPI и сохраняет PlatformState в egui::Context.
+///
+/// # Восстановление состояния
+///
+/// При kill/restore: Kotlin `onCreate` уже вызвал `nativeSetSavedState`,
+/// данные уже в `platform_state.saved_state_buffer`.
+/// Забираем их через `take_saved_state()` и передаём в `on_restore_state(Some(bytes))`.
+/// Если буфер пуст — первый запуск или config change, вызываем `on_restore_state(None)`
+/// (Application восстановит из своего поля).
 fn handle_init_window<A: Application>(
     backend: &mut dyn AndroidBackend,
     app_instance: &mut A,
     egui_ctx: &egui::Context,
     graphics: &mut Option<GraphicsPipeline>,
+    platform_state: &PlatformState,
 ) {
     log::info!("Lifecycle: InitWindow");
 
@@ -78,7 +94,6 @@ fn handle_init_window<A: Application>(
     if has_egl {
         // InitWindow после Pause/Resume — пересоздаём surface
         // и восстанавливаем состояние навигации
-        // (как в Decompose: restoreState при каждом создании контекста)
         if let Err(e) = backend.recreate_surface() {
             log::error!("Ошибка пересоздания EGL surface: {}", e);
             if let Some(ref mut g) = graphics {
@@ -86,29 +101,44 @@ fn handle_init_window<A: Application>(
             }
             *graphics = None;
             backend.destroy_graphics();
-        } else {
-            if let Some(ref mut g) = graphics {
-                unsafe {
-                    use glow::HasContext;
-                    let gl = &*g.painter.gl();
-                    gl.clear_color(0.0, 0.0, 0.0, 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-                }
+        } else if let Some(ref mut g) = graphics {
+            unsafe {
+                use glow::HasContext;
+                let gl = &*g.painter.gl();
+                gl.clear_color(0.0, 0.0, 0.0, 1.0);
+                gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        // Восстанавливаем состояние навигации после пересоздания
-        // Application сам восстановит из своего поля saved_state
-        app_instance.on_restore_state(None);
+        // Восстанавливаем состояние: сначала пробуем данные из Bundle (kill/restore),
+        // затем своё поле (config change)
+        let saved = platform_state.take_saved_state();
+        log::info!(
+            "Lifecycle: InitWindow (has_egl) — saved_state_buffer: {}",
+            if saved.is_some() {
+                "есть данные"
+            } else {
+                "пуст"
+            }
+        );
+        app_instance.on_restore_state(saved);
     } else {
         // Первый InitWindow — инициализируем EGL
         backend.init().ok();
         if let Err(e) = backend.init_graphics() {
             log::error!("Ошибка инициализации EGL: {}", e);
         }
-        // Восстанавливаем состояние навигации после пересоздания
-        // Application сам восстановит из своего поля saved_state
-        // (None означает: используй своё поле, если оно есть)
-        app_instance.on_restore_state(None);
+        // Восстанавливаем состояние: сначала пробуем данные из Bundle (kill/restore),
+        // затем своё поле (config change)
+        let saved = platform_state.take_saved_state();
+        log::info!(
+            "Lifecycle: InitWindow (первый) — saved_state_buffer: {}",
+            if saved.is_some() {
+                "есть данные"
+            } else {
+                "пуст"
+            }
+        );
+        app_instance.on_restore_state(saved);
     }
 
     // Обновляем системные отступы через JNI
@@ -137,12 +167,19 @@ fn handle_pause<A: Application>(app_instance: &mut A) {
 
 /// Обработать Stop — приложение остановлено.
 ///
-/// Вызывает `on_save_state()` — Application сам сохраняет состояние
-/// в своё поле для восстановления при повороте экрана.
-/// Platform не хранит результат.
-fn handle_stop<A: Application>(app_instance: &mut A) {
+/// Вызывает `on_save_state()` — результат сохраняется в `platform_state`
+/// для JNI-моста (kill/restore через Bundle).
+/// Application также сохраняет в своё поле для config change.
+fn handle_stop<A: Application>(app_instance: &mut A, platform_state: &PlatformState) {
     log::info!("Lifecycle: Stop");
-    let _ = app_instance.on_save_state();
+    let saved = app_instance.on_save_state();
+    if let Some(bytes) = saved {
+        log::info!(
+            "Lifecycle: Stop — сохраняем {} байт в platform_state",
+            bytes.len()
+        );
+        platform_state.set_saved_state(bytes);
+    }
     app_instance.on_stop();
 }
 
@@ -150,9 +187,20 @@ fn handle_stop<A: Application>(app_instance: &mut A) {
 ///
 /// Вызывает `on_save_state()` (на случай если Stop не был вызван)
 /// и устанавливает флаг завершения.
-/// Platform не хранит результат — Application сам управляет состоянием.
-fn handle_destroy<A: Application>(app_instance: &mut A, destroy_requested: &mut bool) {
+/// Результат сохраняется в `platform_state` для JNI-моста.
+fn handle_destroy<A: Application>(
+    app_instance: &mut A,
+    destroy_requested: &mut bool,
+    platform_state: &PlatformState,
+) {
     log::info!("Lifecycle: Destroy");
-    let _ = app_instance.on_save_state();
+    let saved = app_instance.on_save_state();
+    if let Some(bytes) = saved {
+        log::info!(
+            "Lifecycle: Destroy — сохраняем {} байт в platform_state",
+            bytes.len()
+        );
+        platform_state.set_saved_state(bytes);
+    }
     *destroy_requested = true;
 }

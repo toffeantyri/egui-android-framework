@@ -587,7 +587,7 @@ if let Some(active) = self.stack.active_mut() {
           └── NestedScreen (ручной impl ComponentNode)
 ```
 
-### Поток при повороте экрана (config change)
+### Поток при повороте экрана (config change) и kill/restore (JNI-мост)
 
 ```
 Stop → app.on_save_state()
@@ -637,6 +637,32 @@ impl ComponentNode for NestedScreen {
     }
 }
 ```
+
+### Поток при kill/restore процесса (JNI-мост)
+
+```
+// Старый процесс
+Stop/Destroy -> app.on_save_state()
+  -> root.save() -> SavedStack<Route> -> bincode -> Vec<u8>
+  -> platform_state.set_saved_state(bytes)
+
+onSaveInstanceState (Kotlin):
+  -> nativeGetSavedState()  // JNI: PlatformState.take_saved_state()
+  -> Bundle.putByteArray("egui_saved_state", bytes)
+
+// Новый процесс
+onCreate (Kotlin):
+  -> Bundle.getByteArray("egui_saved_state")
+  -> nativeSetSavedState(bytes)  // JNI: PlatformState.set_saved_state(bytes)
+
+InitWindow -> app.on_restore_state(Some(bytes))
+  -> bincode -> SavedStack<Route> -> ChildStack::restore_from_saved()
+```
+
+JNI-функции реализованы в `crates/platform-android/src/saved_state_jni.rs`.
+Kotlin-слой в `EguiActivity.kt` вызывает `nativeGetSavedState()` / `nativeSetSavedState()`.
+Platform не знает про навигацию - только raw bytes в буфере `saved_state_buffer`.
+Application по-прежнему владеет логикой save/restore.
 
 ### Что не сохраняется
 - `remember()` — UI-состояние, сбрасывается при пересоздании

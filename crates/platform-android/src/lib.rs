@@ -115,6 +115,7 @@ pub mod lifecycle;
 pub mod r#loop;
 pub mod platform_state;
 pub mod run;
+pub mod saved_state_jni;
 pub mod system_bars;
 
 pub mod waker;

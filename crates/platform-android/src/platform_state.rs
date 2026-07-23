@@ -33,6 +33,13 @@ struct PlatformStateInner {
     vm_ptr: *mut std::ffi::c_void,
     /// Указатель на Activity (JNI global reference).
     activity_ptr: *mut std::ffi::c_void,
+
+    // ─── Saved state buffer ──────────────────────────────────────
+    /// Буфер сериализованных данных для JNI-моста kill/restore.
+    /// `on_save_state()` → этот буфер → JNI → Bundle →
+    /// новый процесс → Bundle → JNI → этот буфер → `on_restore_state()`.
+    /// Platform хранит только raw bytes, не знает про ChildStack.
+    saved_state_buffer: Option<Vec<u8>>,
 }
 
 impl Default for PlatformStateInner {
@@ -45,6 +52,7 @@ impl Default for PlatformStateInner {
             clear_color: 0x33_33_33,
             vm_ptr: std::ptr::null_mut(),
             activity_ptr: std::ptr::null_mut(),
+            saved_state_buffer: None,
         }
     }
 }
@@ -161,6 +169,34 @@ impl PlatformState {
     /// Получить указатель на Activity.
     pub fn activity_ptr(&self) -> *mut std::ffi::c_void {
         self.inner.lock().unwrap().activity_ptr
+    }
+
+    // ─── Saved state buffer ───────────────────────────────────────
+
+    /// Сохранить сериализованные данные в буфер.
+    ///
+    /// Вызывается из lifecycle при Stop/Destroy — кладёт результат
+    /// `on_save_state()` для передачи в Android Bundle через JNI.
+    pub fn set_saved_state(&self, bytes: Vec<u8>) {
+        let mut inner = self.inner.lock().unwrap();
+        log::info!(
+            "PlatformState: set_saved_state — {} байт в буфере",
+            bytes.len()
+        );
+        inner.saved_state_buffer = Some(bytes);
+    }
+
+    /// Забрать сериализованные данные из буфера (очищает).
+    ///
+    /// Вызывается JNI-функцией `nativeGetSavedState` для передачи в Bundle,
+    /// и lifecycle при InitWindow для восстановления.
+    pub fn take_saved_state(&self) -> Option<Vec<u8>> {
+        let mut inner = self.inner.lock().unwrap();
+        let result = inner.saved_state_buffer.take();
+        if result.is_some() {
+            log::info!("PlatformState: take_saved_state — буфер очищен");
+        }
+        result
     }
 }
 

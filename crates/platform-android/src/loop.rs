@@ -14,6 +14,7 @@ use crate::backend::AndroidBackend;
 use crate::event::BackendEvent;
 use crate::graphics::GraphicsPipeline;
 use crate::input::InputState;
+use crate::platform_state::PlatformState;
 use egui_android_platform::Waker;
 use egui_android_runtime::{Application, RuntimeContext};
 
@@ -65,6 +66,7 @@ impl RunState {
         egui_ctx: &egui::Context,
         waker: &Waker,
         target_dt: Duration,
+        platform_state: &PlatformState,
     ) -> bool {
         // --- Шаг 1: poll events ---
         let backend_events = backend.poll_events();
@@ -80,6 +82,7 @@ impl RunState {
                         egui_ctx,
                         &mut self.graphics,
                         &mut self.destroy_requested,
+                        platform_state,
                     );
                 }
                 other => {

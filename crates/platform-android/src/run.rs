@@ -108,6 +108,11 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     let mut state = RunState::new();
     let target_dt = Duration::from_secs_f64(1.0 / app_instance.config().target_fps as f64);
 
+    // Инициализируем JNI-мост для kill/restore — регистрируем PlatformState
+    // в глобальном OnceLock для доступа из nativeGetSavedState/nativeSetSavedState.
+    let platform_state = backend.platform_state().clone();
+    crate::saved_state_jni::init_jni_platform_state(platform_state.clone());
+
     // --- Главный цикл ---
     while state.tick(
         &mut *backend,
@@ -115,6 +120,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
         &egui_ctx,
         &waker,
         target_dt,
+        &platform_state,
     ) {}
 
     // --- Очистка ---
