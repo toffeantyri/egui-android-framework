@@ -1,21 +1,15 @@
-//! Платформенная абстракция — контракт для различных платформ (Android, iOS, Desktop, Web).
+//! Платформенная абстракция — минимальный контракт для платформенного уровня.
 //!
-//! Определяет трейт [`Platform`], типы [`PlatformEvent`], [`FrameInput`], [`FrameOutput`]
-//! и [`PlatformConfig`].
+//! Содержит:
+//! - [`Waker`] — пробуждение event loop платформы
+//! - [`SystemTheme`] — системная тема (Light/Dark)
 //!
 //! Этот крейт НЕ знает про runtime, core, ui, navigation.
+//! Конкретные реализации находятся в platform-android, platform-desktop и т.д.
 
-pub mod config;
-pub mod event;
-pub mod frame;
-pub mod platform;
 pub mod theme;
 
 pub mod waker;
 
-pub use config::*;
-pub use event::*;
-pub use frame::*;
-pub use platform::*;
 pub use theme::*;
 pub use waker::Waker;

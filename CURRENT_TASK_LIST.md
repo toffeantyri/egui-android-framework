@@ -1,27 +1,5 @@
 # Проблемы
 
-## 1. ViewFn мёртв
-
-```
-Проблема: ViewFn мёртв
-
-Файл: crates/core/src/view.rs
-
-Суть:
-  pub type ViewFn<S, M> = fn(state: &S, ui: &mut egui::Ui, dispatch: &Dispatcher<M>);
-
-  Тип объявлен, но нигде не используется.
-  Component::render() принимает &mut UiWrapper, а не ViewFn.
-  Сигнатура ViewFn принимает &mut egui::Ui — несовместима с текущим API.
-
-Влияние:
-  - Путаница для новых разработчиков (guide.md ссылается на ViewFn)
-  - Мёртвый код в публичном API крейта core
-
-Затрагиваемые слои: core
-Риск: нулевой — нигде не используется
-```
-
 ## 2. Type erasure — runtime ошибка вместо compile-time
 
 ```
@@ -113,34 +91,7 @@
 Риск: нулевой при документировании, высокий при изменении кода
 ```
 
-## 6. Counter пример — 6 файлов для инкремента
 
-```
-Проблема: Избыточный boilerplate для простых приложений
-
-Файлы: examples/counter/src/
-
-Суть:
-  examples/counter/src/
-  ├── app.rs          (130 строк)
-  ├── component.rs    (45 строк)
-  ├── data_layer.rs   (30 строк)
-  ├── msg.rs          (12 строк)
-  ├── view.rs         (80 строк)
-  └── lib.rs          (10 строк)
-
-  6 файлов, ~300 строк для инкремента числа.
-  Весь UI счётчика — 80 строк в view.rs, остальное — инфраструктура.
-
-  Для сравнения: showcase — 13+ файлов для демо.
-
-Влияние:
-  - Высокий порог входа для новых разработчиков
-  - Onboarding занимает непропорционально много времени
-
-Затрагиваемые слои: macros (новый макрос), examples
-Риск: высокий — макросы сложны в отладке
-```
 
 ## 7. Platform-абстракция минимальна
 
@@ -204,26 +155,6 @@
 
 # Задачи (решения)
 
-## Задача 1: Удалить ViewFn
-
-```
-Задача: Удалить мёртвый тип ViewFn
-
-Что сделать:
-  1. Удалить файл crates/core/src/view.rs
-  2. Убрать `pub mod view;` из crates/core/src/lib.rs
-  3. Убрать `pub use view::*;` из crates/core/src/lib.rs
-  4. Обновить guide.md — убрать упоминания ViewFn,
-     заменить на описание Component::render()
-
-Проверка:
-  cargo check --workspace
-  cargo test --workspace
-  grep -r "ViewFn" crates/ examples/  # должно быть пусто
-
-Затрагиваемые слои: core, документация
-Оценка: 1 час
-```
 
 ## Задача 3: Документировать двухуровневую модель мутации
 
@@ -339,45 +270,6 @@
 
 Затрагиваемые слои: macros, core, navigation, examples
 Оценка: 3 дня
-```
-
-## Задача 6: Макрос #[app] для простых приложений
-
-```
-Задача: Снизить boilerplate для простых приложений до 1 файла
-
-Что сделать:
-  1. В crates/macros/src/lib.rs добавить proc-macro #[app]:
-
-     #[app(tag = "counter", fps = 60)]
-     struct CounterApp { count: u32 }
-
-     #[app::view]
-     fn view(state: &CounterApp, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
-         Column::new().show(ui, dispatch, |ui, d| {
-             Text::new(format!("{}", state.count)).render(ui, d);
-             Button::new("+1").on_click(Msg::Inc).render(ui, d);
-         });
-     }
-
-     #[app::handle]
-     fn handle(state: &mut CounterApp, msg: Msg) {
-         match msg { Msg::Inc => state.count += 1 }
-     }
-
-     Макрос генерирует: Application, Component, LifecycleObserver,
-     android_main(), data layer worker.
-
-  2. Переписать examples/counter с использованием макроса
-
-  3. Для сложных приложений (showcase) — ручная реализация как сейчас
-
-Проверка:
-  cargo check --workspace
-  cargo build -p egui-android-counter --target aarch64-linux-android
-
-Затрагиваемые слои: macros, examples
-Оценка: 2 недели
 ```
 
 ## Задача 8: Enum-based dispatch для compile-time safety

@@ -1,28 +1,24 @@
 # egui-android-platform
 
-**Абстрактный Platform trait для egui на Android.**
+**Платформенная абстракция: Waker (пробуждение event loop) и SystemTheme (Light/Dark).**
 
-Определяет контракт платформы: Platform, PlatformEvent, FrameInput, FrameOutput, PlatformConfig.
 Конкретная реализация — в `egui-android-platform-android`.
 
 [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform)
 
 ## Состав
 
-### Platform (trait)
-- Абстракция над платформой (Android, десктоп, web)
+### Waker
+- Пробуждение event loop платформы
+- Обёртка над замыканием (`AndroidApp::signal()` для Android)
+- Используется RuntimeContext для уведомления платформы
 
-### PlatformEvent
-- События: Touch, Key, BackPressed, Lifecycle (Resume, Pause, Destroy)
-
-### FrameInput / FrameOutput
-- Входные/выходные данные для одного кадра
-
-### PlatformConfig
-- Настройки платформы
+### SystemTheme
+- Системная тема: Light / Dark
+- Используется в platform-android для настройки системных баров
 
 ## Когда использовать
 
 Подключайте `egui-android-platform`, если вы:
-- пишете свою платформенную реализацию
-- используете абстракцию для тестирования на хосте
+- пишете свою платформенную реализацию (нужен Waker)
+- работаете с системной темой на уровне платформы

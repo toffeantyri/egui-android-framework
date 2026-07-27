@@ -51,10 +51,10 @@ description: Архитектура, правила и идиомы проект
                     ▼                           ▼
           ┌─────────────────┐       ┌──────────────────────┐
           │    platform     │       │  platform-android    │
-          │  Platform trait │◀──────│  EGL | NDK input    │
-          │  PlatformEvent  │       │  run<A: Application> │
-          │  FrameInput/Out │       │  egui_glow renderer  │
-          │  PlatformConfig │       └──────────────────────┘
+          │  Waker          │◀──────│  EGL | NDK input    │
+          │  SystemTheme    │       │  run<A: Application> │
+          │                 │       │  egui_glow renderer  │
+          │                 │       └──────────────────────┘
           └─────────────────┘
 ```
 
@@ -735,10 +735,8 @@ loop {
 ├── crates/
 │   ├── platform/           — egui-android-platform
 │   │   └── src/
-│   │       ├── platform.rs  — trait Platform
-│   │       ├── event.rs     — PlatformEvent<W, I>
-│   │       ├── frame.rs     — FrameInput, FrameOutput
-│   │       └── config.rs    — PlatformConfig
+│   │       ├── waker.rs     — Waker (пробуждение event loop)
+│   │       └── theme.rs     — SystemTheme (Light/Dark)
 │   │
 │   ├── platform-android/   — egui-android-platform-android (cfg = android)
 │   │   └── src/
