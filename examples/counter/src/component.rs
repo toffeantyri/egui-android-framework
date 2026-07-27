@@ -5,12 +5,15 @@
 use egui_android_framework::{
     core::{Component, LifecycleObserver, UiWrapper},
     runtime::{Dispatcher, StateStore},
+    ComponentNode,
 };
 
 use crate::msg::{CounterState, Msg};
 use crate::view::counter_view;
 
 /// Компонент счётчика.
+#[derive(ComponentNode)]
+#[component_message(Msg)]
 pub struct CounterComponent {
     /// Snapshot текущего состояния.
     count: u32,

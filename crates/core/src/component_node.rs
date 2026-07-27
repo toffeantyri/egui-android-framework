@@ -15,16 +15,25 @@
 //! - `handle_back` — встроенная поддержка BackPressed (как в Decompose)
 //! - `save_state` / `restore_state` — сохранение состояния для пересоздания Activity
 //!
-//! # Blanket-impl
+//! # Реализация через макрос
 //!
-//! Любой тип, реализующий [`Component`], автоматически реализует [`ComponentNode`]:
+//! `ComponentNode` реализуется через `#[derive(ComponentNode)]` (из `egui-android-macros`).
+//! Макрос генерирует конкретный impl для каждого компонента.
+//!
+//! Если компонент использует `#[persistent_fields(...)]`, макрос генерирует
+//! `save_state`/`restore_state` через `PersistentState::save_to_boxed()`.
+//! Иначе — `save_state = None` (стандартное поведение blanket-impl).
 //!
 //! ```ignore
-//! impl<T: Component> ComponentNode for T { ... }
-//! ```
+//! // Компонент без сохранения состояния
+//! #[derive(ComponentNode)]
+//! struct MyScreen;
 //!
-//! Таким образом, экраны реализуют `Component`, а `ChildStack` хранит их как
-//! `Box<dyn ComponentNode>`.
+//! // Компонент с сохранением состояния
+//! #[derive(Component, ComponentNode)]
+//! #[persistent_fields(counter)]
+//! struct StatefulScreen { counter: i32 }
+//! ```
 
 use crate::lifecycle::LifecycleObserver;
 use crate::UiWrapper;
@@ -81,51 +90,6 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-// Blanket-impl: любой Component автоматически становится ComponentNode.
-//
-// Для сохранения/восстановления состояния используйте обёртку
-// `PersistentComponent<T>` (из `persistent_state`), которая реализует
-// ComponentNode с корректными save_state/restore_state.
-impl<T> ComponentNode for T
-where
-    T: crate::Component,
-    T::Message: 'static + Send,
-{
-    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher) {
-        let typed = dispatch.wrap::<T::Message>();
-        crate::Component::render(self, ui, &typed);
-    }
-
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
-        if let Ok(typed) = msg.downcast::<T::Message>() {
-            crate::Component::handle(self, *typed);
-        } else {
-            log::error!(
-                "ComponentNode::handle_dyn: ошибка типа сообщения — ожидался {}, получен неизвестный тип",
-                std::any::type_name::<T::Message>()
-            );
-        }
-    }
-
-    fn handle_back(&mut self) -> bool {
-        false
-    }
-
-    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
-        None
-    }
-
-    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,24 +119,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_component_node_blanket_impl() {
-        let comp = TestComponent::default();
-        let _node: Box<dyn ComponentNode> = Box::new(comp);
-    }
-
-    #[test]
-    fn test_handle_dyn_downcasts() {
-        let comp = TestComponent::default();
-        let mut node: Box<dyn ComponentNode> = Box::new(comp);
-
-        node.handle_dyn(Box::new("hello".to_string()));
-        node.handle_dyn(Box::new("world".to_string()));
-
-        // Достаём обратно, чтобы проверить состояние
-        let comp = node.as_any_mut().downcast_mut::<TestComponent>().unwrap();
-        assert_eq!(comp.handled, vec!["hello".to_string(), "world".to_string()]);
-    }
+    // Для тестов используем макрос ComponentNode
+    // В integration-тестах это проверяется через framework.
+    // Здесь — юнит-тесты базового поведения трейта.
 
     #[test]
     fn test_handle_back_default() {
@@ -185,6 +134,25 @@ mod tests {
             fn handle(&mut self, _msg: ()) {}
             fn state(&self) -> &Self::State {
                 &()
+            }
+        }
+        impl crate::ComponentNode for NoBack {
+            fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher) {
+                let typed = dispatch.wrap::<()>();
+                crate::Component::render(self, ui, &typed);
+            }
+            fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+                if let Ok(typed) = msg.downcast::<()>() {
+                    crate::Component::handle(self, *typed);
+                } else {
+                    log::error!("ComponentNode::handle_dyn: ошибка типа");
+                }
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
             }
         }
 

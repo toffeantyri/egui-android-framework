@@ -13,10 +13,13 @@ use egui_android_framework::ui::{
     theme::{Colors, Theme},
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation_host::RootMsg;
 
 /// Экран демонстрации виджетов.
+#[derive(ComponentNode)]
+#[component_message(RootMsg)]
 pub struct WidgetsScreen;
 
 impl WidgetsScreen {

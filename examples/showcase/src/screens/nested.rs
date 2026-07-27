@@ -18,7 +18,7 @@
 //! Это позволяет добавлять новые слои без изменения существующего кода.
 
 use egui_android_framework::core::{
-    Component, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+    Component as UiComponent, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
 };
 use egui_android_framework::navigation::{ChildStack, ComponentFactory};
 use egui_android_framework::runtime::{Dispatcher, DynDispatcher, SavedStack};
@@ -28,6 +28,7 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode as ComponentNodeDerive;
 
 use crate::navigation::{NestedLayer2Msg, NestedLayer2Route, NestedMsg, NestedRoute};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,8 @@ use serde::{Deserialize, Serialize};
 
 /// Подэкран слоя 1: A, B или C.
 /// Содержит только заголовок и кнопку «← Назад».
+#[derive(ComponentNodeDerive)]
+#[component_message(NestedMsg)]
 pub struct Layer1Sub {
     label: String,
 }
@@ -58,7 +61,7 @@ impl Layer1Sub {
 
 impl LifecycleObserver for Layer1Sub {}
 
-impl Component for Layer1Sub {
+impl UiComponent for Layer1Sub {
     type State = ();
     type Message = NestedMsg;
 
@@ -86,6 +89,8 @@ impl Component for Layer1Sub {
 
 /// Подэкран слоя 2: X или Y.
 /// Содержит только заголовок и кнопку «← Назад».
+#[derive(ComponentNodeDerive)]
+#[component_message(NestedLayer2Msg)]
 pub struct Layer2Sub {
     label: String,
 }
@@ -107,7 +112,7 @@ impl Layer2Sub {
 
 impl LifecycleObserver for Layer2Sub {}
 
-impl Component for Layer2Sub {
+impl UiComponent for Layer2Sub {
     type State = ();
     type Message = NestedLayer2Msg;
 
@@ -215,7 +220,7 @@ impl PersistentState for NestedScreen {
     }
 }
 
-impl ComponentNode for NestedScreen {
+impl ::egui_android_framework::core::ComponentNode for NestedScreen {
     fn render(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
         // Если есть активный подэкран — показываем только его
         if let Some(active) = self.stack_layer2.active() {

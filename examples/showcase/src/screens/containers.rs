@@ -9,10 +9,13 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation_host::RootMsg;
 
 /// Экран демонстрации контейнеров.
+#[derive(ComponentNode)]
+#[component_message(RootMsg)]
 pub struct ContainersScreen;
 
 impl ContainersScreen {

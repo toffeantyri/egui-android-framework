@@ -39,16 +39,25 @@
 //! }
 //! ```
 //!
-//! # Рекурсивное сохранение
+//! # Использование с макросом
 //!
-//! Компонент может сохранять вложенные `ChildStack`:
+//! Вместо ручной реализации `PersistentState` используйте
+//! `#[derive(Component, ComponentNode)]` с `#[persistent_fields(...)]`:
 //!
 //! ```ignore
-//! impl PersistentState for NestedScreen {
-//!     type State = NestedSavedState;  // содержит SavedStack<NestedRoute>
-//!     // ...
+//! use egui_android_macros::{Component, ComponentNode};
+//!
+//! #[derive(Component, ComponentNode)]
+//! #[persistent_fields(counter)]
+//! struct MyScreen {
+//!     counter: i32,
+//!     expanded: bool,  // не сохраняется
 //! }
 //! ```
+//!
+//! Макрос `ComponentNode` генерирует конкретный impl `ComponentNode`
+//! со `save_state`/`restore_state` через PersistentState, полностью устраняя
+//! необходимость в обёртке.
 
 use crate::{Component, ComponentNode, UiWrapper};
 use egui_android_runtime::DynDispatcher;
@@ -97,84 +106,5 @@ pub trait PersistentState {
                 self.restore(saved);
             }
         }
-    }
-}
-
-/// Структурная обёртка, реализующая `ComponentNode` через `Component` + `PersistentState`.
-///
-/// Используется для компонентов, которые хотят автоматическое
-/// сохранение/восстановление состояния через `PersistentState`.
-///
-/// В отличие от blanket-impl (который вернул бы `save_state = None`),
-/// эта обёртка явно реализует `ComponentNode` и делегирует
-/// `save_state`/`restore_state` в `PersistentState::save_to_boxed`.
-///
-/// # Почему не blanket-impl
-///
-/// Rust запрещает два blanket-impl для одного трейта на пересекающихся типах.
-/// Мы не можем сделать:
-/// ```ignore
-/// impl<T: Component> ComponentNode for T { /* save_state = None */ }
-/// impl<T: Component + PersistentState> ComponentNode for T { /* save_state = Some(...) */ } // ❌ конфликт
-/// ```
-/// `PersistentComponent<T>` — compositional solution, не конфликтующий с blanket-impl.
-///
-/// # Пример
-///
-/// ```ignore
-/// // StateScreen: Component + PersistentState (через #[derive(Component)])
-/// // В фабрике:
-/// Box::new(PersistentComponent::new(StateScreen::new()))
-/// ```
-pub struct PersistentComponent<T> {
-    pub inner: T,
-}
-
-impl<T> PersistentComponent<T> {
-    pub fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-impl<T: crate::LifecycleObserver> crate::LifecycleObserver for PersistentComponent<T> {}
-
-impl<T> ComponentNode for PersistentComponent<T>
-where
-    T: Component + PersistentState,
-    T::Message: 'static + Send,
-{
-    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher) {
-        let typed = dispatch.wrap::<T::Message>();
-        Component::render(&self.inner, ui, &typed);
-    }
-
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
-        if let Ok(typed) = msg.downcast::<T::Message>() {
-            Component::handle(&mut self.inner, *typed);
-        } else {
-            log::error!(
-                "PersistentComponent::handle_dyn: ожидался {}, получен неизвестный",
-                std::any::type_name::<T::Message>()
-            );
-        }
-    }
-
-    fn handle_back(&mut self) -> bool {
-        false
-    }
-
-    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
-        PersistentState::save_to_boxed(&self.inner)
-    }
-
-    fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
-        PersistentState::restore_from_boxed(&mut self.inner, state);
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
     }
 }

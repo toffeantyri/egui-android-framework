@@ -168,7 +168,7 @@ impl Application for ShowcaseApplication {
         //
         // Иначе пробрасываем активному компоненту через handle_dyn() —
         // компонент сам знает свой тип сообщения (например, NestedMsg).
-        // Blanket-impl ComponentNode сделает downcast и вызовет handle().
+        // #[derive(ComponentNode)] сделает downcast и вызовет handle().
         for msg in uidynmsg_rx.try_iter() {
             // Пробуем downcast в RootMsg — сообщения корневого стека.
             // Если не получилось — пробрасываем активному компоненту

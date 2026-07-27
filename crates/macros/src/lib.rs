@@ -6,23 +6,36 @@
 //!   для структуры-компонента. Сохраняемые поля указываются через
 //!   helper-атрибут `#[persistent_fields(...)]`.
 //!
-//! # Аналогия с Decompose
+//! - `#[derive(ComponentNode)]` — derive-макрос, генерирует `ComponentNode`
+//!   для структуры, реализующей `Component`. Тип сообщения указывается
+//!   через атрибут `#[component_message(MsgType)]`.
 //!
-//! В Decompose компонент регистрирует `stateKeeper<T>(init)` для сохранения состояния.
-//! У нас `#[derive(Component)]` с `#[persistent_fields(...)]` генерирует `PersistentState`.
+//!   Если структура также использует `#[derive(Component)]` с
+//!   `#[persistent_fields(...)]`, макрос генерирует `save_state`/`restore_state`
+//!   через PersistentState. Иначе — `save_state = None`.
 //!
-//! # Пример
+//! Заменяет blanket-impl из `component_node.rs`.
+//!
+//! # Примеры
 //!
 //! ```ignore
-//! use egui_android_macros::Component;
+//! use egui_android_macros::{Component, ComponentNode};
 //!
-//! #[derive(Component)]
-//! #[persistent_fields(counter, name)]
-//! struct CounterScreen {
-//!     counter: i32,
-//!     name: String,
-//!     expanded: bool,  // не сохраняется
-//! }
+//! // Компонент без сохранения состояния:
+//! #[derive(ComponentNode)]
+//! #[component_message(RootMsg)]
+//! struct HomeScreen;
+//!
+//! // Компонент с сохранением состояния:
+//! #[derive(Component, ComponentNode)]
+//! #[persistent_fields(counter)]
+//! #[component_message(StateScreenMsg)]
+//! struct StateScreen { counter: i32 }
+//! ```
+//!
+//! В фабрике обёртка не нужна:
+//! ```ignore
+//! Route::State => Box::new(StateScreen::new())
 //! ```
 
 use proc_macro::TokenStream;
@@ -44,6 +57,23 @@ fn parse_persistent_fields(attrs: &[syn::Attribute]) -> Vec<String> {
         }
     }
     vec![]
+}
+
+/// Извлекает тип сообщения из `#[component_message(MsgType)]`.
+fn parse_component_message(attrs: &[syn::Attribute]) -> Option<syn::Type> {
+    for attr in attrs {
+        if attr.path().is_ident("component_message") {
+            if let syn::Meta::List(list) = &attr.meta {
+                return list.parse_args::<syn::Type>().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Проверяет, есть ли `#[persistent_fields(...)]` на структуре.
+fn has_persistent_fields(attrs: &[syn::Attribute]) -> bool {
+    !parse_persistent_fields(attrs).is_empty()
 }
 
 /// Derive-макрос `Component` — генерирует `PersistentState` для структуры.
@@ -156,12 +186,106 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Derive-макрос `ComponentNode` — генерирует конкретный impl `ComponentNode`.
+///
+/// Заменяет blanket-impl из `component_node.rs`. Требует указания типа сообщения
+/// через `#[component_message(MsgType)]`.
+///
+/// Если структура также использует `#[derive(Component)]` с
+/// `#[persistent_fields(...)]`, макрос генерирует `save_state`/`restore_state`
+/// через PersistentState. Иначе — `save_state = None`.
+///
+/// # Пример
+///
+/// ```ignore
+/// #[derive(ComponentNode)]
+/// #[component_message(MyMsg)]
+/// struct MyScreen;
+///
+/// #[derive(Component, ComponentNode)]
+/// #[persistent_fields(counter)]
+/// #[component_message(MyMsg)]
+/// struct StatefulScreen { counter: i32 }
+/// ```
+#[proc_macro_derive(ComponentNode, attributes(persistent_fields, component_message))]
+pub fn derive_component_node(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let msg_type = match parse_component_message(&input.attrs) {
+        Some(t) => t,
+        None => {
+            return syn::Error::new_spanned(
+                &name,
+                "ComponentNode требует указания типа сообщения через #[component_message(MsgType)]",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Проверяем, есть ли persistent_fields на этой структуре
+    let has_persistent = has_persistent_fields(&input.attrs);
+
+    let save_restore = if has_persistent {
+        quote! {
+            fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+                ::egui_android_framework::core::PersistentState::save_to_boxed(self)
+            }
+
+            fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
+                ::egui_android_framework::core::PersistentState::restore_from_boxed(self, state);
+            }
+        }
+    } else {
+        quote! {
+            fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+                None
+            }
+
+            fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
+        }
+    };
+
+    let expanded = quote! {
+        impl ::egui_android_framework::core::ComponentNode for #name {
+            fn render(&self, ui: &mut ::egui_android_framework::core::UiWrapper, dispatch: &::egui_android_framework::runtime::DynDispatcher) {
+                let typed = dispatch.wrap::<#msg_type>();
+                ::egui_android_framework::core::Component::render(self, ui, &typed);
+            }
+
+            fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+                if let Ok(typed) = msg.downcast::<#msg_type>() {
+                    ::egui_android_framework::core::Component::handle(self, *typed);
+                } else {
+                    log::error!(
+                        "ComponentNode::handle_dyn: ошибка типа сообщения — ожидался {}, получен неизвестный тип",
+                        std::any::type_name::<#msg_type>()
+                    );
+                }
+            }
+
+            fn handle_back(&mut self) -> bool {
+                false
+            }
+
+            #save_restore
+
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
 /// Оставляет оригинальный `#[component]` для обратной совместимости.
-/// В будущем будет расширен до генерации `ComponentNode`.
 #[proc_macro_attribute]
 pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Пока заглушка — просто возвращает item без изменений
-    // В будущем будет генерировать ComponentNode для компонентов
-    // которые не могут использовать blanket-impl
     item
 }

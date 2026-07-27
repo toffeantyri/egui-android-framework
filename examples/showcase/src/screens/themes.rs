@@ -8,10 +8,13 @@ use egui_android_framework::ui::{
     theme::{MaterialTheme, Theme},
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation_host::RootMsg;
 
 /// Экран демонстрации тем.
+#[derive(ComponentNode)]
+#[component_message(RootMsg)]
 pub struct ThemesScreen {
     pub is_dark_mode: bool,
 }

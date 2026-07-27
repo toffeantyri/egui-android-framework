@@ -27,6 +27,6 @@ pub use component_context::*;
 pub use component_node::*;
 pub use constraints::Constraints;
 pub use lifecycle::*;
-pub use persistent_state::{PersistentComponent, PersistentState};
+pub use persistent_state::PersistentState;
 pub use ui_wrapper::UiWrapper;
 pub use widget::*;

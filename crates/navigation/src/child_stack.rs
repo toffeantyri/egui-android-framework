@@ -295,6 +295,25 @@ mod tests {
             &()
         }
     }
+    impl egui_android_core::ComponentNode for TestComp {
+        fn render(&self, ui: &mut UiWrapper, dispatch: &egui_android_runtime::DynDispatcher) {
+            let typed = dispatch.wrap::<()>();
+            Component::render(self, ui, &typed);
+        }
+        fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+            if let Ok(typed) = msg.downcast::<()>() {
+                Component::handle(self, *typed);
+            } else {
+                log::error!("ComponentNode::handle_dyn: ошибка типа");
+            }
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
 
     #[test]
     fn test_push_lifecycle() {

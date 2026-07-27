@@ -8,11 +8,14 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation::Route;
 use crate::navigation_host::RootMsg;
 
 /// Главный экран.
+#[derive(ComponentNode)]
+#[component_message(RootMsg)]
 pub struct HomeScreen;
 
 impl HomeScreen {

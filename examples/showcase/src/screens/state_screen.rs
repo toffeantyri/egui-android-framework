@@ -17,6 +17,7 @@ use egui_android_framework::ui::{
     widgets::{Button, Spacer, Text, Widget},
 };
 use egui_android_framework::Component;
+use egui_android_framework::ComponentNode;
 
 /// Сообщения экрана состояния.
 #[derive(Clone, Debug)]
@@ -26,8 +27,9 @@ pub enum StateScreenMsg {
     Reset,
 }
 
-#[derive(Component)]
+#[derive(Component, ComponentNode)]
 #[persistent_fields(counter)]
+#[component_message(StateScreenMsg)]
 pub struct StateScreen {
     counter: i32,
 }
