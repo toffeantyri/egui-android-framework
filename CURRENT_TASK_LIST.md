@@ -31,38 +31,15 @@
 Риск: средний — требует изменения публичного API
 ```
 
-## 4. Гибридные Constraints — два источника правды
+## 4. Гибридные Constraints — два источника правды [ВЫПОЛНЕНО]
 
 ```
-Проблема: Constraints хранятся в двух местах одновременно
+Проблема: Constraints хранились в двух местах одновременно
 
 Файл: crates/core/src/ui_wrapper.rs
 
-Суть:
-  pub enum UiWrapper<'a> {
-      Borrowed(&'a mut egui::Ui, Constraints),  // ← поле
-      Owned(Box<egui::Ui>, Constraints),        // ← поле
-  }
-
-  fn read_cx(ui: &egui::Ui) -> Constraints {
-      ui.ctx().data(|d| d.get_temp::<Constraints>(cx_key()).unwrap_or_default())
-  }
-  fn write_cx(ui: &egui::Ui, constraints: Constraints) {
-      ui.ctx().data_mut(|d| d.insert_temp(cx_key(), constraints));
-  }
-
-  Поле UiWrapper + Context::data() = два источника правды.
-  Глобальный ключ cx_key() — один на весь Context, не привязан к Ui.
-  При вложенных UiWrapper последний write_cx() перезаписывает предыдущий.
-  Зависимость от internals egui (IdTypeMap).
-
-Влияние:
-  - Рассинхронизация поля и Context::data() при прямом доступе через Deref
-  - Хрупкость при обновлении egui
-  - Невозможность параллельных веток с разными Constraints
-
-Затрагиваемые слои: core
-Риск: средний — влияет на все контейнеры и модификаторы
+Решение: Вариант A — только Context::data(), поле убрано.
+Единственный источник правды. См. Задача 4.
 ```
 
 ## 5. remember() мутирует состояние внутри рендера
@@ -91,182 +68,91 @@
 Риск: нулевой при документировании, высокий при изменении кода
 ```
 
-## 9. Blanket-impl конфликт решён обёрткой
+## 9. Blanket-impl конфликт [ВЫПОЛНЕНО]
 
 ```
-Проблема: PersistentComponent<T> — вынужденная обёртка из-за ограничений Rust
-
-Файл: crates/core/src/persistent_state.rs
-
-Суть:
-  // Rust запрещает два blanket-impl:
-  // impl<T: Component> ComponentNode for T { save_state = None }
-  // impl<T: Component + PersistentState> ComponentNode for T { save_state = Some }
-  //
-  // Решение: compositional wrapper
-  pub struct PersistentComponent<T> { pub inner: T }
-
-  Каждый persistent-компонент нужно вручную оборачивать в фабрике:
-  Route::State => Box::new(PersistentComponent::new(StateScreen::new())),
-
-  Без обёртки save_state() вернёт None — состояние не сохранится.
-  Ошибка невидима до рантайма.
-
-Влияние:
-  - Лишний boilerplate в каждой фабрике
-  - Легко забыть обёртку — тихая потеря состояния
-
-Затрагиваемые слои: core, macros
-Риск: средний — изменение публичного API
+Проблема: Rust запрещает два blanket-impl для одного трейта.
+Решение: blanket-impl удалён, заменён на #[derive(ComponentNode)].
+PersistentComponent<T> удалён. См. Задача 5.
 ```
 
 ---
 
 # Задачи (решения)
 
-
-## Задача 3: Документировать гибридную MVI + Local State модель
+## Задача 3: Документировать гибридную MVI + Local State модель [ВЫПОЛНЕНО]
 
 ```
 Задача: Задокументировать гибридную модель — MVI для бизнес-данных + локальное UI-состояние
 
-Что сделать:
-  1. В arch.md добавить раздел «Гибридная модель: MVI + Local State»:
+Что сделано:
+  1. В arch.md добавлен раздел «Гибридная модель: MVI + Local State» с диаграммой
+  2. В guide.md раздел «Упрощённая MVI-модель» → «Гибридная модель»
+  3. В arch.md обновлён контракт (UI не изменяет бизнес-State)
+  4. Добавлена таблица-аналогия с Jetpack Compose
 
-     ┌─────────────────────────────────────────────────┐
-     │                  Framework                       │
-     │                                                  │
-     │  ┌──────────────┐    ┌──────────────────────┐   │
-     │  │  MVI Layer   │    │   Local State Layer  │   │
-     │  │              │    │                      │   │
-     │  │  Intent      │    │  remember()          │   │
-     │  │  Message     │    │  on_click_with()     │   │
-     │  │  Reducer     │    │  Arc<RwLock<T>>      │   │
-     │  │  State       │    │                      │   │
-     │  │  store.      │    │  Не сохраняется      │   │
-     │  │  update()    │    │  при kill/restore    │   │
-     │  └──────┬───────┘    └──────────┬───────────┘   │
-     │         │                       │               │
-     │         ▼                       ▼               │
-     │  ┌─────────────────────────────────────────┐    │
-     │  │              UI (egui)                   │    │
-     │  │  Component::render(ui, dispatch)         │    │
-     │  └─────────────────────────────────────────┘    │
-     └─────────────────────────────────────────────────┘
-
-     Уровень 1 (MVI / бизнес-данные):
-       Intent → Message → Reducer → State → UI
-       store.update() — единственная точка мутации
-       Сохраняется при kill/restore через PersistentState
-       Примеры: счётчик, список товаров, auth-токен
-
-     Уровень 2 (Local / UI-состояние):
-       remember() / on_click_with()
-       Arc<RwLock<T>> в IdTypeMap
-       НЕ сохраняется при kill/restore
-       Примеры: expanded/collapsed, позиция скролла, текст ввода
-
-     Правило: если данные нужны после пересоздания Activity —
-     это бизнес-данные → MVI. Если нет — UI-состояние → remember().
-
-     Аналогия с Jetpack Compose:
-       MVI Layer = ViewModel + StateFlow
-       Local State = remember() / rememberSaveable()
-
-  2. В guide.md:
-     - Раздел «Упрощённая MVI-модель» → «Гибридная модель»
-     - Обновить раздел «Правила»:
-       «store.update() — единственная точка изменения состояния» →
-       «store.update() — единственная точка изменения БИЗНЕС-состояния.
-        Локальное UI-состояние (remember) — исключение.»
-
-  3. В arch.md обновить контракт:
-     «UI никогда самостоятельно не изменяет State» →
-     «UI никогда самостоятельно не изменяет бизнес-State.
-      Локальное UI-состояние (remember) — исключение.»
-
-Проверка:
-  Ревью документации, cargo check (код не меняется)
+Проверка: ревью документации
 
 Затрагиваемые слои: документация
-Оценка: 3 часа
 ```
 
-## Задача 4: Убрать гибридное хранение Constraints
+## Задача 4: Убрать гибридное хранение Constraints [ВЫПОЛНЕНО]
 
 ```
 Задача: Оставить один источник правды для Constraints
 
-Вариант A (рекомендуемый): только Context::data(), убрать поле
-  1. В UiWrapper убрать поле Constraints из обоих вариантов enum
-  2. constraints() → всегда read_cx(self.ui)
-  3. set_constraints() → всегда write_cx(self.ui, c)
-  4. new() → write_cx + UiWrapper без поля
-  5. new_unconstrained() → read_cx + UiWrapper без поля
+Что сделано (Вариант A):
+  1. Из UiWrapper убрано поле Constraints из Borrowed/Owned
+  2. constraints() читает из Context::data()
+  3. set_constraints() пишет в Context::data()
+  4. Удалён constraints_mut()
+  5. Обновлён Modifier::apply_recursive (убрано *ui.constraints())
+  6. Обновлены тесты layout_tests
 
-  Плюс: один источник, нет рассинхронизации
-  Минус: хэш-таблица на каждый доступ (некритично для 60 FPS)
-
-Вариант B: только поле, убрать Context::data()
-  1. Убрать read_cx/write_cx
-  2. Frame::show() → передавать Constraints через UiBuilder или параметр
-  3. Контейнеры явно передают Constraints детям
-
-  Плюс: быстрее
-  Минус: ломает совместимость с Frame::show(), ScrollArea::show()
-
-Что сделать (вариант A):
-  1. Изменить UiWrapper в crates/core/src/ui_wrapper.rs
-  2. Обновить все контейнеры (Column, Row, Stack, LazyColumn)
-  3. Обновить Modifier::apply_recursive
-  4. Обновить тесты в crates/ui/tests/
-
-Проверка:
-  cargo test --workspace
-  cargo test -p egui-android-ui  # layout_tests, widget_tests
+Проверка: cargo test --workspace
 
 Затрагиваемые слои: core, ui
-Оценка: 3 дня
 ```
 
-## Задача 5: Макрос #[derive(ComponentNode)] для устранения обёртки
+## Задача 5: Макрос #[derive(ComponentNode)] для устранения обёртки [ВЫПОЛНЕНО]
 
 ```
 Задача: Убрать необходимость вручную оборачивать в PersistentComponent
 
-Что сделать:
-  1. В crates/macros/src/lib.rs добавить proc-macro:
-     #[derive(Component, ComponentNode)]
-     #[persistent_fields(counter, label)]
-     struct MyScreen { ... }
+Что сделано:
+  1. Добавлен proc-macro #[derive(ComponentNode)] с #[component_message(MsgType)]
+  2. Blanket-impl ComponentNode for T: Component удалён из component_node.rs
+  3. PersistentComponent<T> удалён из persistent_state.rs и core/lib.rs
+  4. У всех экранов showcase и counter добавлен #[derive(ComponentNode)]
+  5. StateScreen — ручной impl (кастомный take_back_request)
+  6. BackCustomScreen — ручной impl (кастомный handle_back)
+  7. NestedScreen — ручной impl (кастомный handle_back, handle_dyn)
+  8. Из фабрики убрана обёртка PersistentComponent::new(...)
 
-     Макрос ComponentNode генерирует:
-     impl ComponentNode for MyScreen {
-         fn save_state(&self) -> Option<Box<dyn Any + Send>> {
-             PersistentState::save_to_boxed(self)
-         }
-         fn restore_state(&mut self, state: Box<dyn Any + Send>) {
-             PersistentState::restore_from_boxed(self, state);
-         }
-         // render, handle_dyn, as_any, as_any_mut — делегирование
-     }
-
-     Это конкретный impl (не blanket) — не конфликтует с blanket-impl.
-
-  2. В фабриках убрать обёртку:
-     Было: Box::new(PersistentComponent::new(StateScreen::new()))
-     Стало: Box::new(StateScreen::new())
-
-  3. PersistentComponent<T> оставить для обратной совместимости,
-     пометить #[deprecated]
-
-Проверка:
-  cargo test --workspace
-  cargo test -p egui-android-macros  # integration tests
-  cargo test -p egui-android-navigation  # child_stack_save_tests
+Проверка: cargo test --workspace
 
 Затрагиваемые слои: macros, core, navigation, examples
-Оценка: 3 дня
+```
+
+## Задача 6: Единая система обработки Back [ВЫПОЛНЕНО]
+
+```
+Задача: Объединить системный Back и кнопку "← Назад" в единый механизм
+
+Что сделано:
+  1. В ComponentNode добавлен метод take_back_request() (default = false)
+  2. В NavigationHost добавлен check_back_request() — проверяет флаг после handle_dyn
+  3. В app.rs после handle_dyn вызывается check_back_request()
+  4. StateScreen: ручной impl ComponentNode + back_requested + кнопка Back
+  5. BackCustomScreen: ручной impl ComponentNode с кастомным handle_back()
+  6. Обновлена документация в arch.md и guide.md
+
+Корнер-кейсы:
+  - handle_back() -> true: перехват без pop (NestedScreen, BackCustomScreen)
+  - take_back_request() -> true: кастомная логика + pop (StateScreen)
+  - handle_back() -> false + take_back_request() -> false: обычный pop или finish
+
+Затрагиваемые слои: core, showcase (navigation_host, app, screens)
 ```
 
 ## Задача 8: Enum-based dispatch для compile-time safety

@@ -156,33 +156,22 @@ pub trait PersistentState {
 }
 ```
 
-### PersistentComponent<T>
+### PersistentComponent<T> (удалён в 0.4.0)
 
 **Крейт**: `egui-android-core`
 
-Структурная обёртка, реализующая `ComponentNode` для любого `T: Component + PersistentState`.
-Используется в фабрике для автоматического save/restore:
+Ранее — структурная обёртка для `Component + PersistentState`.
+Удалён в пользу `#[derive(ComponentNode)]`, который генерирует
+конкретный impl `ComponentNode` без обёртки.
 
-```rust
-// В фабрике (ShowcaseFactory):
-Route::State => Box::new(PersistentComponent::new(StateScreen::new())),
-```
-
-`PersistentComponent<T>` делегирует `render()`, `handle_dyn()`, `as_any()` внутреннему `T`,
-и переопределяет `save_state()`/`restore_state()` через `PersistentState::save_to_boxed()`.
-
-**Почему не blanket-impl?** Rust запрещает два blanket-impl для одного трейта.
-`PersistentComponent<T>` — compositional solution: обёртка не конфликтует
-с blanket-impl `ComponentNode` для `Component`.
-
-### Макрос #[derive(Component)]
+### Макрос #[derive(Component, ComponentNode)]
 
 **Крейт**: `egui-android-macros`
 
-Генерирует `PersistentState` автоматически по `#[persistent_fields(...)]`:
+`#[derive(Component)]` генерирует `PersistentState` по `#[persistent_fields(...)]`:
 
 ```rust
-#[derive(Component)]
+#[derive(Component, ComponentNode)]
 #[persistent_fields(counter, label)]
 struct MyScreen {
     counter: i32,   // ← сохраняется
@@ -191,10 +180,16 @@ struct MyScreen {
 }
 ```
 
-Генерирует скрытую структуру `__MyScreenPersistentState` с `Serialize/Deserialize`
-и `impl PersistentState for MyScreen`.
+`#[derive(ComponentNode)]` генерирует конкретный impl `ComponentNode`
+(не blanket), который:
+- Если есть `#[persistent_fields(...)]` — `save_state`/`restore_state`
+  через `PersistentState::save_to_boxed()`
+- Если нет — `save_state = None`
 
-Обязательно обернуть в `PersistentComponent<T>` в фабрике для активации save/restore.
+**Важно:** В фабрике обёртка не нужна:
+```rust
+Route::State => Box::new(StateScreen::new())
+```
 
 ### SavedStack<C>
 
@@ -279,13 +274,12 @@ EguiActivity (Kotlin)
 
 `restore_from_saved()` пересоздаёт компоненты через фабрику (как в Decompose)
 и восстанавливает их состояние через `ComponentNode::restore_state()`.
-Для `PersistentComponent<T>` — через `PersistentState::restore_from_boxed()`.
 
 ### Правила использования
 
 1. Компонент реализует `Component + PersistentState` (через `#[derive(Component)]` или вручную)
-2. В фабрике компонент оборачивается в `PersistentComponent::new(...)`
-3. `ChildStack::save()` → вызывает `save_state()` на `PersistentComponent` → `PersistentState::save_to_boxed()` → `Vec<u8>`
+2. В фабрике компонент не требует обёртки — `#[derive(ComponentNode)]` генерирует `save_state`/`restore_state`
+3. `ChildStack::save()` → вызывает `save_state()` на компонент → `PersistentState::save_to_boxed()` → `Vec<u8>`
 4. `ChildStack::restore_from_saved()` → создаёт компонент через фабрику → вызывает `restore_state()`
 5. JNI-мост автоматически передаёт SavedStack<C> между процессами при kill/restore
 
@@ -422,6 +416,54 @@ Component может сохранять/восстанавливать своё 
 **Направление зависимости:** Component → StateStore (потребитель).
 Component использует Store как источник состояния (читает snapshot через `sync_from_store()`).
 Обратная зависимость (Store → Component) отсутствует.
+
+### ComponentNode
+
+**Крейт**: `egui-android-core`
+
+Object-safe трейт для хранения компонента в `ChildStack`. Реализуется через макрос `#[derive(ComponentNode)]`.
+
+Методы:
+- `render()` — отрисовка через DynDispatcher
+- `handle_dyn()` — type-erased обработка сообщений
+- `handle_back() -> bool` — кастомный перехват Back (Decompose-style)
+- `save_state()` / `restore_state()` — сохранение состояния
+- `take_back_request() -> bool` — флаг «сделать Back после handle»
+- `as_any()` / `as_any_mut()` — downcast для тестов
+
+### Обработка Back (единая система)
+
+Две точки входа — единая цепочка обработки:
+
+```
+Точка входа A: Системный Back (Android)
+  Android AKEYCODE_BACK
+    → input_processing::process_back_pressed()
+      → app.on_back_pressed()
+        → NavigationHost::on_back()
+          → ChildStack::on_back()
+
+Точка входа B: Кнопка "← Назад" в UI
+  dispatch(RootMsg::Back | StateScreenMsg::Back)
+    → DynDispatcher
+      → в app.rs::frame():
+        → downcast<RootMsg>? → handle_msg(RootMsg::Back) → on_back()
+        → downcast не RootMsg? → handle_dyn() → handle()
+          → если компонент выставил back_requested → take_back_request() → on_back()
+
+ChildStack::on_back():
+  1. active.handle_back()       — кастомный перехват (NestedScreen, BackCustomScreen)
+  2. active.take_back_request() — флаг "сделать что-то + pop" (StateScreen)
+  3. pop()                      — если стек > 1
+  4. finish_requested = true     — если стек = 1 (Home)
+```
+
+**Правила:**
+- Системный Back и кнопка "← Назад" в UI проходят одну цепочку
+- Компонент с `handle_back() -> true` перехватывает Back, pop не делается
+- Компонент выставляет `back_requested = true` в `handle()`, фреймворк делает pop
+- Для кастомной логики без pop используется `handle_back()`
+- Для кастомной логики + pop используется `take_back_request()`
 
 ---
 

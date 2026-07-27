@@ -170,18 +170,22 @@ Message = и событие, и семантика
 ### `ComponentNode` — `egui-android-core`
 - Object-safe трейт для хранения разнотипных компонентов в `Box<dyn ComponentNode>`.
 - Аналог `Component<*, *>` из Decompose (type erasure).
+- Реализуется через `#[derive(ComponentNode)]` с атрибутом `#[component_message(MsgType)]`.
 - `render(ui: &mut UiWrapper, dispatch: &DynDispatcher)` — type-erased рендер.
 - `handle_dyn(msg: Box<dyn Any + Send>)` — type-erased handle (downcast внутри).
-  При ошибке downcast логирует ожидаемый тип (начиная с 0.4.0).
+  При ошибке downcast логирует ожидаемый тип.
 - `handle_back() -> bool` — встроенная поддержка BackPressed (как в Decompose).
-- `save_state() -> Option<Box<dyn Any + Send>>` — сохранить состояние компонента
-  для восстановления после пересоздания (по умолч. None).
-  Компонент может переопределить напрямую (blanket-impl больше не затирает).
+  Если вернул `true` — Back перехвачен, pop не делается.
+- `save_state() -> Option<Box<dyn Any + Send>>` — сохранить состояние компонента.
+  Если есть `#[persistent_fields(...)]` — генерируется через PersistentState.
+  Иначе — `None`.
 - `restore_state(Box<dyn Any + Send>)` — восстановить ранее сохранённое состояние.
+- `take_back_request() -> bool` — запрос навигации назад после `handle()`.
+  По умолчанию — `false`. Компонент выставляет флаг в `handle()`:
+  `self.back_requested = true`. Фреймворк проверяет после `handle_dyn`.
 - `as_any() / as_any_mut()` — downcast для тестирования и доступа к конкретному типу.
-- Blanket-impl: любой `Component<Message: 'static + Send>` автоматически становится `ComponentNode`.
-  **Важно:** blanket-impl НЕ переопределяет `save_state()`/`restore_state()` —
-  они наследуются из `ComponentNode` с дефолтной реализацией (None/пусто).
+- `#[derive(ComponentNode)]` генерирует конкретный impl (не blanket).
+  Для кастомной логики (handle_back, take_back_request) — ручной impl.
 
 ### `StateStore<T>` — `egui-android-runtime`
 - Реактивное состояние на `tokio::sync::watch`.
@@ -299,17 +303,13 @@ Blanket-impl НЕ переопределяет их — компонент мо�
 - `type State: Serialize + DeserializeOwned + Send + 'static`.
 - `save_to_boxed()/restore_from_boxed()` — хелперы с bincode.
 
-### `PersistentComponent<T>` — `egui-android-core`
-- Структурная обёртка для `Component + PersistentState`.
-- Реализует `ComponentNode`, делегирует `render`/`handle_dyn`,
-  и переопределяет `save_state`/`restore_state` через `PersistentState`.
-- Используется в фабрике: `Box::new(PersistentComponent::new(MyScreen::new()))`.
-- Решение конфликта blanket-impl: не blanket, а композиция.
-
-### `#[derive(Component)]` — `egui-android-macros`
-- Генерирует `PersistentState` по `#[persistent_fields(f1, f2)]`.
+### `#[derive(Component, ComponentNode)]` — `egui-android-macros`
+- `#[derive(Component)]` генерирует `PersistentState` по `#[persistent_fields(f1, f2)]`.
+- `#[derive(ComponentNode)]` генерирует `ComponentNode` с `save_state`/`restore_state`
+  через PersistentState (если есть persistent_fields) или `None` (если нет).
 - Поля без persistent_fields = UI-состояние, не сохраняются.
-- **Важно:** компонент нужно обернуть в `PersistentComponent<T>` в фабрике.
+- **Важно:** компонент должен использовать `#[derive(ComponentNode)]` (не blanket).
+  Для кастомной логики (handle_back, take_back_request) — ручной impl ComponentNode.
 
 ### `SavedStack<C>` — `egui-android-runtime`
 - `ChildStack::save() -> SavedStack<C>`, `restore_from_saved()`.
@@ -473,103 +473,88 @@ if app_instance.request_destroy() {
 
 BackPressed обрабатывается по архитектуре Decompose: иерархический перехват с fallback на `pop()`.
 
-### ВАЖНО: Безопасность указателей
-
-`BackDispatcher` хранит callback'и, которые **переживают** зарегистрировавший их компонент.
-Если компонент уничтожается (pop из корневого ChildStack) — callback в BackDispatcher становится
-висячим указателем → **SIGSEGV**.
-
-**Правило:** Не регистрировать callback в BackDispatcher, если он ссылается на состояние компонента,
-которое может быть уничтожено раньше, чем callback будет вызван.
-
-Для экранов с кастомной обработкой Back используется **прямой вызов `handle_back()`**
-из `RootComponent::on_back()`, без BackDispatcher.
-
 ### Цепочка обработки
 
+Системный Back (Android AKEYCODE_BACK) и кнопка "← Назад" в UI проходят единую цепочку:
+
 ```
-Android Back (AKEYCODE_BACK)
-  ↓
-platform-android/input.rs (перехват, InputStatus::Handled)
-  ↓
-run.rs: app_instance.on_back_pressed()
-  ↓
-Application::on_back_pressed()
-  ↓
-RootComponent::on_back()
-  ├── BackCustomScreen::handle_back()?
-  │   └── true → кастомная логика (переключение цвета)
-  ├── NestedScreen::handle_back()?
-  │   ├── вложенный ChildStack не пуст → pop() → true
-  │   └── вложенный ChildStack пуст → false
-  └── ComponentContext::on_back()
-      ├── BackDispatcher::handle()
-      │   └── зарегистрированные callback'и (диалоги, BottomSheet)
-      ├── back_fallback
-      │   ├── стек > 1 → pop() из Root ChildStack
-      │   └── стек = 1 (Home) → false (завершение приложения)
-      └── RootComponent проверяет: если стек не изменился и Back не обработан → завершение
+Точка входа A: Системный Back
+  process_back_pressed()
+    → app.on_back_pressed()
+      → NavigationHost::on_back()
+        → ChildStack::on_back()
+
+Точка входа B: Кнопка "← Назад" (RootMsg/StateScreenMsg)
+  dispatch(...) → DynDispatcher → msg.downcast::<RootMsg>()?
+    ├── Ok => handle_msg(RootMsg::Back) → on_back() → ChildStack::on_back()
+    └── Err => handle_dyn() → handle()
+        → если компонент выставил back_requested
+          → take_back_request() → on_back() → ChildStack::on_back()
+
+ChildStack::on_back():
+  1. active.handle_back()       — кастомный перехват (NestedScreen, BackCustomScreen)
+  2. active.take_back_request() — флаг "сделать что-то + pop" (StateScreen)
+  3. pop()                      — если стек > 1
+  4. finish_requested = true     — если стек = 1 (Home)
 ```
 
-### Как добавить экран с кастомной обработкой Back
+### Как добавить кастомную обработку Back
 
-1. В структуре экрана реализовать `handle_back(&mut self) -> bool`
-2. Экран должен реализовать `ComponentNode` (напрямую или через blanket-impl от `Component`)
-3. В `RootComponent::on_back()` проверить активный компонент через `as_any_mut().downcast_mut::<MyScreen>()`
+**Вариант A: перехват Back без pop (handle_back)**
 
-Пример — `BackCustomScreen` (переключает цвет фона при Back вместо pop):
+Компонент переопределяет `handle_back()` в ручном `impl ComponentNode`.
+Используется, когда Back не должен делать pop, а должен выполнить кастомное действие.
 
 ```rust,ignore
-pub struct BackCustomScreen {
-    bg: BgColor,
-}
-
-impl BackCustomScreen {
-    pub fn handle_back(&mut self) -> bool {
+impl ComponentNode for BackCustomScreen {
+    fn handle_back(&mut self) -> bool {
         match self.bg {
             BgColor::Blue => { self.bg = BgColor::Green; true }
-            BgColor::Green => false, // второй Back уходит на Root
+            BgColor::Green => false, // второй раз — pop
         }
     }
 }
-
-// BackCustomScreen реализует Component — ComponentNode через blanket-impl
-impl Component for BackCustomScreen { ... }
 ```
 
-В `RootComponent::on_back()`:
+**Вариант B: кастомная логика + pop (take_back_request)**
+
+Компонент выставляет флаг `back_requested = true` в `handle()`.
+Фреймворк после `handle_dyn` проверяет флаг и делает pop.
+
 ```rust,ignore
-if let Some(active) = self.stack.active_mut() {
-    if let Some(custom) = active.as_any_mut().downcast_mut::<BackCustomScreen>() {
-        if custom.handle_back() {
-            return;
+struct StateScreen {
+    counter: i32,
+    back_requested: bool,
+}
+
+impl ComponentNode for StateScreen {
+    fn take_back_request(&mut self) -> bool {
+        std::mem::replace(&mut self.back_requested, false)
+    }
+}
+
+impl Component for StateScreen {
+    type Message = StateScreenMsg;
+
+    fn handle(&mut self, msg: Self::Message) {
+        match msg {
+            StateScreenMsg::Back => {
+                self.counter = 0;            // кастомное действие
+                self.back_requested = true;  // сигнал фреймворку: сделать pop
+            }
         }
     }
 }
 ```
-
-`ScreenComponent` (enum-агрегатор) больше не существует — удалён в пользу Decompose-like архитектуры.
 
 ### Правила
 
-- **Platform не знает про Navigation** — только выставляет флаг `back_pressed`.
-- **Application не принимает решений** — только делегирует `RootComponent::on_back()`.
-- **RootComponent решает** — проверить активный компонент, pop или завершение.
-- **Активный компонент может перехватить Back** через `handle_back()`, вернув `true`.
-- **Home — последний экран** — Back на Home = завершение приложения (`destroy_requested = true`).
-- **UI-кнопка «← Назад»** — диспатчит `RootMsg::Back`, который вызывает `on_back()` (тот же путь).
-- **Не каналы** — ChildStack больше не содержит `back_handlers: Vec<Vec<mpsc::Sender<()>>>`.
-  Только прямой вызов `handle_back()`.
-
-### `BackDispatcher`
-
-Для будущих сценариев (диалоги, BottomSheet) используется `BackDispatcher`:
-- Хранит обработчики с приоритетами.
-- `register(BackCallback { priority, handler })` — компонент регистрирует перехват.
-- `handle()` — вызывает от высокого приоритета к низкому.
-- Первый, кто вернул `true`, перехватывает Back.
-- **Внимание:** Не хранить в callback'ах ссылки на компоненты, которые могут быть уничтожены
-  раньше вызова callback'а. Для экранов использовать `handle_back()` напрямую.
+- **Единая цепочка** — системный Back и UI-кнопка идут через `ChildStack::on_back()`
+- **Перехват** — `handle_back() -> true` отменяет pop
+- **Сигнал** — `take_back_request() -> true` после handle запускает pop
+- **Не пересекаются** — `handle_back()` и `take_back_request()` — два независимых механизма
+- **Home** — Back на Home = `finish_requested = true` (завершение приложения)
+- **No downcast** — `ChildStack::on_back()` не делает downcast на конкретный тип экрана
 
 ## Сохранение состояния навигации (Decompose-style)
 
@@ -588,8 +573,8 @@ if let Some(active) = self.stack.active_mut() {
           │
           Слой 3: ComponentNode::save_state/restore_state
           │
-          ├── PersistentComponent<T> (через PersistentState::save_to_boxed)
-          └── NestedScreen (ручной impl ComponentNode)
+          ├── StateScreen (#[derive(Component, ComponentNode)] с persistent_fields)
+          └── NestedScreen (ручной impl ComponentNode с PersistentState)
 ```
 
 ### Поток при повороте экрана (config change) и kill/restore (JNI-мост)
@@ -618,10 +603,11 @@ struct MyScreen {
 }
 ```
 
-2. В фабрике обернуть в `PersistentComponent`:
+2. В фабрике экран используется без обёртки — `#[derive(ComponentNode)]`
+   генерирует `save_state`/`restore_state` автоматически:
 
 ```rust
-Route::MyScreen => Box::new(PersistentComponent::new(MyScreen::new())),
+Route::MyScreen => Box::new(MyScreen::new()),
 ```
 
 3. Для экранов с вложенными стеками (NestedScreen) — impl ComponentNode напрямую:
@@ -672,7 +658,7 @@ Application по-прежнему владеет логикой save/restore.
 ### Что не сохраняется
 - `remember()` — UI-состояние, сбрасывается при пересоздании
 - Поля без `#[persistent_fields(...)]` в `#[derive(Component)]`
-- Обычные компоненты без `PersistentComponent<T>` (HomeScreen, WidgetsScreen etc.)
+- Обычные компоненты без `#[derive(ComponentNode)]` с `#[persistent_fields(...)]` (HomeScreen, WidgetsScreen etc.)
 
 ### Платформа не хранит состояние
 
