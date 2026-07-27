@@ -1,6 +1,10 @@
 //! Wrapper over `egui::Ui` with Constraints support.
 //!
 //! Implements `Deref<Target = egui::Ui>` for compatibility with existing code.
+//!
+//! Constraints хранятся в `egui::Context::data()` (единственный источник правды),
+//! а не в поле UiWrapper. Это гарантирует, что constraints переживают
+//! `Frame::show()` и `ScrollArea::show()`, которые создают новый `egui::Ui`.
 
 use std::ops::{Deref, DerefMut};
 
@@ -25,20 +29,22 @@ fn write_cx(ui: &egui::Ui, constraints: Constraints) {
 /// Two variants:
 /// - `Borrowed` — wraps `&mut egui::Ui`
 /// - `Owned` — wraps an owned `egui::Ui` (from `new_child`)
+///
+/// Constraints хранятся только в `egui::Context::data()`, не в поле.
 pub enum UiWrapper<'a> {
     /// Wraps a mutable reference to `egui::Ui`.
-    Borrowed(&'a mut egui::Ui, Constraints),
+    Borrowed(&'a mut egui::Ui),
     /// Wraps an owned `egui::Ui` (boxed to reduce enum size).
-    Owned(Box<egui::Ui>, Constraints),
+    Owned(Box<egui::Ui>),
 }
 
 impl<'a> UiWrapper<'a> {
     /// Create wrapper from a mutable reference with constraints.
     ///
-    /// Записывает constraints в поле и в Context (переживает обёртки).
+    /// Записывает constraints в Context (переживает обёртки).
     pub fn new(ui: &'a mut egui::Ui, constraints: Constraints) -> Self {
         write_cx(ui, constraints);
-        Self::Borrowed(ui, constraints)
+        Self::Borrowed(ui)
     }
 
     /// Create wrapper from a mutable reference.
@@ -46,37 +52,22 @@ impl<'a> UiWrapper<'a> {
     /// Читает constraints из Context (если были установлены родителем).
     /// Если нет — использует unconstrained.
     pub fn new_unconstrained(ui: &'a mut egui::Ui) -> Self {
-        let constraints = read_cx(ui);
-        Self::Borrowed(ui, constraints)
+        Self::Borrowed(ui)
     }
 
-    /// Get current constraints.
-    pub fn constraints(&self) -> &Constraints {
+    /// Get current constraints from Context.
+    pub fn constraints(&self) -> Constraints {
         match self {
-            Self::Borrowed(_, c) => c,
-            Self::Owned(_, c) => c,
+            Self::Borrowed(ui) => read_cx(ui),
+            Self::Owned(ui) => read_cx(ui),
         }
     }
 
-    /// Get mutable reference to constraints.
-    pub fn constraints_mut(&mut self) -> &mut Constraints {
-        match self {
-            Self::Borrowed(_, c) => c,
-            Self::Owned(_, c) => c,
-        }
-    }
-
-    /// Set constraints (updates field and Context).
+    /// Set constraints (updates Context).
     pub fn set_constraints(&mut self, constraints: Constraints) {
         match self {
-            Self::Borrowed(ui, field) => {
-                *field = constraints;
-                write_cx(ui, *field);
-            }
-            Self::Owned(ui, field) => {
-                *field = constraints;
-                write_cx(ui, *field);
-            }
+            Self::Borrowed(ui) => write_cx(ui, constraints),
+            Self::Owned(ui) => write_cx(ui, constraints),
         }
     }
 
@@ -88,7 +79,7 @@ impl<'a> UiWrapper<'a> {
         let constraints = read_cx(ui);
         write_cx(ui, constraints);
         let child_ui = ui.new_child(builder);
-        UiWrapper::Owned(Box::new(child_ui), constraints)
+        UiWrapper::Owned(Box::new(child_ui))
     }
 
     /// Create a child `Ui` with the given constraints.
@@ -99,20 +90,20 @@ impl<'a> UiWrapper<'a> {
     ) -> UiWrapper<'_> {
         write_cx(ui, constraints);
         let child_ui = ui.new_child(builder);
-        UiWrapper::Owned(Box::new(child_ui), constraints)
+        UiWrapper::Owned(Box::new(child_ui))
     }
 
     fn ui_mut(&mut self) -> &mut egui::Ui {
         match self {
-            Self::Borrowed(ui, _) => ui,
-            Self::Owned(ui, _) => ui,
+            Self::Borrowed(ui) => ui,
+            Self::Owned(ui) => ui,
         }
     }
 
     fn ui_ref(&self) -> &egui::Ui {
         match self {
-            Self::Borrowed(ui, _) => ui,
-            Self::Owned(ui, _) => ui,
+            Self::Borrowed(ui) => ui,
+            Self::Owned(ui) => ui,
         }
     }
 

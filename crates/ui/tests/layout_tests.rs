@@ -1456,11 +1456,11 @@ fn test_constraints_inheritance_frame_show() {
     with_ui(|ui| {
         let constraints = Constraints::exact(150.0, 80.0);
         let mut wrapper = UiWrapper::new(ui, constraints);
-        let before = *wrapper.constraints();
+        let before = wrapper.constraints();
         let mut result = None::<Constraints>;
         let _ = egui::Frame::default().show(&mut wrapper, |ui| {
             let w = UiWrapper::new_unconstrained(ui);
-            result = Some(*w.constraints());
+            result = Some(w.constraints());
         });
         let after = result.expect("Frame::show не вызвал callback");
         // width должно быть унаследовано
