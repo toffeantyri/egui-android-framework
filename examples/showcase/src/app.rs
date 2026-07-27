@@ -182,6 +182,8 @@ impl Application for ShowcaseApplication {
                     log::debug!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
                     if let Some(active) = self.root.stack.active_mut() {
                         active.handle_dyn(msg);
+                        // После handle_dyn проверяем, запросил ли компонент Back
+                        self.root.check_back_request();
                     }
                 }
             }

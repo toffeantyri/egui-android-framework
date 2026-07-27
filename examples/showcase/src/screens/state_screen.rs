@@ -7,7 +7,9 @@
 //! Аналог Decompose: `stateKeeper` для данных, `remember` для UI.
 
 pub use egui_android_framework::core;
-use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{
+    Component as UiComponent, ComponentNode, LifecycleObserver, UiWrapper,
+};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -17,7 +19,6 @@ use egui_android_framework::ui::{
     widgets::{Button, Spacer, Text, Widget},
 };
 use egui_android_framework::Component;
-use egui_android_framework::ComponentNode;
 
 /// Сообщения экрана состояния.
 #[derive(Clone, Debug)]
@@ -25,22 +26,71 @@ pub enum StateScreenMsg {
     Increment,
     Decrement,
     Reset,
+    Back,
 }
 
-#[derive(Component, ComponentNode)]
+#[derive(Component)]
 #[persistent_fields(counter)]
-#[component_message(StateScreenMsg)]
 pub struct StateScreen {
     counter: i32,
+    /// Флаг: запрошена навигация назад после обработки сообщения.
+    /// Проверяется фреймворком через `ComponentNode::take_back_request()`.
+    back_requested: bool,
 }
 
 impl StateScreen {
     pub fn new() -> Self {
-        Self { counter: 0 }
+        Self {
+            counter: 0,
+            back_requested: false,
+        }
     }
 }
 
 impl LifecycleObserver for StateScreen {}
+
+impl ComponentNode for StateScreen {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &::egui_android_framework::runtime::DynDispatcher,
+    ) {
+        let typed = dispatch.wrap::<StateScreenMsg>();
+        UiComponent::render(self, ui, &typed);
+    }
+
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+        if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
+            UiComponent::handle(self, *typed);
+        } else {
+            log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
+        }
+    }
+
+    fn handle_back(&mut self) -> bool {
+        false
+    }
+
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        ::egui_android_framework::core::PersistentState::save_to_boxed(self)
+    }
+
+    fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
+        ::egui_android_framework::core::PersistentState::restore_from_boxed(self, state);
+    }
+
+    fn take_back_request(&mut self) -> bool {
+        std::mem::replace(&mut self.back_requested, false)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
 
 impl UiComponent for StateScreen {
     type State = ();
@@ -124,8 +174,8 @@ impl UiComponent for StateScreen {
                     .render(ui, dispatch);
 
                 Spacer::new(16.0).render(ui, dispatch);
-                Button::new("← Назад")
-                    .on_click(StateScreenMsg::Reset)
+                Button::new("← Назад (сброс + назад)")
+                    .on_click(StateScreenMsg::Back)
                     .theme_colors(c.primary)
                     .text_color(c.on_primary)
                     .modifier(Modifier::new().fill_max_width().padding(8.0))
@@ -138,6 +188,11 @@ impl UiComponent for StateScreen {
             StateScreenMsg::Increment => self.counter += 1,
             StateScreenMsg::Decrement => self.counter -= 1,
             StateScreenMsg::Reset => self.counter = 0,
+            StateScreenMsg::Back => {
+                // Кастомная логика: сброс + навигация назад
+                self.counter = 0;
+                self.back_requested = true;
+            }
         }
     }
 

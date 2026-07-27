@@ -63,6 +63,36 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
         false
     }
 
+    /// Запросить навигацию назад после обработки сообщения.
+    ///
+    /// Вызывается фреймворком после `handle_dyn()`.
+    /// Если компонент в `handle()` решил, что нужно сделать pop,
+    /// он выставляет флаг `back_requested` и возвращает `true`.
+    ///
+    /// По умолчанию — `false` (навигация не запрошена).
+    ///
+    /// # Пример
+    ///
+    /// ```ignore
+    /// fn handle(&mut self, msg: Self::Message) {
+    ///     match msg {
+    ///         Msg::Back => {
+    ///             // кастомная логика
+    ///             self.some_field = 0;
+    ///             self.back_requested = true;
+    ///         }
+    ///         // ...
+    ///     }
+    /// }
+    ///
+    /// fn take_back_request(&mut self) -> bool {
+    ///     std::mem::replace(&mut self.back_requested, false)
+    /// }
+    /// ```
+    fn take_back_request(&mut self) -> bool {
+        false
+    }
+
     /// Сохранить состояние компонента для восстановления после пересоздания.
     ///
     /// По умолчанию — `None` (состояние не сохраняется).

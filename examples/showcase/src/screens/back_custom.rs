@@ -4,7 +4,9 @@
 //! цвет фона между синим и зелёным. Back не делает pop — RootComponent
 //! возвращается на Home только при повторном Back (через back_fallback).
 
-use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{
+    Component as UiComponent, ComponentNode, LifecycleObserver, UiWrapper,
+};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -12,7 +14,6 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
-use egui_android_framework::ComponentNode;
 
 use crate::navigation_host::RootMsg;
 
@@ -23,8 +24,6 @@ enum BgColor {
     Green,
 }
 
-#[derive(ComponentNode)]
-#[component_message(RootMsg)]
 pub struct BackCustomScreen {
     bg: BgColor,
 }
@@ -33,9 +32,31 @@ impl BackCustomScreen {
     pub fn new() -> Self {
         Self { bg: BgColor::Blue }
     }
+}
 
-    /// Обработать BackPressed — переключает цвет фона.
-    pub fn handle_back(&mut self) -> bool {
+impl LifecycleObserver for BackCustomScreen {}
+
+impl ComponentNode for BackCustomScreen {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &::egui_android_framework::runtime::DynDispatcher,
+    ) {
+        let typed = dispatch.wrap::<RootMsg>();
+        UiComponent::render(self, ui, &typed);
+    }
+
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+        if let Ok(typed) = msg.downcast::<RootMsg>() {
+            UiComponent::handle(self, *typed);
+        } else {
+            log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
+        }
+    }
+
+    /// Кастомная обработка Back: переключает цвет фона.
+    /// Первый вызов — переключение (true), второй — pop (false).
+    fn handle_back(&mut self) -> bool {
         match self.bg {
             BgColor::Blue => {
                 self.bg = BgColor::Green;
@@ -44,9 +65,22 @@ impl BackCustomScreen {
             BgColor::Green => false,
         }
     }
-}
 
-impl LifecycleObserver for BackCustomScreen {}
+    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
+        None
+    }
+    fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
+    fn take_back_request(&mut self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
 
 impl UiComponent for BackCustomScreen {
     type State = ();

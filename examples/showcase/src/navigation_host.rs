@@ -82,6 +82,18 @@ impl NavigationHost {
         }
     }
 
+    /// Проверить, запросил ли активный компонент навигацию назад.
+    ///
+    /// Вызывается после `handle_dyn()`.
+    /// Если компонент выставил `back_requested` — делаем pop.
+    pub fn check_back_request(&mut self) {
+        if let Some(active) = self.stack.active_mut() {
+            if active.take_back_request() {
+                self.on_back();
+            }
+        }
+    }
+
     /// Обработать сообщение от UI.
     pub fn handle_msg(&mut self, msg: RootMsg) {
         match msg {
