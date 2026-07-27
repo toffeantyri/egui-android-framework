@@ -1,858 +1,494 @@
---- Задача ---
-Архитектура Decompose и наше соответствие
+# Проблемы
 
-### Ключевые сущности Decompose → Наш аналог
-
-| Decompose | Наш аналог | Статус |
-|---|---|---|
-| `Parcelable` конфигурация | `C: Clone + Debug + Serialize + Deserialize` | Нужно добавить serde |
-| `ChildStack<C, T>` | `ChildStack<C>` (хранит `Box<dyn ComponentNode>`) | ✅ Есть |
-| `ComponentContext` | `ComponentContext<NavEvent, DataCmd, State>` | ✅ Есть |
-| `StateKeeper` (регистрируется в контексте) | `ComponentNode::save_state()` + `restore_state()` | ✅ Есть |
-| `StateKeeperDispatcher` | `ChildStack::save()` / `restore()` — рекурсивный обход | ✅ Есть, но не подключён |
-| `SavedState` (Parcelable контейнер) | `Vec<u8>` через bincode | Нужно создать |
-| `GenericComponentContext` (корень) | `NavigationHost` (корневой компонент) | ✅ Есть |
-| `onSaveInstanceState(Bundle)` | `Application::on_save_state() -> SavedState` | Нужно реализовать |
-| `onCreate(Bundle?)` | `Application::on_restore_state(SavedState)` | Нужно реализовать |
-| `RootComponent` | `NavigationHost` (не реализует Component) | ✅ Есть |
-
----
-
-### Как работает Decompose при Save
+## 1. ViewFn мёртв
 
 ```
-Activity.onSaveInstanceState(outState)
-  ↓
-ComponentContext.saveState(outState)
-  ↓
-StateKeeperDispatcher.save()
-  │
-  ├── Для Child Stack:
-  │   1. Сохранить конфигурации всех элементов стека
-  │   2. Для каждого элемента → Component.saveState()
-  │      └── Внутри компонента: все зарегистрированные StateKeeper-ы
-  │         сохраняют свои данные
-  │
-  └── Все данные → SavedState (Parcelable) → outState
+Проблема: ViewFn мёртв
+
+Файл: crates/core/src/view.rs
+
+Суть:
+  pub type ViewFn<S, M> = fn(state: &S, ui: &mut egui::Ui, dispatch: &Dispatcher<M>);
+
+  Тип объявлен, но нигде не используется.
+  Component::render() принимает &mut UiWrapper, а не ViewFn.
+  Сигнатура ViewFn принимает &mut egui::Ui — несовместима с текущим API.
+
+Влияние:
+  - Путаница для новых разработчиков (guide.md ссылается на ViewFn)
+  - Мёртвый код в публичном API крейта core
+
+Затрагиваемые слои: core
+Риск: нулевой — нигде не используется
 ```
 
-### Как работает Decompose при Restore
+## 2. Type erasure — runtime ошибка вместо compile-time
 
 ```
-Activity.onCreate(savedInstanceState)
-  ↓
-savedInstanceState?.getParcelable<SavedState>()
-  ↓
-ComponentContext.restoreState(savedState)
-  ↓
-StateKeeperDispatcher.restore(data)
-  │
-  ├── Для Child Stack:
-  │   1. Извлечь сохранённые конфигурации
-  │   2. Пересоздать компоненты заново (factory.create(config))
-  │   3. Для каждого → Component.restoreState()
-  │      └── Внутри: StateKeeper-ы восстанавливают данные
+Проблема: Type erasure через Box<dyn Any> теряет типобезопасность
+
+Файл: crates/core/src/component_node.rs
+
+Суть:
+  fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+      if let Ok(typed) = msg.downcast::<T::Message>() {
+          crate::Component::handle(self, *typed);
+      } else {
+          log::error!("ожидался {}, получен неизвестный", ...);
+      }
+  }
+
+  Неправильный тип сообщения = тихий log::error в рантайме,
+  а не ошибка компиляции.
+
+  DynDispatcher (crates/runtime/src/dyn_dispatcher.rs) упаковывает
+  M в Box<dyn Any + Send> — вся типобезопасность теряется на
+  границе View → Component.
+
+Влияние:
+  - Ошибки маршрутизации сообщений обнаруживаются только в рантайме
+  - Нет compile-time гарантии, что View шлёт правильный тип
+
+Затрагиваемые слои: core, runtime
+Риск: средний — требует изменения публичного API
 ```
 
-**Критически важно:** при restore компоненты **пересоздаются**, не "чинятся". Конфигурация — единственный источник истины для структуры стека.
-
----
-
-### Три слоя сохранения (как в Decompose)
+## 4. Гибридные Constraints — два источника правды
 
 ```
-Слой 1: Android Bundle
-  └── Parcelable byte array → Vec<u8>
-      │
-      Слой 2: StateKeeperDispatcher (ChildStack::save/restore)
-      │
-      ├── Стек: список конфигураций
-      └── Состояния компонентов: Vec<u8> для каждого
-          │
-          Слой 3: Компоненты (ComponentNode::save_state/restore_state)
-          │
-          ├── Примитивные данные (счётчики, текст)
-          ├── Вложенные ChildStack (рекурсивно!)
-          └── Any кастомные данные
+Проблема: Constraints хранятся в двух местах одновременно
+
+Файл: crates/core/src/ui_wrapper.rs
+
+Суть:
+  pub enum UiWrapper<'a> {
+      Borrowed(&'a mut egui::Ui, Constraints),  // ← поле
+      Owned(Box<egui::Ui>, Constraints),        // ← поле
+  }
+
+  fn read_cx(ui: &egui::Ui) -> Constraints {
+      ui.ctx().data(|d| d.get_temp::<Constraints>(cx_key()).unwrap_or_default())
+  }
+  fn write_cx(ui: &egui::Ui, constraints: Constraints) {
+      ui.ctx().data_mut(|d| d.insert_temp(cx_key(), constraints));
+  }
+
+  Поле UiWrapper + Context::data() = два источника правды.
+  Глобальный ключ cx_key() — один на весь Context, не привязан к Ui.
+  При вложенных UiWrapper последний write_cx() перезаписывает предыдущий.
+  Зависимость от internals egui (IdTypeMap).
+
+Влияние:
+  - Рассинхронизация поля и Context::data() при прямом доступе через Deref
+  - Хрупкость при обновлении egui
+  - Невозможность параллельных веток с разными Constraints
+
+Затрагиваемые слои: core
+Риск: средний — влияет на все контейнеры и модификаторы
 ```
 
----
+## 5. remember() мутирует состояние внутри рендера
 
-## Задача: полная реализация
+```
+Проблема: remember() нарушает декларацию «store.update() — единственная точка мутации»
 
-### Что должно быть на выходе
+Файл: crates/ui/src/remember.rs
 
-1. **Поворот экрана:** пользователь на экране State (счётчик = 5) → поворот → счётчик всё ещё 5, экран тот же
-2. **Вложенная навигация:** пользователь на Nested → Экран B → поворот → Nested → Экран B
-3. **Kill/Restore процесса:** система убила процесс → перезапуск → открывается тот же стек с теми же данными
-4. **Произвольные данные:** любой компонент может сохранить любые `Serialize + Deserialize` данные
+Суть:
+  pub fn set(&self, new_value: T) {
+      *self.value.write().expect("...") = new_value.clone();
+      self.persist(&new_value);  // ← мутация ctx.data_mut внутри рендера
+  }
 
----
+  on_click_with() делает то же самое — вызывает closure в момент рендера.
 
-## Пошаговый план реализации
+  arch.md декларирует: «store.update() — единственная точка изменения состояния».
+  Но remember() и on_click_with() мутируют состояние напрямую.
 
-### Шаг 0. Добавить зависимости
+Влияние:
+  - Архитектурное противоречие между декларацией и реализацией
+  - Неочевидно для разработчика, какие данные где мутируются
 
-**Крейт: `egui-android-runtime`**
-- В `Cargo.toml` добавить `serde` с derive, `bincode`
-
-**Крейт: `egui-android-navigation`**
-- В `Cargo.toml` добавить `serde`, `bincode`
-
-**Крейт: `egui-android-core`**
-- В `Cargo.toml` добавить `serde`
-
----
-
-### Шаг 1. Тип `SavedState` в `egui-android-runtime`
-
-**Файл: `crates/runtime/src/saved_state.rs`** (новый)
-
-```rust
-/// Сохранённое состояние приложения.
-/// Это аналог `SavedState` из Decompose — контейнер Parcelable-данных.
-/// Сериализуется через bincode и сохраняется в Android Bundle как byte array.
-pub type SavedState = Option<Vec<u8>>;
+Затрагиваемые слои: ui, документация (arch.md)
+Риск: нулевой при документировании, высокий при изменении кода
 ```
 
-**Файл: `crates/runtime/src/lib.rs`** — добавить модуль, реэкспорт типа.
+## 6. Counter пример — 6 файлов для инкремента
 
----
+```
+Проблема: Избыточный boilerplate для простых приложений
 
-### Шаг 2. Расширить `Application` trait
+Файлы: examples/counter/src/
 
-**Файл: `crates/runtime/src/application.rs`**
+Суть:
+  examples/counter/src/
+  ├── app.rs          (130 строк)
+  ├── component.rs    (45 строк)
+  ├── data_layer.rs   (30 строк)
+  ├── msg.rs          (12 строк)
+  ├── view.rs         (80 строк)
+  └── lib.rs          (10 строк)
 
-```rust
-pub trait Application {
-    // ... существующие методы ...
+  6 файлов, ~300 строк для инкремента числа.
+  Весь UI счётчика — 80 строк в view.rs, остальное — инфраструктура.
 
-    /// Сохранить состояние навигации и компонентов.
-    /// Возвращает сериализованные данные для Android Bundle.
-    /// 
-    /// Вызывается из platform-android при Lifecycle::Destroy.
-    fn on_save_state(&mut self) -> SavedState { None }
+  Для сравнения: showcase — 13+ файлов для демо.
 
-    /// Восстановить состояние навигации и компонентов.
-    /// 
-    /// Вызывается из platform-android при первом InitWindow.
-    fn on_restore_state(&mut self, _state: SavedState) {}
-}
+Влияние:
+  - Высокий порог входа для новых разработчиков
+  - Onboarding занимает непропорционально много времени
+
+Затрагиваемые слои: macros (новый макрос), examples
+Риск: высокий — макросы сложны в отладке
 ```
 
----
+## 7. Platform-абстракция минимальна
 
-### Шаг 3. Platform-android: хранить и пробрасывать SavedState
+```
+Проблема: Крейт platform — пустые трейты, кросс-платформенность не реализована
 
-**Файл: `crates/platform-android/src/loop.rs`** — `RunState`
+Файл: crates/platform/src/platform.rs
 
-Добавить поле:
-```rust
-pub struct RunState {
-    // ... существующие поля ...
-    /// Сохранённое состояние навигации.
-    /// Сохраняется при Destroy, передаётся в on_restore_state при InitWindow.
-    pub saved_state: Option<Vec<u8>>,
-}
+Суть:
+  pub trait Platform {
+      type Window: Clone + Send + 'static;
+      type InputEvent: Send + 'static;
+      type Error: std::fmt::Debug + Send + 'static;
+      fn run<A>(app: A, config: PlatformConfig) -> Result<(), Self::Error>;
+  }
+
+  5 файлов в platform/ (platform.rs, event.rs, frame.rs, config.rs, waker.rs),
+  но реальный код — только в platform-android/.
+  Нет platform-desktop, platform-web.
+  run() захардкожен на AndroidApp.
+
+Влияние:
+  - Кросс-платформенность заявлена, но не достигнута
+  - Абстракция не проверяется вторым потребителем
+
+Затрагиваемые слои: platform, platform-android, новый platform-desktop
+Риск: высокий — требует нового backend
 ```
 
-**Файл: `crates/platform-android/src/lifecycle.rs`**
 
-Изменить `handle_destroy`:
-```rust
-fn handle_destroy<A: Application>(
-    app_instance: &mut A,
-    destroy_requested: &mut bool,
-) -> SavedState {
-    let saved = app_instance.on_save_state();
-    *destroy_requested = true;
-    saved
-}
+## 9. Blanket-impl конфликт решён обёрткой
+
 ```
+Проблема: PersistentComponent<T> — вынужденная обёртка из-за ограничений Rust
 
-Изменить `handle_init_window`:
-```rust
-fn handle_init_window<A: Application>(
-    backend: &mut dyn AndroidBackend,
-    app_instance: &mut A,
-    egui_ctx: &egui::Context,
-    graphics: &mut Option<GraphicsPipeline>,
-    saved_state: &mut Option<Vec<u8>>,
-) {
-    if !has_egl {
-        // Первый InitWindow
-        backend.init().ok();
-        backend.init_graphics().ok();
-        
-        // Восстанавливаем сохранённое состояние
-        let state = saved_state.take();
-        app_instance.on_restore_state(state);
-    } else {
-        backend.recreate_surface().ok();
-    }
-    // ...
-}
-```
+Файл: crates/core/src/persistent_state.rs
 
-Изменить `handle_lifecycle_event` — добавить параметр `saved_state` и возвращать `SavedState` из Destroy.
+Суть:
+  // Rust запрещает два blanket-impl:
+  // impl<T: Component> ComponentNode for T { save_state = None }
+  // impl<T: Component + PersistentState> ComponentNode for T { save_state = Some }
+  //
+  // Решение: compositional wrapper
+  pub struct PersistentComponent<T> { pub inner: T }
 
-**Файл: `crates/platform-android/src/loop.rs`** — `tick()`
+  Каждый persistent-компонент нужно вручную оборачивать в фабрике:
+  Route::State => Box::new(PersistentComponent::new(StateScreen::new())),
 
-```rust
-// При Destroy:
-BackendEvent::Lifecycle(ev) => {
-    let saved = crate::lifecycle::handle_lifecycle_event(
-        ev, backend, app_instance, egui_ctx,
-        &mut self.graphics, &mut self.destroy_requested,
-        &mut self.saved_state,
-    );
-    if let Some(bytes) = saved {
-        self.saved_state = Some(bytes);
-    }
-}
+  Без обёртки save_state() вернёт None — состояние не сохранится.
+  Ошибка невидима до рантайма.
+
+Влияние:
+  - Лишний boilerplate в каждой фабрике
+  - Легко забыть обёртку — тихая потеря состояния
+
+Затрагиваемые слои: core, macros
+Риск: средний — изменение публичного API
 ```
 
 ---
 
-### Шаг 4. Сделать `C` (конфигурацию) сериализуемой в `ChildStack`
+# Задачи (решения)
 
-**Файл: `crates/navigation/src/child_stack.rs`**
+## Задача 1: Удалить ViewFn
 
-Изменить bound на `C`:
-```rust
-// Было:
-C: Clone + PartialEq + std::fmt::Debug,
+```
+Задача: Удалить мёртвый тип ViewFn
 
-// Стало:
-C: Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned,
+Что сделать:
+  1. Удалить файл crates/core/src/view.rs
+  2. Убрать `pub mod view;` из crates/core/src/lib.rs
+  3. Убрать `pub use view::*;` из crates/core/src/lib.rs
+  4. Обновить guide.md — убрать упоминания ViewFn,
+     заменить на описание Component::render()
+
+Проверка:
+  cargo check --workspace
+  cargo test --workspace
+  grep -r "ViewFn" crates/ examples/  # должно быть пусто
+
+Затрагиваемые слои: core, документация
+Оценка: 1 час
 ```
 
-Добавить метод `save_serializable()`:
-```rust
-/// Сохранить стек с сериализованными состояниями компонентов.
-/// Использует bincode для сериализации ComponentNode::save_state().
-pub fn save_serializable(&self) -> Vec<(C, Option<Vec<u8>>)> {
-    self.items
-        .iter()
-        .map(|item| {
-            let state_bytes = item.component.save_state()
-                .and_then(|state| {
-                    // Пробуем сериализовать через bincode
-                    // Но save_state() возвращает Box<dyn Any + Send>,
-                    // а не Serialize. Нужен другой подход — см. Шаг 7.
-                    None
-                });
-            (item.config.clone(), state_bytes)
-        })
-        .collect()
-}
+## Задача 3: Документировать двухуровневую модель мутации
+
+```
+Задача: Задокументировать два уровня мутации состояния
+
+Что сделать:
+  1. В arch.md добавить раздел «Двухуровневая модель мутации»:
+
+     Уровень 1 (MVI / бизнес-данные):
+       Intent → Message → Reducer → State → UI
+       store.update() — единственная точка мутации
+       Примеры: счётчик, список товаров, auth-токен
+       Сохраняется при kill/restore через PersistentState
+
+     Уровень 2 (Local / UI-состояние):
+       remember() / on_click_with()
+       Arc<RwLock<T>> в IdTypeMap
+       НЕ сохраняется при kill/restore
+       Примеры: expanded/collapsed, позиция скролла, текст ввода
+
+     Правило: если данные нужны после пересоздания Activity —
+     это бизнес-данные → MVI. Если нет — UI-состояние → remember().
+
+  2. В guide.md обновить раздел «Правила»:
+     Заменить «store.update() — единственная точка изменения состояния»
+     на «store.update() — единственная точка изменения БИЗНЕС-состояния»
+
+  3. В arch.md обновить контракт:
+     «UI никогда самостоятельно не изменяет State» →
+     «UI никогда самостоятельно не изменяет бизнес-State.
+      Локальное UI-состояние (remember) — исключение.»
+
+Проверка:
+  Ревью документации, cargo check (код не меняется)
+
+Затрагиваемые слои: документация
+Оценка: 2 часа
 ```
 
-**Проблема:** `save_state()` возвращает `Box<dyn Any + Send>`, который нельзя сериализовать через bincode. Нужно либо:
-- Изменить сигнатуру на `Box<dyn SerializableState>` (новый trait)
-- Или сериализовать компонентом отдельно через trait `PersistentState`
+## Задача 4: Убрать гибридное хранение Constraints
 
-**Решение (как в Decompose):** Ввести трейт `PersistentState` + метод `save_to_bytes()`.
+```
+Задача: Оставить один источник правды для Constraints
 
----
+Вариант A (рекомендуемый): только Context::data(), убрать поле
+  1. В UiWrapper убрать поле Constraints из обоих вариантов enum
+  2. constraints() → всегда read_cx(self.ui)
+  3. set_constraints() → всегда write_cx(self.ui, c)
+  4. new() → write_cx + UiWrapper без поля
+  5. new_unconstrained() → read_cx + UiWrapper без поля
 
-### Шаг 5. Трейт `PersistentState` в `egui-android-core`
+  Плюс: один источник, нет рассинхронизации
+  Минус: хэш-таблица на каждый доступ (некритично для 60 FPS)
 
-**Файл: `crates/core/src/persistent_state.rs`** (новый)
+Вариант B: только поле, убрать Context::data()
+  1. Убрать read_cx/write_cx
+  2. Frame::show() → передавать Constraints через UiBuilder или параметр
+  3. Контейнеры явно передают Constraints детям
 
-```rust
-use serde::{Serialize, Deserialize};
+  Плюс: быстрее
+  Минус: ломает совместимость с Frame::show(), ScrollArea::show()
 
-/// Трейт для типобезопасного сохранения/восстановления состояния.
-/// Аналог `StateKeeper` в Decompose.
-///
-/// Компонент реализует этот трейт, если хочет сохранять кастомные данные
-/// при пересоздании Activity (поворот экрана, kill/restore).
-pub trait PersistentState {
-    /// Тип сохраняемого состояния.
-    /// Должен быть Serializable + Deserializable + Send.
-    type State: Serialize + DeserializeOwned + Send + 'static;
+Что сделать (вариант A):
+  1. Изменить UiWrapper в crates/core/src/ui_wrapper.rs
+  2. Обновить все контейнеры (Column, Row, Stack, LazyColumn)
+  3. Обновить Modifier::apply_recursive
+  4. Обновить тесты в crates/ui/tests/
 
-    /// Сохранить текущее состояние.
-    fn save(&self) -> Self::State;
+Проверка:
+  cargo test --workspace
+  cargo test -p egui-android-ui  # layout_tests, widget_tests
 
-    /// Восстановить состояние из ранее сохранённого.
-    fn restore(&mut self, state: Self::State);
-}
+Затрагиваемые слои: core, ui
+Оценка: 3 дня
 ```
 
----
+## Задача 5: Макрос #[derive(ComponentNode)] для устранения обёртки
 
-### Шаг 6. Связать `ComponentNode::save_state()` с `PersistentState`
+```
+Задача: Убрать необходимость вручную оборачивать в PersistentComponent
 
-**Вариант A (blanket-impl):** если компонент реализует `PersistentState`, то `save_state()`/`restore_state()` автоматически сериализуют через bincode.
+Что сделать:
+  1. В crates/macros/src/lib.rs добавить proc-macro:
+     #[derive(Component, ComponentNode)]
+     #[persistent_fields(counter, label)]
+     struct MyScreen { ... }
 
-```rust
-impl<T: PersistentState + ComponentNode> ComponentNodeExt for T {
-    fn save_state(&self) -> Option<Box<dyn Any + Send>> {
-        let data = self.save();
-        let bytes = bincode::serialize(&data).ok()?;
-        Some(Box::new(bytes))
-    }
-}
+     Макрос ComponentNode генерирует:
+     impl ComponentNode for MyScreen {
+         fn save_state(&self) -> Option<Box<dyn Any + Send>> {
+             PersistentState::save_to_boxed(self)
+         }
+         fn restore_state(&mut self, state: Box<dyn Any + Send>) {
+             PersistentState::restore_from_boxed(self, state);
+         }
+         // render, handle_dyn, as_any, as_any_mut — делегирование
+     }
+
+     Это конкретный impl (не blanket) — не конфликтует с blanket-impl.
+
+  2. В фабриках убрать обёртку:
+     Было: Box::new(PersistentComponent::new(StateScreen::new()))
+     Стало: Box::new(StateScreen::new())
+
+  3. PersistentComponent<T> оставить для обратной совместимости,
+     пометить #[deprecated]
+
+Проверка:
+  cargo test --workspace
+  cargo test -p egui-android-macros  # integration tests
+  cargo test -p egui-android-navigation  # child_stack_save_tests
+
+Затрагиваемые слои: macros, core, navigation, examples
+Оценка: 3 дня
 ```
 
-**Вариант Б (явный в `ComponentNode`):** добавить методы `save_to_bytes()` / `restore_from_bytes()`:
+## Задача 6: Макрос #[app] для простых приложений
 
-```rust
-pub trait ComponentNode {
-    // ... существующие методы ...
+```
+Задача: Снизить boilerplate для простых приложений до 1 файла
 
-    /// Сохранить состояние компонента как сериализованные байты.
-    fn save_state(&self) -> Option<Box<dyn Any + Send>> { None }
-    
-    // Существующий restore_state остаётся
-}
+Что сделать:
+  1. В crates/macros/src/lib.rs добавить proc-macro #[app]:
+
+     #[app(tag = "counter", fps = 60)]
+     struct CounterApp { count: u32 }
+
+     #[app::view]
+     fn view(state: &CounterApp, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
+         Column::new().show(ui, dispatch, |ui, d| {
+             Text::new(format!("{}", state.count)).render(ui, d);
+             Button::new("+1").on_click(Msg::Inc).render(ui, d);
+         });
+     }
+
+     #[app::handle]
+     fn handle(state: &mut CounterApp, msg: Msg) {
+         match msg { Msg::Inc => state.count += 1 }
+     }
+
+     Макрос генерирует: Application, Component, LifecycleObserver,
+     android_main(), data layer worker.
+
+  2. Переписать examples/counter с использованием макроса
+
+  3. Для сложных приложений (showcase) — ручная реализация как сейчас
+
+Проверка:
+  cargo check --workspace
+  cargo build -p egui-android-counter --target aarch64-linux-android
+
+Затрагиваемые слои: macros, examples
+Оценка: 2 недели
 ```
 
-И в `ChildStack::save()` сериализовать через bincode если тип реализует `Serialize`.
+## Задача 8: Enum-based dispatch для compile-time safety
 
-**Решение:** идём по пути **Варианта А** — вводим `PersistentState` как отдельный трейт и делаем blanket-impl для `ComponentNode`, который автоматически конвертирует `Serialize` данные в `Vec<u8>`.
+```
+Задача: Заменить Box<dyn Any> downcast на типизированный enum
 
----
+Что сделать:
+  1. Генерировать enum сообщений макросом из Route:
 
-### Шаг 7. `ChildStack` — сериализуемое сохранение/восстановление
+     // Генерируется из enum Route { State, Widgets, ... }
+     enum ScreenMsg {
+         StateScreen(state_screen::Msg),
+         WidgetsScreen(widgets::Msg),
+         // ...
+     }
 
-**Файл: `crates/navigation/src/child_stack.rs`**
+  2. ComponentNode получает типизированный handle:
+     fn handle_enum(&mut self, msg: ScreenMsg) {
+         match msg {
+             ScreenMsg::StateScreen(m) => self.handle(m),
+             // ...
+         }
+     }
 
-Добавить struct для сохранённых данных:
+  3. DynDispatcher остаётся для динамических случаев (плагины),
+     но основной путь — типизированный enum
 
-```rust
-/// Сохранённое представление стека.
-#[derive(Serialize, Deserialize)]
-pub struct SavedStack<C> {
-    /// Элементы стека: конфигурация + сериализованное состояние компонента.
-    pub items: Vec<(C, Option<Vec<u8>>)>,
-}
+  4. Ошибка в типе сообщения = compile error
+
+Проверка:
+  cargo check --workspace
+  cargo test --workspace
+
+Затрагиваемые слои: core, runtime, macros, navigation
+Оценка: 2 недели
 ```
 
-Изменить `save()` — возвращать `SavedStack<C>`:
-```rust
-pub fn save(&self) -> SavedStack<C> {
-    let items = self.items.iter().map(|item| {
-        let state_bytes = item.component.save_state()
-            .and_then(|boxed| {
-                // downcast to Vec<u8> (если компонент реализует PersistentState)
-                boxed.downcast::<Vec<u8>>().ok().map(|v| *v)
-            });
-        (item.config.clone(), state_bytes)
-    }).collect();
-    SavedStack { items }
-}
+## Задача 9: Desktop/Web платформы
+
+```
+Задача: Реализовать кросс-платформенность через platform-desktop
+
+Что сделать:
+  1. Создать crates/platform-desktop/:
+     - winit event loop
+     - glow renderer (уже используется в platform-android)
+     - run<A: Application>() с тем же контрактом
+
+  2. Выделить общий код из platform-android в platform:
+     - RunState::tick() → общий для всех платформ
+     - GraphicsPipeline → общий (glow)
+     - Input processing → адаптер под winit events
+
+  3. platform-android остаётся Android-специфичным:
+     - EGL, GameActivity, JNI, IME
+
+  4. Проверить, что Application trait не содержит Android-специфики
+
+Проверка:
+  cargo check --workspace
+  cargo run -p example-counter  # desktop
+  cargo ndk build -p example-counter  # android
+
+Затрагиваемые слои: platform, platform-android, новый platform-desktop
+Оценка: 2 месяца
 ```
 
-Переделать `restore()` — принимать `SavedStack<C>`:
-```rust
-/// Восстановить стек из сохранённого состояния.
-/// Компоненты пересоздаются через фабрику, затем восстанавливают состояние.
-/// Аналог Decompose: пересоздание компонентов + restoreState.
-pub fn restore_from_saved(
-    &mut self,
-    saved: SavedStack<C>,
-    factory: &dyn ComponentFactory<C>,
-) {
-    self.clear();
-    for (config, state_bytes) in saved.items {
-        let mut component = factory.create(config.clone());
-        if let Some(bytes) = state_bytes {
-            component.restore_state(Box::new(bytes));
-        }
-        self.push(config, component);
-    }
-}
+## Задача 10: Гибридная MVI модель — документация
+
 ```
+Задача: Явно задокументировать гибридную MVI + Local State модель
 
----
+Что сделать:
+  1. В arch.md добавить диаграмму:
 
-### Шаг 8. `NavigationHost` — save/restore (showcase)
+     ┌─────────────────────────────────────────────────┐
+     │                  Framework                       │
+     │                                                  │
+     │  ┌──────────────┐    ┌──────────────────────┐   │
+     │  │  MVI Layer   │    │   Local State Layer  │   │
+     │  │              │    │                      │   │
+     │  │  Intent      │    │  remember()          │   │
+     │  │  Message     │    │  on_click_with()     │   │
+     │  │  Reducer     │    │  Arc<RwLock<T>>      │   │
+     │  │  State       │    │                      │   │
+     │  │  store.      │    │  Не сохраняется      │   │
+     │  │  update()    │    │  при kill/restore    │   │
+     │  └──────┬───────┘    └──────────┬───────────┘   │
+     │         │                       │               │
+     │         ▼                       ▼               │
+     │  ┌─────────────────────────────────────────┐    │
+     │  │              UI (egui)                   │    │
+     │  │  Component::render(ui, dispatch)         │    │
+     │  └─────────────────────────────────────────┘    │
+     └─────────────────────────────────────────────────┘
 
-**Файл: `examples/showcase/src/navigation_host.rs`**
+  2. Аналогия с Jetpack Compose:
+     MVI Layer = ViewModel + StateFlow
+     Local State = remember() / rememberSaveable()
 
-Добавить методы:
+  3. Обновить guide.md:
+     - Раздел «Упрощённая MVI-модель» → «Гибридная модель»
+     - Добавить правило: «remember() — для UI-состояния,
+       store.update() — для бизнес-данных»
 
-```rust
-use egui_android_runtime::saved_state::SavedStack;
+Проверка:
+  Ревью документации, код не меняется
 
-impl NavigationHost {
-    /// Сохранить состояние всей навигации.
-    pub fn save(&self) -> SavedStack<Route> {
-        self.stack.save()
-    }
-
-    /// Восстановить навигацию из сохранённого состояния.
-    pub fn restore(&mut self, saved: SavedStack<Route>) {
-        self.stack.restore_from_saved(saved, &*self.factory);
-    }
-}
-```
-
----
-
-### Шаг 9. `ShowcaseApplication` — подключить save/restore
-
-**Файл: `examples/showcase/src/app.rs`**
-
-```rust
-use egui_android_runtime::saved_state::{SavedState, SavedStack};
-
-impl Application for ShowcaseApplication {
-    // ... существующие методы ...
-
-    fn on_save_state(&mut self) -> SavedState {
-        let saved = self.root.save();
-        let bytes = bincode::serialize(&saved)
-            .expect("Ошибка сериализации SavedStack");
-        log::info!("on_save_state: сохранено {} элементов стека", saved.items.len());
-        Some(bytes)
-    }
-
-    fn on_restore_state(&mut self, state: SavedState) {
-        if let Some(bytes) = state {
-            match bincode::deserialize::<SavedStack<Route>>(&bytes) {
-                Ok(saved) => {
-                    log::info!("on_restore_state: восстановлено {} элементов", saved.items.len());
-                    self.root.restore(saved);
-                }
-                Err(e) => {
-                    log::error!("on_restore_state: ошибка десериализации: {}", e);
-                }
-            }
-        }
-    }
-}
-```
-
----
-
-### Шаг 10. Рекурсивное сохранение вложенных стеков
-
-**Файл: `examples/showcase/src/screens/nested.rs`**
-
-`NestedScreen` должен реализовать `PersistentState` (или переопределить `save_state`/`restore_state`), чтобы сохранять свои `stack_layer1`, `stack_layer2` и `layer2_open`.
-
-```rust
-// Сохраняемая структура
-#[derive(Serialize, Deserialize)]
-struct NestedSavedState {
-    layer1: SavedStack<NestedRoute>,
-    layer2: SavedStack<NestedLayer2Route>,
-    layer2_open: bool,
-}
-
-impl PersistentState for NestedScreen {
-    type State = NestedSavedState;
-
-    fn save(&self) -> Self::State {
-        NestedSavedState {
-            layer1: self.stack_layer1.save(),
-            layer2: self.stack_layer2.save(),
-            layer2_open: self.layer2_open,
-        }
-    }
-
-    fn restore(&mut self, state: Self::State) {
-        // ВАЖНО: пересоздаём компоненты через фабрики
-        struct Layer1Factory;
-        impl ComponentFactory<NestedRoute> for Layer1Factory {
-            fn create(&self, config: NestedRoute) -> Box<dyn ComponentNode> {
-                Box::new(Layer1Sub::from_route(&config))
-            }
-        }
-        struct Layer2Factory;
-        impl ComponentFactory<NestedLayer2Route> for Layer2Factory {
-            fn create(&self, config: NestedLayer2Route) -> Box<dyn ComponentNode> {
-                Box::new(Layer2Sub::from_route(&config))
-            }
-        }
-
-        // Очищаем и пересоздаём
-        self.stack_layer1.clear();
-        self.stack_layer2.clear();
-
-        // Восстанавливаем слой 1
-        let mut new_stack1 = ChildStack::new();
-        new_stack1.restore_from_saved(state.layer1, &Layer1Factory);
-        self.stack_layer1 = new_stack1;
-
-        // Восстанавливаем слой 2
-        let mut new_stack2 = ChildStack::new();
-        new_stack2.restore_from_saved(state.layer2, &Layer2Factory);
-        self.stack_layer2 = new_stack2;
-
-        self.layer2_open = state.layer2_open;
-    }
-}
-```
-
----
-
-### Шаг 11. Пример кастомных данных компонента (StateScreen)
-
-**Файл: `examples/showcase/src/screens/state_screen.rs`**
-
-```rust
-#[derive(Serialize, Deserialize)]
-struct StateScreenSavedState {
-    counter: i32,
-    expanded: bool,
-}
-
-// StateScreen получает поля для хранения между пересозданиями
-pub struct StateScreen {
-    counter: i32,
-    expanded: bool,
-}
-
-impl PersistentState for StateScreen {
-    type State = StateScreenSavedState;
-
-    fn save(&self) -> Self::State {
-        StateScreenSavedState {
-            counter: self.counter,
-            expanded: self.expanded,
-        }
-    }
-
-    fn restore(&mut self, state: Self::State) {
-        self.counter = state.counter;
-        self.expanded = state.expanded;
-    }
-}
+Затрагиваемые слои: документация
+Оценка: 2 часа
 ```
 
 ---
-
-### Шаг 12. Тесты
-
-**Файл: `crates/navigation/src/child_stack.rs`** — добавить тесты:
-
-```rust
-#[test]
-fn test_save_restore_stack() {
-    let mut stack = ChildStack::<TestRoute>::new();
-    stack.push(TestRoute::A, Box::new(TestComp::new(42)));
-    stack.push(TestRoute::B, Box::new(TestComp::new(99)));
-
-    let saved = stack.save();
-    assert_eq!(saved.items.len(), 2);
-    assert_eq!(saved.items[0].0, TestRoute::A);
-    assert_eq!(saved.items[1].0, TestRoute::B);
-
-    // Пересоздаём стек из сохранённого
-    let mut restored = ChildStack::new();
-    restored.restore_from_saved(saved, &TestFactory);
-    assert_eq!(restored.len(), 2);
-
-    // Проверяем, что состояние компонентов восстановилось
-    // (нужен TestComp с PersistentState и сохранённым значением)
-}
-```
-
-**Файл: `crates/runtime/src/saved_state.rs`** — тесты сериализации/десериализации `SavedStack`.
-
----
-
-### Шаг 13. Документация
-
-Обновить:
-- `SKILL.md` в `egui-android-guide` — добавить раздел "Сохранение состояния"
-- `SKILL.md` в `android-egui-architecture` — добавить слой "SavedStateRegistry"
-- Комментарии в коде — на русском языке
-
----
-
-## Результирующая файловая структура (новые/изменённые файлы)
-
-```
-crates/
-├── runtime/src/
-│   ├── saved_state.rs       ← НОВЫЙ: SavedState тип, SavedStack, утилиты
-│   ├── application.rs       ← ИЗМЕНИТЬ: on_save_state/on_restore_state с SavedState
-│   └── lib.rs               ← ИЗМЕНИТЬ: pub mod saved_state
-│
-├── core/src/
-│   ├── persistent_state.rs  ← НОВЫЙ: трейт PersistentState
-│   ├── component_node.rs    ← ИЗМЕНИТЬ: blanket-impl для PersistentState
-│   └── lib.rs               ← ИЗМЕНИТЬ: pub mod persistent_state
-│
-├── navigation/src/
-│   ├── child_stack.rs       ← ИЗМЕНИТЬ: SavedStack, save/restore через bincode
-│   └── lib.rs               ← ИЗМЕНИТЬ: pub use SavedStack
-│
-├── platform-android/src/
-│   ├── loop.rs              ← ИЗМЕНИТЬ: RunState.saved_state
-│   ├── lifecycle.rs         ← ИЗМЕНИТЬ: проброс saved_state
-│   └── run.rs               ← ИЗМЕНИТЬ: передача saved_state в lifecycle
-│
-└── framework/src/
-    └── lib.rs               ← ИЗМЕНИТЬ: re-export нового API
-```
-
----
-
-## Итоговая проверка: все правила Decompose соблюдены
-
-| Принцип Decompose | Как реализовано |
-|---|---|
-| Конфигурация = источник истины | `C: Serialize + Deserialize` используется для пересоздания компонентов |
-| Компоненты пересоздаются при restore | `ComponentFactory::create(config)` + затем `restore_state()` |
-| Рекурсивное сохранение | `NestedScreen` сохраняет свои `ChildStack` через `PersistentState` |
-| Единый контейнер (SavedState) | `SavedStack<C>` — одно значение, сериализуемое в Bundle |
-| Android Bundle как транспорт | `Vec<u8>` → `Bundle.putByteArray()` |
-| StateKeeper регистрируется/отписывается | `ComponentNode::save_state()` вызывается только для живых компонентов в стеке |
-
----
-
-## Порядок выполнения
-
-**Шаги идут строго последовательно из-за зависимостей:**
-
-```
-0. dep: serde, bincode в runtime, core, navigation
-   ↓
-1. saved_state.rs (новый модуль в runtime)
-   ↓
-2. application.rs (расширить trait)
-   ↓
-3. loop.rs + lifecycle.rs (platform-android)
-   ↓
-4. child_stack.rs (добавить Serialize bound, SavedStack, новые методы)
-5. persistent_state.rs (новый трейт в core)
-   ↓
-6. component_node.rs (blanket-impl PersistentState → ComponentNode)
-   ↓
-7. navigation_host.rs (save/restore в showcase)
-8. app.rs (подключить в ShowcaseApplication)
-   ↓
-9. nested.rs (рекурсивное сохранение)
-10. state_screen.rs (пример кастомных данных)
-   ↓
-11. Тесты (child_stack, saved_state, integration)
-12. Документация (обновить SKILL.md)
-
----
-
-## Шаг 13. JNI-мост для kill/restore процесса
-
-### Задача
-
-Передавать Vec<u8> (сериализованный SavedStack<C>) между Rust и Android Bundle
-через JNI, чтобы пережить убийство процесса.
-
-### Архитектура (два сценария)
-
-**Config Change (поворот) — процесс жив:**
-- InitWindow → on_restore_state(None)
-- Application берёт из self.saved_state (своё поле)
-- PlatformState buffer НЕ используется
-
-**Kill/Restore — процесс пересоздан:**
-- onCreate → JNI → PlatformState.set_saved_state(bytes)
-- InitWindow → PlatformState.take_saved_state() → app.on_restore_state(Some(bytes))
-
-### Пошаговый план
-
-#### 13.1. Kotlin — EguiActivity.kt
-
-Файлы:
-- examples/showcase/android/.../EguiActivity.kt
-- examples/counter/android/.../EguiActivity.kt
-- crates/platform-android/kotlin/EguiActivity.kt
-
-Добавить native-методы nativeGetSavedState()/nativeSetSavedState(),
-onSaveInstanceState/onCreate.
-
-#### 13.2. Rust — PlatformState buffer
-
-Файл: crates/platform-android/src/platform_state.rs
-
-Добавить saved_state_buffer: Option<Vec<u8>>.
-Методы set_saved_state/take_saved_state.
-
-#### 13.3. Rust — JNI-функции (#[no_mangle])
-
-Файл: crates/platform-android/src/saved_state_jni.rs (НОВЫЙ)
-
-Глобальный OnceLock<PlatformState> для доступа из UI thread.
-Функции nativeGetSavedState/nativeSetSavedState.
-
-#### 13.4. Rust — lifecycle связка
-
-Файл: crates/platform-android/src/lifecycle.rs
-
-- handle_stop/destroy: после on_save_state() → platform_state.set_saved_state(bytes)
-- handle_init_window: platform_state.take_saved_state() → app.on_restore_state(Some(bytes))
-- Добавить параметр &PlatformState в lifecycle-функции
-
-#### 13.5. Rust — главный цикл
-
-Файл: crates/platform-android/src/loop.rs
-
-Проброс &PlatformState в handle_lifecycle_event.
-
-#### 13.6. Application — проверка
-
-Файл: examples/showcase/src/app.rs
-
-Изменений не требуется: on_restore_state(Some(bytes)) и on_save_state() уже готовы.
-
-#### 13.7. Тестирование на устройстве с логами
-
-1. Собрать showcase APK
-2. Запустить, перейти на State Screen, изменить counter
-3. Повернуть экран — проверить логи
-4. adb shell am kill com.example.egui_android — убить процесс
-5. Перезапустить — проверить логи
-
-Логи для верификации:
-  on_save_state: сохранено N элементов (M байт)
-  PlatformState: set_saved_state, M байт
-  JNI: nativeGetSavedState M байт
-
-После kill:
-  JNI: nativeSetSavedState M байт
-  PlatformState: take_saved_state M байт
-  on_restore_state: восстанавливаем N элементов
-
-#### 13.8. Документация
-
-Обновить SKILL.md. Описать JNI-мост и kill/restore поток.
-
-### Результирующая файловая структура (шаг 13)
-
-```
-crates/platform-android/
-  src/
-    saved_state_jni.rs     ← NEW: JNI-функции
-    platform_state.rs      ← CHANGE: поле saved_state_buffer
-    lifecycle.rs           ← CHANGE: связка буфера
-    loop.rs                ← CHANGE: проброс PlatformState
-    lib.rs                 ← CHANGE: pub mod saved_state_jni
-  kotlin/
-    EguiActivity.kt        ← CHANGE: native-методы
-
-examples/
-  showcase/android/.../EguiActivity.kt  ← CHANGE: JNI-методы
-  counter/android/.../EguiActivity.kt   ← CHANGE: JNI-методы
-```
-
-### Порядок подшагов
-
-```
-13.1 Kotlin: EguiActivity.kt
-        ↓
-13.2 Rust: PlatformState buffer
-        ↓
-13.3 Rust: JNI #[no_mangle] функции
-        ↓
-13.4 Rust: lifecycle связка
-        ↓
-13.5 Rust: loop.rs связка
-        ↓
-13.6 Rust: Application (проверка, без изменений)
-        ↓
-13.7 Тестирование на устройстве
-        ↓
-13.8 Документация
-```
-
-### Критические уточнения
-
-#### OnceLock для PlatformState
-
-JNI-функции вызываются из UI thread в onCreate (до создания backend'а).
-PlatformState нужно инициализировать в глобальный OnceLock:
-
-```rust
-// platform_state.rs
-use std::sync::OnceLock;
-static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
-
-impl PlatformState {
-    pub fn new() -> Self {
-        let state = Self { inner: Arc::new(Mutex::new(PlatformStateInner::default())) };
-        GLOBAL_PLATFORM_STATE.set(state.clone()).ok();
-        state
-    }
-    pub fn set_saved_state(&self, bytes: Option<Vec<u8>>) { ... }
-    pub fn take_saved_state(&self) -> Option<Vec<u8>> { ... }
-}
-
-// saved_state_jni.rs: JNI-функции используют GLOBAL_PLATFORM_STATE.get()
-```
-
-#### Связка on_save_state() -> PlatformState
-
-handle_stop и handle_destroy перестают игнорировать результат on_save_state(),
-а передают его в PlatformState:
-
-```rust
-fn handle_stop<A: Application>(app_instance: &mut A, ps: &PlatformState) {
-    let saved = app_instance.on_save_state(); // SavedState = Option<Vec<u8>>
-    ps.set_saved_state(saved);                // buffer for JNI/kill/restore
-    app_instance.on_stop();
-}
-```
-
-#### Связка handle_init_window -> PlatformState.take_saved_state()
-
-handle_init_window берёт bytes из PlatformState вместо жёсткого None:
-
-```rust
-fn handle_init_window<A: Application>(..., ps: &PlatformState) {
-    // ... EGL init ...
-    let saved = ps.take_saved_state();
-    app_instance.on_restore_state(saved);
-}
-```
-
-### Проверка ShowcaseApplication
-
-on_restore_state уже написан по паттерну:
-  let bytes = state.or_else(|| self.saved_state.take());
-
-Покрывает оба сценария:
-- Config change: state = Some(bytes) из PlatformState, использует напрямую
-- Kill/restore: state = Some(bytes) из PlatformState (JNI), использует напрямую
-- Первый запуск: state = None, fallback на self.saved_state (None), ничего
-
-### Полная схема Rust-части
-
-```
-Создание (run.rs):
-  backend создаёт PlatformState::new()
-  -> PlatformState сохраняется в GLOBAL_PLATFORM_STATE (OnceLock)
-
-Главный цикл (loop.rs):
-  tick(...) -> handle_lifecycle_event(ev, ..., &platform_state)
-
-Lifecycle (lifecycle.rs):
-  Stop:
-    saved = app.on_save_state()           -> Vec<u8>
-    ps.set_saved_state(Some(saved))       -> buffer
-    app.on_stop()
-
-  Destroy:
-    saved = app.on_save_state()           -> Vec<u8>
-    ps.set_saved_state(Some(saved))       -> buffer
-
-  InitWindow:
-    saved = ps.take_saved_state()         <- buffer
-    app.on_restore_state(saved)           -> Application
-
-JNI (saved_state_jni.rs):
-  onSaveInstanceState:
-    ps = GLOBAL_PLATFORM_STATE.get()
-    bytes = ps.take_saved_state()         -> Vec<u8>
-    return byteArray -> Kotlin Bundle
-
-  onCreate:
-    byteArray -> Vec<u8>
-    ps = GLOBAL_PLATFORM_STATE.get()
-    ps.set_saved_state(Some(bytes))       -> buffer
-```

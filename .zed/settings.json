@@ -1,0 +1,21 @@
+// Zed settings для egui-android-framework
+{
+  "lsp": {
+    "rust-analyzer": {
+      "check": {
+        "allTargets": false,
+        "allFeatures": false
+      },
+      "cargo": {
+        "noDevDeps": true
+      },
+      "diagnostics": {
+        "experimental": {
+          "ignore": [
+            "unlinked-file"
+          ]
+        }
+      }
+    }
+  }
+}

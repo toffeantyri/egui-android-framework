@@ -68,7 +68,7 @@ Data Layer никогда не взаимодействует с UI.
 | Runtime | `egui-android-runtime` | Application, Dispatcher, StateStore, UiNotifier |
 | Application | `egui-android-runtime` | Application trait, frame(), DI корень, on_save_state/on_restore_state |
 | Component | `egui-android-core` | Component trait, ComponentContext, lifecycle |
-| UI | `egui-android-core` + `egui-android-ui` | ViewFn, Widget, remember, builders, modifier, widgets, containers, animation, theme |
+| UI | `egui-android-core` + `egui-android-ui` | Component, Widget, remember, builders, modifier, widgets, containers, animation, theme |
 | State | `egui-android-runtime` | StateStore (tokio::sync::watch) |
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
 | Navigation | `egui-android-navigation` | ChildStack, save/restore состояния |
@@ -309,7 +309,7 @@ View вызывает `dispatch(msg)` в момент события, не во�
 
 ### UI Layer
 
-**Крейты**: `egui-android-core` (ViewFn, Widget), `egui-android-ui` (remember, builders, modifier)
+**Крейты**: `egui-android-core` (Component, Widget), `egui-android-ui` (remember, builders, modifier)
 
 Ответственность:
 

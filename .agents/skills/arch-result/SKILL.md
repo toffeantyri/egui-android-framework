@@ -44,7 +44,7 @@ description: Задача - Архитектурный аудит проекта
 - **Runtime Layer** — запуск egui, создание RawInput, Context::run
 - **Application Layer** — Application trait, frame(), DI корень
 - **Component Layer** — Component trait, ChildStack, навигация
-- **UI Layer** — ViewFn, декларативный рендеринг
+- **UI Layer** — Widget, декларативный рендеринг
 - **State Layer** — StateStore, реактивное состояние
 - **Reducer Layer** — обработка сообщений, изменение состояния
 - **Effect Layer** — async операции, сеть, БД

@@ -28,7 +28,7 @@ description: Архитектура, правила и идиомы проект
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │  navigation  │   │     ui       │   │    core      │
 │  ChildStack  │   │  remember    │   │  Component   │
-│  Lifecycle   │   │  builders    │   │  ViewFn      │
+│  Lifecycle   │   │  builders    │   │  Widget   │
 │              │   │  modifier    │   │  Widget      │
 │              │   │  widgets     │   │  Lifecycle   │
 │              │   │  containers  │   │  Ctx         │
@@ -347,10 +347,6 @@ Blanket-impl НЕ переопределяет их — компонент мо�
 - Все методы имеют пустую реализацию по умолчанию.
 
 ## View — чистая функция с Dispatcher
-
-```rust,ignore
-type ViewFn<S, M> = fn(state: &S, ui: &mut UiWrapper, dispatch: &Dispatcher<M>);
-```
 
 View не хранит состояние, не знает о каналах, не имеет побочных эффектов.
 Сообщения отправляются через `dispatch.dispatch(msg)` в момент события,
@@ -781,7 +777,6 @@ loop {
 │   │       ├── component_node.rs   — trait ComponentNode (object-safe, Box<dyn>)
 │   │       ├── component_context.rs — ComponentContext (+ BackDispatcher)
 │   │       ├── lifecycle.rs        — LifecycleState + LifecycleObserver
-│   │       ├── view.rs             — type ViewFn<S, M>
 │   │       ├── widget.rs           — trait Widget<M: Send>
 │   │       ├── ui_wrapper.rs       — UiWrapper (обёртка над egui::Ui с Constraints)
 │   │       ├── constraints.rs      — Constraints

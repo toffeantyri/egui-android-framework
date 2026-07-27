@@ -27,7 +27,7 @@ egui — отличный immediate-mode GUI, но для создания по�
 │  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌────────┐│
 │  │ platform │  │   core   │  │   ui   │  │ nav-   ││
 │  │  - EGL   │  │ Component│  │ Widgets│  │ igation││
-│  │  - Input │  │ ViewFn   │  │ Contain│  │ ChildS.││
+│  │  - Input │  │ Widget  │  │ Contain│  │ ChildS.││
 │  │  - Loop  │  │ Lifecycle│  │ Modif. │  │ Lifecy.││
 │  │          │  │ BackDisp.│  │ Anim.  │  │        ││
 │  │          │  │          │  │ Theme  │  │        ││
@@ -47,7 +47,7 @@ egui — отличный immediate-mode GUI, но для создания по�
 
 - ✅ **Единый главный цикл** — EGL + `poll_events()` + `egui_glow` + Android lifecycle
 - ✅ **Touch-ввод** — MotionEvent → egui::Event, поддержка скролла с инерцией (fling), батчинг событий для исключения скачков
-- ✅ **MVI-архитектура** — Component + ViewFn + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
+- ✅ **MVI-архитектура** — Component + Widget + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
 - ✅ **Compose-like UI** — Column, Row, Stack (с двухфазным measure→layout), LazyColumn. Модификаторы: padding, background, border, clip, shadow, alpha, width, height, width_in, height_in, fill_max_width, clickable, wrap_content, size. Анимации: Fade, Slide, AnimatedVisibility. Тема: Material Design 3 (light/dark)
 - ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy). `ComponentNode::handle_dyn()` — делегирование сообщений активному компоненту. Каждый вложенный стек имеет свой тип сообщений, независимый от других. `ComponentState` — типобезопасное save/restore состояния.
 - ✅ **Кнопка Back** — иерархическая обработка: `ComponentNode::handle_back()` (кастомная логика) → `BackDispatcher` (диалоги) → `ChildStack` pop → завершение приложения
@@ -177,7 +177,7 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 
 | Крейт | crates.io | Назначение |
 |---|---|---|
-| egui-android-core | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, ViewFn, Widget, LifecycleObserver, BackDispatcher, UiWrapper, Constraints |
+| egui-android-core | [![crates.io](https://img.shields.io/crates/v/egui-android-core)](https://crates.io/crates/egui-android-core) | MVI примитивы: Component, Widget, LifecycleObserver, BackDispatcher, UiWrapper, Constraints |
 | egui-android-ui | [![crates.io](https://img.shields.io/crates/v/egui-android-ui)](https://crates.io/crates/egui-android-ui) | Виджеты (Button, Text, Spacer, Icon), контейнеры (Column, Row, Stack, LazyColumn), модификаторы, remember, анимации, темы Material Design 3 |
 | egui-android-runtime | [![crates.io](https://img.shields.io/crates/v/egui-android-runtime)](https://crates.io/crates/egui-android-runtime) | Application, Dispatcher, StateStore, UiNotifier, RuntimeContext, RuntimeConfig, DataLayerHandle |
 | egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |

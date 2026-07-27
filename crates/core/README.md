@@ -3,7 +3,7 @@
 **MVI-примитивы для egui-приложений на Android.**
 
 Крейт содержит базовые типы и трейты для построения UI-компонентов
-с однонаправленным потоком данных: Component, ViewFn, Widget, LifecycleObserver,
+с однонаправленным потоком данных: Component, Widget, LifecycleObserver,
 а также инфраструктурные элементы: UiWrapper (обёртка над egui::Ui с Constraints),
 BackDispatcher (обработка кнопки Back), Constraints (Compose-like ограничения).
 

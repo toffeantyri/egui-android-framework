@@ -24,6 +24,7 @@ pub use self::inner::*;
 /// Применить цвета системных баров для текущей темы через PlatformState в backend.
 ///
 /// Вызывается из platform-android при инициализации или при смене темы.
+/// Использует троттлинг — не чаще раза в 10 секунд, и только при смене темы.
 pub fn apply_system_bars_for_platform_state(state: &PlatformState) {
     let vm = state.vm_ptr();
     let activity = state.activity_ptr();
@@ -34,6 +35,7 @@ pub fn apply_system_bars_for_platform_state(state: &PlatformState) {
 }
 
 mod inner {
+    use crate::log::{log_with_throttling, log_with_throttling_id};
     use egui_android_platform::SystemTheme;
 
     /// Настроить системные бары: прозрачный статус-бар и навбар.
@@ -268,6 +270,15 @@ mod inner {
         activity_ptr: *mut std::ffi::c_void,
         theme: SystemTheme,
     ) {
+        log::info!(
+            "apply_system_bars_color_jni: caller={} theme={:?}",
+            std::backtrace::Backtrace::force_capture()
+                .to_string()
+                .lines()
+                .nth(3)
+                .unwrap_or("?"),
+            theme,
+        );
         if vm_ptr.is_null() || activity_ptr.is_null() {
             log::warn!("apply_system_bars_color_jni: null pointer");
             return;
@@ -357,10 +368,17 @@ mod inner {
                         jni::objects::JValue::Int(mask),
                     ],
                 );
-                log::info!(
-                    "apply_system_bars_color_jni: setSystemBarsAppearance appearance={:#x} mask={:#x}",
-                    appearance,
-                    mask,
+
+                log_with_throttling_id(
+                    "setSystemBarsAppearance",
+                    1, // раз в секунду
+                    || {
+                        format!(
+                        "apply_system_bars_color_jni: setSystemBarsAppearance appearance={:#x} mask={:#x}",
+                        appearance,
+                        mask,
+                    )
+                    },
                 );
             } else {
                 log::warn!(
@@ -368,10 +386,15 @@ mod inner {
                 );
             }
 
-            log::info!(
-                "apply_system_bars_color_jni: theme={:?} color=#{:06x}",
-                theme,
-                color,
+            log_with_throttling_id(
+                "theme_color",
+                10, // раз в 10 секунд
+                || {
+                    format!(
+                        "apply_system_bars_color_jni: theme={:?} color=#{:06x}",
+                        theme, color,
+                    )
+                },
             );
         }
     }

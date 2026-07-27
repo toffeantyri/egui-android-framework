@@ -29,6 +29,7 @@ pub struct RunState {
     pub rt_ctx: Option<RuntimeContext>,
     pub rt_ctx_initialized: bool,
     pub destroy_requested: bool,
+    last_theme: Option<egui_android_platform::SystemTheme>,
 }
 
 impl RunState {
@@ -41,6 +42,7 @@ impl RunState {
             rt_ctx: None,
             rt_ctx_initialized: false,
             destroy_requested: false,
+            last_theme: None,
         }
     }
 
@@ -190,13 +192,17 @@ impl RunState {
                 backend.platform_state().set_clear_color_from(bg);
 
                 // Определяем тему по яркости фона и обновляем системные бары
+                // только при реальной смене темы (не каждый кадр)
                 let is_dark = (bg.r() as u32) + (bg.g() as u32) + (bg.b() as u32) < 384;
                 let theme = if is_dark {
                     egui_android_platform::SystemTheme::Dark
                 } else {
                     egui_android_platform::SystemTheme::Light
                 };
-                backend.set_theme_override(Some(theme));
+                if self.last_theme != Some(theme) {
+                    self.last_theme = Some(theme);
+                    backend.set_theme_override(Some(theme));
+                }
             }
 
             // Рендеринг через GraphicsPipeline
