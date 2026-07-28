@@ -45,9 +45,13 @@ impl RuntimeContext {
     /// Вызывается синхронно в главном цикле.
     ///
     /// Если signal есть — вызывает `request_repaint()` и `waker.wake()`.
-    pub fn check(&mut self) {
+    ///
+    /// Возвращает `true`, если сигнал был обработан.
+    pub fn check(&mut self) -> bool {
         if let Some(ref mut n) = self.notifier {
-            n.check();
+            n.check()
+        } else {
+            false
         }
     }
 

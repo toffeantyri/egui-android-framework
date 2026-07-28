@@ -39,7 +39,9 @@ impl UiNotifier {
     ///
     /// Вызывается Runtime в главном цикле, без блокировки.
     /// Если сигнал есть — вызывает `request_repaint()` и `wake()`.
-    pub fn check(&mut self) {
+    ///
+    /// Возвращает `true`, если сигнал был обработан.
+    pub fn check(&mut self) -> bool {
         let mut changed = false;
         while self.rx.try_recv().is_ok() {
             changed = true;
@@ -50,5 +52,6 @@ impl UiNotifier {
                 w.wake();
             }
         }
+        changed
     }
 }

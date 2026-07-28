@@ -96,6 +96,8 @@ impl RunState {
             poll_elapsed,
         );
 
+        let had_events = !backend_events.is_empty() || self.input_state.back_pressed;
+
         // --- Шаги 2-3: обработка событий ---
         for event in backend_events {
             match event {
@@ -156,9 +158,11 @@ impl RunState {
         }
 
         // --- Шаг 7: проверка уведомлений от data layer ---
-        if let Some(ref mut ctx) = self.rt_ctx {
-            ctx.check();
-        }
+        let had_notify = if let Some(ref mut ctx) = self.rt_ctx {
+            ctx.check()
+        } else {
+            false
+        };
 
         // --- Шаг 8: рендеринг ---
         let now = Instant::now();
@@ -214,18 +218,20 @@ impl RunState {
                 .map(|v| v.repaint_delay)
                 .unwrap_or(Duration::ZERO);
 
-            if self.repaint_delay != new_delay {
-                log::info!(
-                    "LOOP: repaint_delay изменился: {:?} -> {:?}",
-                    self.repaint_delay,
-                    new_delay,
-                );
+            // Если были события от платформы (touch, lifecycle, back)
+            // или сигнал от data layer — следующий кадр немедленно.
+            // Это гарантирует, что после клика/навигации новый экран рисуется сразу.
+            if had_events || had_notify {
+                self.repaint_delay = Duration::ZERO;
+            } else {
+                self.repaint_delay = new_delay;
             }
-            self.repaint_delay = new_delay;
 
             log::info!(
-                "LOOP: repaint_delay = {:?}, событий в кадре = {}",
-                new_delay,
+                "LOOP: repaint_delay = {:?} (had_events={}, had_notify={}, событий в кадре={})",
+                self.repaint_delay,
+                had_events,
+                had_notify,
                 num_events,
             );
 

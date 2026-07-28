@@ -46,14 +46,17 @@ impl<T: Clone + Send + Sync + 'static> RememberState<T> {
     /// Установить новое значение и сохранить в контексте egui.
     ///
     /// Принимает `&self` (не требует `&mut self`).
+    /// После установки вызывает `request_repaint()`, чтобы UI обновился.
     pub fn set(&self, new_value: T) {
         *self.value.write().expect("RememberState: RwLock poisoned") = new_value.clone();
         self.persist(&new_value);
+        self.ctx.request_repaint();
     }
 
     /// Изменить значение через замыкание и сохранить результат.
     ///
     /// Принимает `&self` (не требует `&mut self`).
+    /// После изменения вызывает `request_repaint()`, чтобы UI обновился.
     ///
     /// ```ignore
     /// state.modify(|v| *v += 1);
@@ -66,6 +69,7 @@ impl<T: Clone + Send + Sync + 'static> RememberState<T> {
             .expect("RememberState: RwLock poisoned")
             .clone();
         self.persist(&cloned);
+        self.ctx.request_repaint();
     }
 
     fn persist(&self, value: &T) {

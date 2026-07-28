@@ -175,11 +175,11 @@ impl Application for ShowcaseApplication {
             // через handle_dyn(). Компонент сам сделает downcast в свой тип.
             match msg.downcast::<RootMsg>() {
                 Ok(root_msg) => {
-                    log::debug!("Получено RootMsg: {:?}", root_msg);
+                    log::trace!("Получено RootMsg: {:?}", root_msg);
                     self.root.handle_msg(*root_msg);
                 }
                 Err(msg) => {
-                    log::debug!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
+                    log::trace!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
                     if let Some(active) = self.root.stack.active_mut() {
                         active.handle_dyn(msg);
                         // После handle_dyn проверяем, запросил ли компонент Back
