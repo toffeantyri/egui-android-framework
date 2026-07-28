@@ -29,6 +29,8 @@ mod gl_backend;
 #[cfg(target_os = "android")]
 mod native_backend;
 
+use std::time::Duration;
+
 use crate::event::{BackendError, BackendEvent, InputEvent, Insets, LifecycleEvent, TouchPhase};
 use crate::platform_state::PlatformState;
 use crate::waker::Waker;
@@ -75,7 +77,12 @@ pub trait AndroidBackend {
     fn init(&mut self) -> Result<(), String>;
 
     /// Получить накопившиеся события.
-    fn poll_events(&mut self) -> Vec<BackendEvent>;
+    ///
+    /// Если `timeout` равен:
+    /// - `Some(0)` — неблокирующий опрос (вернуть всё, что есть)
+    /// - `Some(N)` — блокироваться до N времени в ожидании событий
+    /// - `None` — блокироваться до любого события (бесконечное ожидание)
+    fn poll_events(&mut self, timeout: Option<Duration>) -> Vec<BackendEvent>;
 
     /// Инициализировать графику (EGL display + context + surface).
     fn init_graphics(&mut self) -> Result<(), BackendError>;
@@ -169,8 +176,8 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
         (**self).init()
     }
 
-    fn poll_events(&mut self) -> Vec<BackendEvent> {
-        (**self).poll_events()
+    fn poll_events(&mut self, timeout: Option<Duration>) -> Vec<BackendEvent> {
+        (**self).poll_events(timeout)
     }
 
     fn init_graphics(&mut self) -> Result<(), BackendError> {

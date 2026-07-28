@@ -15,6 +15,7 @@ use crate::event::BackendEvent;
 use crate::graphics::GraphicsPipeline;
 use crate::input::InputState;
 use crate::platform_state::PlatformState;
+use egui::viewport::ViewportId;
 use egui_android_platform::Waker;
 use egui_android_runtime::{Application, RuntimeContext};
 
@@ -29,6 +30,7 @@ pub struct RunState {
     pub rt_ctx: Option<RuntimeContext>,
     pub rt_ctx_initialized: bool,
     pub destroy_requested: bool,
+    repaint_delay: Duration,
     last_theme: Option<egui_android_platform::SystemTheme>,
 }
 
@@ -42,6 +44,7 @@ impl RunState {
             rt_ctx: None,
             rt_ctx_initialized: false,
             destroy_requested: false,
+            repaint_delay: Duration::ZERO,
             last_theme: None,
         }
     }
@@ -70,8 +73,25 @@ impl RunState {
         target_dt: Duration,
         platform_state: &PlatformState,
     ) -> bool {
-        // --- Шаг 1: poll events ---
-        let backend_events = backend.poll_events();
+        // --- Шаг 1: poll events (с timeout на основе repaint_delay) ---
+        let timeout = if self.repaint_delay == Duration::ZERO {
+            Some(Duration::ZERO) // первый кадр / срочный repaint
+        } else if self.repaint_delay >= Duration::from_secs(3600) {
+            None // блокировать до события
+        } else {
+            Some(self.repaint_delay) // ждать (анимации egui)
+        };
+
+        let poll_start = Instant::now();
+        let backend_events = backend.poll_events(timeout);
+        let poll_elapsed = poll_start.elapsed();
+
+        log::info!(
+            "LOOP: poll_events(timeout={:?}) -> {} событий, спали {:?}",
+            timeout,
+            backend_events.len(),
+            poll_elapsed,
+        );
 
         // --- Шаги 2-3: обработка событий ---
         for event in backend_events {
@@ -182,6 +202,24 @@ impl RunState {
                 self.destroy_requested = true;
                 return true;
             }
+
+            // Запоминаем, когда egui хочет следующий кадр
+            let new_delay = full_output
+                .viewport_output
+                .get(&ViewportId::ROOT)
+                .map(|v| v.repaint_delay)
+                .unwrap_or(Duration::ZERO);
+
+            if self.repaint_delay != new_delay {
+                log::info!(
+                    "LOOP: repaint_delay изменился: {:?} -> {:?}",
+                    self.repaint_delay,
+                    new_delay,
+                );
+            }
+            self.repaint_delay = new_delay;
+
+            log::info!("LOOP: рендер кадра");
 
             // Синхронизируем clear color с темой Application
             // После frame() egui-стиль уже содержит panel_fill, установленный

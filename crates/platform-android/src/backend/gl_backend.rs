@@ -16,6 +16,7 @@
 #![cfg(target_os = "android")]
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use android_activity::{
     input::{InputEvent, KeyAction, MotionAction},
@@ -66,44 +67,44 @@ impl GlBackend {
     }
 
     /// Слить lifecycle события.
-    fn drain_lifecycle_events(&mut self) {
+    ///
+    /// `timeout` — сколько блокироваться в ожидании событий.
+    /// `None` — блокироваться бесконечно (до любого события).
+    fn drain_lifecycle_events(&mut self, timeout: Option<Duration>) {
         let events = &mut self.events;
         let app = &self.app;
 
-        app.poll_events(
-            Some(std::time::Duration::from_millis(0)),
-            |event| match event {
-                android_activity::PollEvent::Wake | android_activity::PollEvent::Timeout => {}
-                android_activity::PollEvent::Main(e) => match e {
-                    MainEvent::InitWindow { .. } => {
-                        log::info!("GlBackend: InitWindow (GameActivity)");
-                        events.push(BackendEvent::Lifecycle(LifecycleEvent::InitWindow));
-                        if let Some(nw) = app.native_window() {
-                            let pp = crate::insets::get_pp(&app.config(), nw.width(), nw.height());
-                            events.push(BackendEvent::DpiChanged(pp));
-                        }
+        app.poll_events(timeout, |event| match event {
+            android_activity::PollEvent::Wake | android_activity::PollEvent::Timeout => {}
+            android_activity::PollEvent::Main(e) => match e {
+                MainEvent::InitWindow { .. } => {
+                    log::info!("GlBackend: InitWindow (GameActivity)");
+                    events.push(BackendEvent::Lifecycle(LifecycleEvent::InitWindow));
+                    if let Some(nw) = app.native_window() {
+                        let pp = crate::insets::get_pp(&app.config(), nw.width(), nw.height());
+                        events.push(BackendEvent::DpiChanged(pp));
                     }
-                    MainEvent::Resume { .. } => {
-                        log::info!("GlBackend: Resume");
-                        events.push(BackendEvent::Lifecycle(LifecycleEvent::Resume));
-                    }
-                    MainEvent::Pause { .. } => {
-                        log::info!("GlBackend: Pause");
-                        events.push(BackendEvent::Lifecycle(LifecycleEvent::Pause));
-                    }
-                    MainEvent::Stop { .. } => {
-                        log::info!("GlBackend: Stop");
-                        events.push(BackendEvent::Lifecycle(LifecycleEvent::Stop));
-                    }
-                    MainEvent::Destroy { .. } => {
-                        log::info!("GlBackend: Destroy");
-                        events.push(BackendEvent::Lifecycle(LifecycleEvent::Destroy));
-                    }
-                    _ => {}
-                },
+                }
+                MainEvent::Resume { .. } => {
+                    log::info!("GlBackend: Resume");
+                    events.push(BackendEvent::Lifecycle(LifecycleEvent::Resume));
+                }
+                MainEvent::Pause { .. } => {
+                    log::info!("GlBackend: Pause");
+                    events.push(BackendEvent::Lifecycle(LifecycleEvent::Pause));
+                }
+                MainEvent::Stop { .. } => {
+                    log::info!("GlBackend: Stop");
+                    events.push(BackendEvent::Lifecycle(LifecycleEvent::Stop));
+                }
+                MainEvent::Destroy { .. } => {
+                    log::info!("GlBackend: Destroy");
+                    events.push(BackendEvent::Lifecycle(LifecycleEvent::Destroy));
+                }
                 _ => {}
             },
-        );
+            _ => {}
+        });
     }
 
     /// Слить input события.
@@ -230,9 +231,9 @@ impl AndroidBackend for GlBackend {
         }
     }
 
-    fn poll_events(&mut self) -> Vec<BackendEvent> {
+    fn poll_events(&mut self, timeout: Option<Duration>) -> Vec<BackendEvent> {
         self.events.clear();
-        self.drain_lifecycle_events();
+        self.drain_lifecycle_events(timeout);
         self.drain_input_events();
         std::mem::take(&mut self.events)
     }
