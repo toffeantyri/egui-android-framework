@@ -43,9 +43,13 @@ where
     pub fn into_inner(self) -> M {
         self.inner
     }
+}
 
-    /// Получить ссылку на сообщение.
-    pub fn as_ref(&self) -> &M {
+impl<M> std::convert::AsRef<M> for MessageEnvelope<M>
+where
+    M: Clone + Debug + Send + 'static,
+{
+    fn as_ref(&self) -> &M {
         &self.inner
     }
 }

@@ -109,6 +109,7 @@ pub trait Application: Sized + 'static {
     /// Используется Runtime для принятия решения:
     /// - Back + IME открыта → hide_keyboard()
     /// - Back + IME закрыта → on_back_pressed()
+    ///
     /// Реализация по умолчанию возвращает false.
     fn is_keyboard_visible(&self) -> bool {
         false

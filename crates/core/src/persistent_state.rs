@@ -59,8 +59,6 @@
 //! со `save_state`/`restore_state` через PersistentState, полностью устраняя
 //! необходимость в обёртке.
 
-use crate::{Component, ComponentNode, UiWrapper};
-use egui_android_runtime::DynDispatcher;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Трейт для типобезопасного сохранения/восстановления состояния компонента.

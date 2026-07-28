@@ -216,7 +216,7 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
         Some(t) => t,
         None => {
             return syn::Error::new_spanned(
-                &name,
+                name,
                 "ComponentNode требует указания типа сообщения через #[component_message(MsgType)]",
             )
             .to_compile_error()

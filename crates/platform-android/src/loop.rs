@@ -74,7 +74,10 @@ impl RunState {
         platform_state: &PlatformState,
     ) -> bool {
         // --- Шаг 1: poll events (с timeout на основе repaint_delay) ---
-        let timeout = if self.repaint_delay == Duration::ZERO {
+        // Пока нет GraphicsPipeline — блокируемся до события (InitWindow ещё не пришёл).
+        let timeout = if self.graphics.is_none() {
+            None
+        } else if self.repaint_delay == Duration::ZERO {
             Some(Duration::ZERO) // первый кадр / срочный repaint
         } else if self.repaint_delay >= Duration::from_secs(3600) {
             None // блокировать до события
@@ -173,6 +176,7 @@ impl RunState {
             let insets = get_current_insets(backend, pp, w, h);
 
             let events_for_frame = std::mem::take(&mut self.input_state.events);
+            let num_events = events_for_frame.len();
 
             let screen_rect = egui::Rect::from_min_size(
                 egui::Pos2::new(insets.left, insets.top),
@@ -219,7 +223,11 @@ impl RunState {
             }
             self.repaint_delay = new_delay;
 
-            log::info!("LOOP: рендер кадра");
+            log::info!(
+                "LOOP: repaint_delay = {:?}, событий в кадре = {}",
+                new_delay,
+                num_events,
+            );
 
             // Синхронизируем clear color с темой Application
             // После frame() egui-стиль уже содержит panel_fill, установленный
