@@ -90,6 +90,44 @@ UI (нажатие кнопки)
 Никакого polling. Никаких `poll()`, `on_event()`, `needs_redraw`.
 Состояние само уведомляет Runtime через `data_statechanged_tx`.
 
+## Гарантия ререндера (когда и почему рисуется новый кадр)
+
+Ререндер происходит в трёх случаях:
+
+**1. Событие от платформы (touch, lifecycle, back):**
+```
+poll_events(timeout) → backend_events
+  → had_events = true
+    → tick() игнорирует FPS-ограничение (target_dt)
+      → frame() → run_ui → dispatch → handle → мутация
+        → repaint_delay = Duration::ZERO (принудительно)
+          → poll_events(0ms) → следующий кадр немедленно
+```
+
+**2. Сигнал от data layer (store.update → statechanged_tx):**
+```
+UiNotifier::check() → есть сигнал в канале?
+  → ctx.request_repaint() + waker.wake()
+    → had_notify = true
+      → tick() игнорирует FPS-ограничение
+        → следующий кадр немедленно
+```
+
+**3. Локальное UI-состояние (remember → ctx.request_repaint()):**
+```
+remember().set(val) / remember().modify(fn)
+  → мутация Arc<RwLock<T>>
+    → ctx.request_repaint()
+      → следующий кадр немедленно
+```
+
+**В простое:** нет событий → had_events=false, had_notify=false →
+FPS-ограничение работает (target_dt = 16ms), poll_events(timeout=None)
+блокируется, CPU не тратится.
+
+Автор Application НЕ должен вызывать request_repaint() вручную —
+фреймворк делает это автоматически.
+
 ## Гибридная модель: MVI + Local State
 
 В проекте используется гибридная модель — MVI для бизнес-данных и локальное UI-состояние через `remember()`.

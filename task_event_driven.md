@@ -180,16 +180,57 @@ while state.tick(...) {}  // ← остаётся, но tick() теперь бл
 | Анимации | 60 FPS всегда | `repaint_delay` от egui |
 | Соответствие MVI | Нарушение (polling) | Push-модель |
 
-## Один вопрос, который нужно проверить
+## Проверка на реальном устройстве
 
-**Будит ли `run_on_java_main_thread()` заблокированный `poll_events()`?**
+`run_on_java_main_thread()` пробуждает заблокированный `poll_events()`
+на GameActivity — подтверждено. Waker через `app.run_on_java_main_thread(||{})`
+корректно пробуждает event loop после сигнала от data layer.
 
-Для **GameActivity** — да. `poll_events()` слушает Java main looper, а `run_on_java_main_thread()` постит callback именно туда.
+## Итоговая архитектура event-driven UI
 
-Для **NativeActivity** — нужно проверить. `poll_events()` использует `ALooper_pollAll()`, а `run_on_java_main_thread()` постит в Java Handler. Это **разные механизмы**. Может потребоваться `ALooper_wake()` или аналог.
+### Три механизма гарантии ререндера
 
-Проверка: запустить пример, нажать кнопку, убедиться что UI обновляется. Если нет — добавить `ALooper_wake()` в `Waker`.
+| Механизм | Ответственный | Вызов |
+|---|---|---|
+| Внешние события (touch, lifecycle, back) | `tick()` в `loop.rs` | `had_events → repaint_delay = ZERO` |
+| Сигнал от data layer (store.update) | `UiNotifier::check()` → `waker.wake()` | `had_notify → repaint_delay = ZERO` |
+| Локальное UI-состояние (remember) | `RememberState::set/modify` | прямой `ctx.request_repaint()` |
 
-## Итого
+### Главный цикл (tick)
 
-Push-модель — **правильный выбор** для event-driven UI на Android. Инфраструктура (`Waker`, `StateStore::watch`, `request_repaint`) уже есть. Нужно только **перестать крутить цикл вхолостую**, изменив timeout в `poll_events` и добавив `repaint_delay`. Это 4 файла, ~20 строк, без изменения API. Давай Подробный план выполнения поэтапно от наиболе сложных задача к наименее сложным.
+```rust
+// timeout = ZERO (срочно) / None (блокировка) / Some(N) (анимация)
+let backend_events = backend.poll_events(timeout);
+let had_events = !backend_events.is_empty() || back_pressed;
+
+// обработка lifecycle / input / back
+
+let had_notify = rt_ctx.check(); // bool: сигнал от data layer
+
+// Если были события или сигнал — рендер без FPS-ограничения
+if dt_ok || had_events || had_notify {
+    frame();
+    if had_events || had_notify {
+        repaint_delay = Duration::ZERO; // следующий кадр — срочно
+    }
+}
+```
+
+### Изменённые файлы
+
+| Файл | Изменение |
+|---|---|
+| `backend/mod.rs` | `poll_events()` принимает `timeout: Option<Duration>` |
+| `gl_backend.rs` / `native_backend.rs` | проброс timeout в `drain_lifecycle_events` |
+| `loop.rs` | `repaint_delay` в RunState, `had_events \|\| had_notify` → принудительный кадр |
+| `runtime_context.rs` | `check()` возвращает `bool` |
+| `ui_notifier.rs` | `check()` возвращает `bool` |
+| `remember.rs` | `set()` и `modify()` вызывают `request_repaint()` |
+
+### Архитектурные правила
+
+- После **любого** события от платформы следует немедленный рендер
+- После **любого** сигнала от data layer — то же самое
+- После **любой** мутации remember() — прямой request_repaint()
+- Автор Application НЕ вызывает request_repaint() вручную
+- В простое CPU спит: poll_events(None) блокирует, FPS-ограничение работает

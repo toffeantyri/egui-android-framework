@@ -165,8 +165,18 @@ impl RunState {
         };
 
         // --- Шаг 8: рендеринг ---
+        //
+        // Если были события от платформы или сигнал от data layer —
+        // рендерим немедленно, игнорируя FPS-ограничение (target_dt).
+        // Это гарантирует, что после клика навигация/действие отрабатывает
+        // без задержки на ожидание следующего таймерного тика.
+        //
+        // В простое (had_events=false, had_notify=false) FPS-ограничение
+        // работает как обычно — не чаще target_dt (60 FPS).
         let now = Instant::now();
-        if now.duration_since(self.last_frame) >= target_dt {
+        let dt_ok = now.duration_since(self.last_frame) >= target_dt;
+
+        if dt_ok || had_events || had_notify {
             self.last_frame = now;
 
             let (w, h) = backend.window_size();

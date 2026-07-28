@@ -673,6 +673,66 @@ Push вместо Pull
 
 ---
 
+Гарантия ререндера (event-driven UI)
+
+После любого события, которое может изменить состояние UI, должен
+последовать ререндер. Фреймворк гарантирует это через комбинацию
+трёх механизмов:
+
+**1. Внешние события (Platform → Platform-android):**
+```
+touch / lifecycle / back
+  → poll_events() возвращает событие
+    → had_events = true
+      → tick() игнорирует FPS-ограничение (target_dt)
+        → frame() → run_ui → dispatch → handle → мутация
+          → repaint_delay = Duration::ZERO (принудительно)
+            → poll_events(0ms) → следующий кадр немедленно
+```
+
+**2. Сигнал от data layer (Store → RuntimeContext):**
+```
+store.update()
+  → data_statechanged_tx.send(())
+    → UiNotifier::check() → request_repaint() + waker.wake()
+      → had_notify = true
+        → tick() игнорирует FPS-ограничение
+          → следующий кадр немедленно
+```
+
+**3. Локальное UI-состояние (remember → egui::Context):**
+```
+remember().set(val) / remember().modify(fn)
+  → мутация Arc<RwLock<T>>
+    → ctx.request_repaint()
+      → следующий кадр немедленно
+```
+
+**Правила:**
+- После любого события от платформы (touch, lifecycle, back) следует
+  немедленный рендер, без ожидания FPS-таймера (target_dt)
+- После сигнала от data layer (через UiNotifier) — то же самое
+- После мутации локального remember() — через прямой request_repaint()
+- В простое (нет событий, нет сигналов) — FPS-ограничение работает,
+  poll_events(timeout=None) блокирует, CPU не тратится
+- Автор Application НЕ должен вызывать request_repaint() вручную —
+  фреймворк делает это автоматически
+
+**Главный цикл (tick в loop.rs):**
+```
+poll_events(timeout)  ← timeout = ZERO/MAX/repaint_delay от egui
+  → backend_events
+    → had_events = !backend_events.is_empty() || back_pressed
+      → обработка lifecycle/input/back
+        → had_notify = rt_ctx.check()  ← bool: был сигнал от data layer
+          → if dt_ok || had_events || had_notify
+              frame() → render
+                → if had_events || had_notify
+                    repaint_delay = Duration::ZERO  ← принудительно
+```
+
+---
+
 Контракт Runtime
 
 Runtime работает только по событиям.
