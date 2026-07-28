@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-core"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "bincode",
  "egui",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-framework"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "egui-android-core",
  "egui-android-macros",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-macros"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "bincode",
  "egui-android-core",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-navigation"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "bincode",
  "egui",
@@ -279,14 +279,14 @@ dependencies = [
 
 [[package]]
 name = "egui-android-platform"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "egui-android-platform-android"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-runtime"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "bincode",
  "egui",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "egui-android-ui"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 dependencies = [
  "egui",
  "egui-android-core",

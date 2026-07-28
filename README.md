@@ -108,43 +108,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ### Минимальный код приложения
 
-```rust
-use egui_android_framework::{
-    core::*,
-    ui::prelude::*,
-    runtime::{Application, Dispatcher, RuntimeConfig, StateStore},
-    platform_android::run,
-};
-
-struct CounterApp;
-
-impl Application for CounterApp {
-    type State = u32;
-    type Message = Msg;
-
-    fn render(&self, state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
-        Column::new().show(ui, dispatch, |ui, dispatch| {
-            Text::new(format!("Счёт: {}", state))
-                .modifier(Modifier::new().padding(16.0))
-                .render(ui, dispatch);
-            Button::new("+1")
-                .on_click(Msg::Increment)
-                .render(ui, dispatch);
-            Button::new("Сброс")
-                .theme_colors(egui::Color32::RED)
-                .text_color(egui::Color32::WHITE)
-                .on_click(Msg::Reset)
-                .render(ui, dispatch);
-        });
-    }
-}
-```├── settings.gradle
-├── gradle.properties
-└── local.properties               # ← sdk.dir, ndk.dir
-```
-
-### Минимальный код приложения
-
 ### Пример UI с Compose-like синтаксисом
 
 ```rust
@@ -183,6 +146,7 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 | egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |
 | egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Waker и SystemTheme — платформенная абстракция |
 | egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл (RunState::tick), lifecycle, system bars, GraphicsPipeline |
+| egui-android-macros | [![crates.io](https://img.shields.io/crates/v/egui-android-macros)](https://crates.io/crates/egui-android-macros) | derive-макросы: `#[derive(ComponentNode)]`, `#[derive(Component)]` |
 | egui-android-framework | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
 
 ## Технологии
