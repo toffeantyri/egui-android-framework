@@ -3,7 +3,7 @@
 //! Проверяют генерацию PersistentState через #[derive(Component)] + #[persistent_fields(...)].
 
 use egui_android_core::{
-    Component as EguiComponent, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+    Component as EguiComponent, ComponentContext, LifecycleObserver, PersistentState, UiWrapper,
 };
 use egui_android_macros::Component;
 use egui_android_runtime::Dispatcher;
@@ -39,8 +39,8 @@ impl EguiComponent for TestScreen {
     type State = ();
     type Message = TestMsg;
 
-    fn render(&self, _ui: &mut UiWrapper, _d: &Dispatcher<TestMsg>) {}
-    fn handle(&mut self, _msg: TestMsg) {}
+    fn render(&self, _ui: &mut UiWrapper, _d: &Dispatcher<TestMsg>, _ctx: &ComponentContext) {}
+    fn handle(&mut self, _msg: TestMsg, _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
     }

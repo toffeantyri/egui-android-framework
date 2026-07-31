@@ -30,7 +30,7 @@ use egui_android_macros::ComponentNode;
 struct MyScreen;
 ```
 
-Генерирует: `render()`, `handle_dyn()`, `handle_back()`, `save_state()`, `restore_state()`, `as_any()`, `as_any_mut()`.
+Генерирует: `render()`, `handle_dyn()`, `handle_back()` (со `ctx`), `save_state()`, `restore_state()`, `as_any()`, `as_any_mut()`. Все методы принимают `ComponentContext` (`ctx`), через который экран запрашивает навигацию назад
 
 ### `#[derive(Component)]`
 
@@ -61,7 +61,7 @@ struct MyScreen {
 
 ```rust
 use egui_android_macros::{Component, ComponentNode};
-use egui_android_core::{Component, LifecycleObserver, UiWrapper};
+use egui_android_core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
 use egui_android_runtime::Dispatcher;
 
 #[derive(Clone, Debug)]
@@ -80,11 +80,11 @@ impl egui_android_core::Component for CounterScreen {
     type State = i32;
     type Message = MyMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<MyMsg>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<MyMsg>, ctx: &ComponentContext) {
         // ...
     }
 
-    fn handle(&mut self, msg: MyMsg) {
+    fn handle(&mut self, msg: MyMsg, ctx: &mut ComponentContext) {
         match msg {
             MyMsg::Click => self.counter += 1,
         }

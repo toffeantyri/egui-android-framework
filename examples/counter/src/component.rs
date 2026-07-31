@@ -3,7 +3,7 @@
 //! Читает состояние из `StateStore` реактивно.
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver, UiWrapper},
+    core::{Component, ComponentContext, LifecycleObserver, UiWrapper},
     runtime::{Dispatcher, StateStore},
     ComponentNode,
 };
@@ -43,11 +43,16 @@ impl Component for CounterComponent {
     type State = u32;
     type Message = Msg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         counter_view(&self.count, ui, dispatch)
     }
 
-    fn handle(&mut self, msg: Self::Message) {
+    fn handle(&mut self, msg: Self::Message, _ctx: &mut ComponentContext) {
         match msg {
             Msg::Increment => {
                 log::info!("Component: handle Increment — data layer обновит store");

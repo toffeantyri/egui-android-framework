@@ -5,7 +5,9 @@
 //! `ComponentNode` со `save_state`/`restore_state` через PersistentState.
 
 use super::*;
-use egui_android_core::{Component, ComponentNode, LifecycleObserver, PersistentState, UiWrapper};
+use egui_android_core::{
+    Component, ComponentContext, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+};
 use egui_android_runtime::Dispatcher;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -29,20 +31,25 @@ impl LifecycleObserver for CounterComp {}
 impl Component for CounterComp {
     type State = ();
     type Message = ();
-    fn render(&self, _ui: &mut UiWrapper, _d: &Dispatcher<()>) {}
-    fn handle(&mut self, _msg: ()) {}
+    fn render(&self, _ui: &mut UiWrapper, _d: &Dispatcher<()>, _ctx: &ComponentContext) {}
+    fn handle(&mut self, _msg: (), _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
     }
 }
 impl ComponentNode for CounterComp {
-    fn render(&self, ui: &mut UiWrapper, dispatch: &egui_android_runtime::DynDispatcher) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &egui_android_runtime::DynDispatcher,
+        ctx: &ComponentContext,
+    ) {
         let typed = dispatch.wrap::<()>();
-        Component::render(self, ui, &typed);
+        Component::render(self, ui, &typed, ctx);
     }
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
         if let Ok(typed) = msg.downcast::<()>() {
-            Component::handle(self, *typed);
+            Component::handle(self, *typed, ctx);
         } else {
             log::error!("ComponentNode::handle_dyn: ошибка типа");
         }

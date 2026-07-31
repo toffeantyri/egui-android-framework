@@ -157,7 +157,12 @@ impl Application for ShowcaseApplication {
                 )
                 .show(ctx, |ui| {
                     let mut wrapper = UiWrapper::new_unconstrained(ui);
-                    NavigationHost::render_dyn(&self.root, &mut wrapper, &uidynmsg_tx);
+                    NavigationHost::render_dyn(
+                        &self.root,
+                        &mut wrapper,
+                        &uidynmsg_tx,
+                        &self.root.context,
+                    );
                 });
         });
 
@@ -180,11 +185,14 @@ impl Application for ShowcaseApplication {
                 }
                 Err(msg) => {
                     log::trace!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
-                    if let Some(active) = self.root.stack.active_mut() {
-                        active.handle_dyn(msg);
-                        // После handle_dyn проверяем, запросил ли компонент Back
-                        self.root.check_back_request();
+                    {
+                        let ctx = &mut self.root.context;
+                        if let Some(active) = self.root.stack.active_mut() {
+                            active.handle_dyn(msg, ctx);
+                        }
                     }
+                    // После handle_dyn проверяем, запросил ли компонент Back
+                    self.root.check_back_request();
                 }
             }
         }

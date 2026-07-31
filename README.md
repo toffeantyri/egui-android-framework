@@ -50,7 +50,7 @@ egui — отличный immediate-mode GUI, но для создания по�
 - ✅ **MVI-архитектура** — Component + Widget + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
 - ✅ **Compose-like UI** — Column, Row, Stack (с двухфазным measure→layout), LazyColumn. Модификаторы: padding, background, border, clip, shadow, alpha, width, height, width_in, height_in, fill_max_width, clickable, wrap_content, size. Анимации: Fade, Slide, AnimatedVisibility. Тема: Material Design 3 (light/dark)
 - ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy). `ComponentNode::handle_dyn()` — делегирование сообщений активному компоненту. Каждый вложенный стек имеет свой тип сообщений, независимый от других. `ComponentState` — типобезопасное save/restore состояния.
-- ✅ **Кнопка Back** — иерархическая обработка: `ComponentNode::handle_back()` (кастомная логика) → `BackDispatcher` (диалоги) → `ChildStack` pop → завершение приложения
+- ✅ **Кнопка Back** — единый механизм `ctx.request_back()`: экран вызывает его из `Component::handle()` (рисованная кнопка «← Назад») или из `handle_back()` (платформенная кнопка). Оба входа ставят один флаг в `ComponentContext`, хост читает его и выполняет `pop` активного экрана. Платформенная Back: `ComponentNode::handle_back()` → `ChildStack` pop → завершение приложения.
 - ✅ **Темы** — Material Design 3 light/dark с полной палитрой, типографикой, скруглениями. Автоматическое определение системной темы
 - ✅ **Системные панели** — автоматическая обработка insets (status bar, navigation bar), смена цвета панелей под тему
 - ✅ **Локальное UI-состояние** — `remember<T>()` (аналог Compose `remember`). Хранится между кадрами, не требует мутабельного доступа

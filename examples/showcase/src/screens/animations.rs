@@ -1,6 +1,8 @@
 //! AnimationsScreen — демонстрация анимаций AnimatedVisibility, Fade, Slide, AnimationExt.
 
-use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{
+    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
+};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     animation::{AnimatedVisibility, AnimationExt, SlideDirection},
@@ -31,7 +33,12 @@ impl UiComponent for AnimationsScreen {
     type State = ();
     type Message = RootMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = &Theme::current_from_ui(ui).colors;
         let show_box = remember(ui, "anim_show", || false);
         let slide_open = remember(ui, "anim_slide", || false);
@@ -128,7 +135,7 @@ impl UiComponent for AnimationsScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
 
     fn state(&self) -> &Self::State {
         &()

@@ -12,6 +12,7 @@
 //! `on_stop` / `on_destroy` вызываются фреймворком синхронно
 //! с Android lifecycle.
 
+use crate::component_context::ComponentContext;
 use crate::lifecycle::LifecycleObserver;
 use egui_android_runtime::Dispatcher;
 
@@ -42,10 +43,20 @@ pub trait Component: LifecycleObserver + Send + 'static {
     ///
     /// Компонент не должен вызывать `egui_ctx.run()` сам —
     /// это делает `run.rs`.
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>);
+    ///
+    /// `ctx` даёт доступ к фреймворковому контексту (напр. [`ComponentContext::request_back`]).
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        ctx: &ComponentContext,
+    );
 
     /// Обработать сообщение от View-функции.
-    fn handle(&mut self, msg: Self::Message);
+    ///
+    /// `ctx` даёт экрану доступ к фреймворковому контексту,
+    /// в т.ч. возможность запросить навигацию назад через [`ComponentContext::request_back`].
+    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext);
 
     /// Получить ссылку на текущее состояние.
     fn state(&self) -> &Self::State;

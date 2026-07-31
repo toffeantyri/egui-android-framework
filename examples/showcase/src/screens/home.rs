@@ -1,6 +1,8 @@
 //! HomeScreen — главный экран со списком демо-экранов, построенный на Compose-like API.
 
-use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{
+    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
+};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -30,7 +32,12 @@ impl UiComponent for HomeScreen {
     type State = ();
     type Message = RootMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = &Theme::current_from_ui(ui).colors;
         let routes = vec![
             Route::Widgets,
@@ -62,7 +69,7 @@ impl UiComponent for HomeScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
 
     fn state(&self) -> &Self::State {
         &()

@@ -5,7 +5,7 @@
 //! возвращается на Home только при повторном Back (через back_fallback).
 
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentNode, LifecycleObserver, UiWrapper,
+    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
 };
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
@@ -41,14 +41,15 @@ impl ComponentNode for BackCustomScreen {
         &self,
         ui: &mut UiWrapper,
         dispatch: &::egui_android_framework::runtime::DynDispatcher,
+        ctx: &ComponentContext,
     ) {
         let typed = dispatch.wrap::<RootMsg>();
-        UiComponent::render(self, ui, &typed);
+        UiComponent::render(self, ui, &typed, ctx);
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
         if let Ok(typed) = msg.downcast::<RootMsg>() {
-            UiComponent::handle(self, *typed);
+            UiComponent::handle(self, *typed, ctx);
         } else {
             log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
         }
@@ -56,7 +57,7 @@ impl ComponentNode for BackCustomScreen {
 
     /// Кастомная обработка Back: переключает цвет фона.
     /// Первый вызов — переключение (true), второй — pop (false).
-    fn handle_back(&mut self) -> bool {
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
         match self.bg {
             BgColor::Blue => {
                 self.bg = BgColor::Green;
@@ -70,9 +71,6 @@ impl ComponentNode for BackCustomScreen {
         None
     }
     fn restore_state(&mut self, _state: Box<dyn std::any::Any + Send>) {}
-    fn take_back_request(&mut self) -> bool {
-        false
-    }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -86,7 +84,12 @@ impl UiComponent for BackCustomScreen {
     type State = ();
     type Message = RootMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = &Theme::current_from_ui(ui).colors;
         Column::new()
             .scrollable()
@@ -146,7 +149,7 @@ impl UiComponent for BackCustomScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
 
     fn state(&self) -> &Self::State {
         &()

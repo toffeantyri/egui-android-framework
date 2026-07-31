@@ -20,19 +20,23 @@ egui — immediate-mode GUI, где состояние хранится в за�
 
 ### `Component` — узел дерева навигации
 - Владеет состоянием + обрабатывает сообщения
-- `render(ui, dispatch)` — рендеринг View
-- `handle(msg)` — обработка сообщения (команда в data layer или из View)
+- `render(ui, dispatch, ctx)` — рендеринг View
+- `handle(msg, ctx)` — обработка сообщения (команда в data layer или из View)
 - `state() -> &State` — snapshot состояния
 - Ассоциированные типы: `State`, `Message: Clone + Debug + Send + 'static`
 
 ### `ComponentNode` — object-safe трейт для хранения в `ChildStack`
 - Позволяет складывать в `Vec<Box<dyn ComponentNode>>` компоненты с разными типами сообщений
-- `render(&self, ui, &DynDispatcher)` — type-erased render
-- `handle_dyn(msg)` — type-erased handle с downcast
-- `handle_back() -> bool` — Decompose-style обработка Back
-- `take_back_request() -> bool` — запрос навигации назад после `handle()`
+- `render(&self, ui, &DynDispatcher, ctx)` — type-erased render
+- `handle_dyn(msg, ctx)` — type-erased handle с downcast
+- `handle_back(ctx) -> bool` — Decompose-style обработка Back
 - `save_state() / restore_state()` — save/restore для пересоздания Activity
 - Реализуется через `#[derive(ComponentNode)]` (из `egui-android-macros`)
+
+Единый механизм навигации назад — `ctx.request_back()`: экран вызывает его из
+`Component::handle()` (рисованная кнопка «← Назад») или из `handle_back()`
+(платформенная кнопка). Оба входа ставят флаг в `ComponentContext`, хост читает
+его через `take_back_request()` и выполняет `pop` активного экрана.
 
 ### `LifecycleObserver`
 - `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`
@@ -48,6 +52,8 @@ egui — immediate-mode GUI, где состояние хранится в за�
 - Контекст компонента (не generic)
 - `back_dispatcher: BackDispatcher` — регистрация кастомных обработчиков Back
 - `finish_requested: bool` — флаг завершения приложения
+- `request_back()` — единый способ запросить навигацию назад (из `handle` / `handle_back`)
+- `take_back_request()` — чтение и сброс запроса назад (вызывается хостом)
 
 ### `BackDispatcher`
 - Центральный менеджер кнопки Back
@@ -66,7 +72,9 @@ egui — immediate-mode GUI, где состояние хранится в за�
 ## Пример
 
 ```rust
-use egui_android_core::{Component, ComponentNode, LifecycleObserver, UiWrapper, PersistentState};
+use egui_android_core::{
+    Component, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper, PersistentState,
+};
 use egui_android_runtime::Dispatcher;
 
 #[derive(Component, ComponentNode)]
@@ -83,11 +91,11 @@ impl Component for CounterScreen {
     type State = i32;
     type Message = Msg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>, ctx: &ComponentContext) {
         // рендеринг
     }
 
-    fn handle(&mut self, msg: Msg) {
+    fn handle(&mut self, msg: Msg, ctx: &mut ComponentContext) {
         match msg {
             Msg::Increment => self.counter += 1,
             Msg::Reset => self.counter = 0,

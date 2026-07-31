@@ -18,7 +18,6 @@ pub use egui_android_runtime as runtime;
 pub use egui_android_ui as ui;
 
 // Реэкспорт макросов
-pub use egui_android_macros::component;
 pub use egui_android_macros::Component;
 pub use egui_android_macros::ComponentNode;
 
@@ -27,9 +26,6 @@ pub mod prelude {
     pub use egui_android_core::{
         Component, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
     };
-    pub use egui_android_macros::component;
-    pub use egui_android_macros::Component as ComponentDerive;
-    pub use egui_android_macros::ComponentNode as ComponentNodeDerive;
     pub use egui_android_navigation::{ChildStack, ComponentFactory};
     pub use egui_android_platform::Waker;
     pub use egui_android_runtime::{

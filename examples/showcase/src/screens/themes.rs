@@ -1,6 +1,8 @@
 //! ThemesScreen — демонстрация тем (light/dark).
 
-use egui_android_framework::core::{Component as UiComponent, LifecycleObserver, UiWrapper};
+use egui_android_framework::core::{
+    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
+};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -33,7 +35,12 @@ impl UiComponent for ThemesScreen {
     type State = ();
     type Message = RootMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         // Применяем тему
         if self.is_dark_mode {
             MaterialTheme::dark().apply(ui.ctx());
@@ -151,7 +158,7 @@ impl UiComponent for ThemesScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
 
     fn state(&self) -> &Self::State {
         &()

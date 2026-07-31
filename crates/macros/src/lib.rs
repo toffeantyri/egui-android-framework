@@ -249,14 +249,23 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl ::egui_android_framework::core::ComponentNode for #name {
-            fn render(&self, ui: &mut ::egui_android_framework::core::UiWrapper, dispatch: &::egui_android_framework::runtime::DynDispatcher) {
+            fn render(
+                &self,
+                ui: &mut ::egui_android_framework::core::UiWrapper,
+                dispatch: &::egui_android_framework::runtime::DynDispatcher,
+                ctx: &::egui_android_framework::core::ComponentContext,
+            ) {
                 let typed = dispatch.wrap::<#msg_type>();
-                ::egui_android_framework::core::Component::render(self, ui, &typed);
+                ::egui_android_framework::core::Component::render(self, ui, &typed, ctx);
             }
 
-            fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+            fn handle_dyn(
+                &mut self,
+                msg: Box<dyn std::any::Any + Send>,
+                ctx: &mut ::egui_android_framework::core::ComponentContext,
+            ) {
                 if let Ok(typed) = msg.downcast::<#msg_type>() {
-                    ::egui_android_framework::core::Component::handle(self, *typed);
+                    ::egui_android_framework::core::Component::handle(self, *typed, ctx);
                 } else {
                     log::error!(
                         "ComponentNode::handle_dyn: ошибка типа сообщения — ожидался {}, получен неизвестный тип",
@@ -265,7 +274,7 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
                 }
             }
 
-            fn handle_back(&mut self) -> bool {
+            fn handle_back(&mut self, _ctx: &mut ::egui_android_framework::core::ComponentContext) -> bool {
                 false
             }
 

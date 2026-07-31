@@ -13,7 +13,7 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::{Component, LifecycleObserver, UiWrapper},
+    core::{Component, ComponentContext, LifecycleObserver, UiWrapper},
     platform::Waker,
     runtime::{Application, Dispatcher, RuntimeConfig, RuntimeContext, StateStore, UiNotifier},
     ui::theme::MaterialTheme,
@@ -124,6 +124,7 @@ impl Application for CounterApp {
         self.root.sync_from_store();
 
         let (uimsg_tx, uimsg_rx) = Dispatcher::new();
+        let mut app_ctx = ComponentContext::new();
 
         let full_output = egui_ctx.run_ui(raw_input, |ctx| {
             egui::CentralPanel::default()
@@ -135,7 +136,7 @@ impl Application for CounterApp {
                 )
                 .show(ctx, |ui| {
                     let mut wrapper = UiWrapper::new_unconstrained(ui);
-                    self.root.render(&mut wrapper, &uimsg_tx);
+                    self.root.render(&mut wrapper, &uimsg_tx, &app_ctx);
                 });
         });
 
@@ -153,7 +154,7 @@ impl Application for CounterApp {
                     );
                 }
                 _ => {
-                    self.root.handle(msg.clone());
+                    self.root.handle(msg.clone(), &mut app_ctx);
                     let _ = self.datacmd_tx.send(msg);
                 }
             }

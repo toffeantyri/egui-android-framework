@@ -4,6 +4,7 @@
 //! каждый со своим типом сообщений и своим `ChildStack`.
 //! `NavigationHost` ничего не знает про эти слои — вся навигация внутри
 //! `NestedScreen` управляется через `handle_dyn()` и `handle_back()`.
+//! Запрос ухода в корневой стек — через `ctx.request_back()` (когда слои пусты).
 //!
 //! # Слои
 //!
@@ -18,7 +19,8 @@
 //! Это позволяет добавлять новые слои без изменения существующего кода.
 
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentNode, LifecycleObserver, PersistentState, UiWrapper,
+    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, PersistentState,
+    UiWrapper,
 };
 use egui_android_framework::navigation::{ChildStack, ComponentFactory};
 use egui_android_framework::runtime::{Dispatcher, DynDispatcher, SavedStack};
@@ -28,7 +30,6 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
-use egui_android_framework::ComponentNode as ComponentNodeDerive;
 
 use crate::navigation::{NestedLayer2Msg, NestedLayer2Route, NestedMsg, NestedRoute};
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 /// Подэкран слоя 1: A, B или C.
 /// Содержит только заголовок и кнопку «← Назад».
-#[derive(ComponentNodeDerive)]
+#[derive(egui_android_framework::ComponentNode)]
 #[component_message(NestedMsg)]
 pub struct Layer1Sub {
     label: String,
@@ -65,7 +66,12 @@ impl UiComponent for Layer1Sub {
     type State = ();
     type Message = NestedMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = Theme::current_from_ui(ui).colors;
         Column::new().show(ui, dispatch, |ui, dispatch| {
             Text::new(&self.label)
@@ -81,7 +87,7 @@ impl UiComponent for Layer1Sub {
         });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
     }
@@ -89,7 +95,7 @@ impl UiComponent for Layer1Sub {
 
 /// Подэкран слоя 2: X или Y.
 /// Содержит только заголовок и кнопку «← Назад».
-#[derive(ComponentNodeDerive)]
+#[derive(egui_android_framework::ComponentNode)]
 #[component_message(NestedLayer2Msg)]
 pub struct Layer2Sub {
     label: String,
@@ -116,7 +122,12 @@ impl UiComponent for Layer2Sub {
     type State = ();
     type Message = NestedLayer2Msg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = Theme::current_from_ui(ui).colors;
         Column::new().show(ui, dispatch, |ui, dispatch| {
             Text::new(&self.label)
@@ -132,7 +143,7 @@ impl UiComponent for Layer2Sub {
         });
     }
 
-    fn handle(&mut self, _msg: Self::Message) {}
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
     }
@@ -221,13 +232,13 @@ impl PersistentState for NestedScreen {
 }
 
 impl ::egui_android_framework::core::ComponentNode for NestedScreen {
-    fn render(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
+    fn render(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher, ctx: &ComponentContext) {
         // Если есть активный подэкран — показываем только его
         if let Some(active) = self.stack_layer2.active() {
-            return active.render(ui, uidynmsg_tx);
+            return active.render(ui, uidynmsg_tx, ctx);
         }
         if let Some(active) = self.stack_layer1.active() {
-            return active.render(ui, uidynmsg_tx);
+            return active.render(ui, uidynmsg_tx, ctx);
         }
 
         // Нет активных подэкранов — показываем меню слоя
@@ -303,7 +314,7 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
         });
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
         match msg.downcast::<NestedMsg>() {
             Ok(m) => {
                 log::debug!("NestedScreen: NestedMsg = {:?}", m);
@@ -315,8 +326,11 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
                         if self.layer2_open {
                             self.stack_layer2.clear();
                             self.layer2_open = false;
-                        } else {
+                        } else if !self.stack_layer1.is_empty() {
                             self.stack_layer1.pop();
+                        } else {
+                            // Внутренние стеки пусты — передаём навигацию назад в корневой стек.
+                            ctx.request_back();
                         }
                     }
                     NestedMsg::OpenLayer2 => self.layer2_open = true,
@@ -348,7 +362,7 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
         }
     }
 
-    fn handle_back(&mut self) -> bool {
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
         if self.layer2_open {
             if !self.stack_layer2.is_empty() {
                 self.stack_layer2.pop();

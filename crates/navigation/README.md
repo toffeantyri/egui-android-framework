@@ -25,7 +25,7 @@
 - **`replace(config, component)`** — заменить верхний компонент (pop + push за один lifecycle-цикл)
 - **`bring_to_front(config, component)`** — добавить на вершину стека, если такого ещё нет
 - **`clear()`** — очистить стек с destroy всех компонентов
-- **`on_back() -> bool`** — Decompose-style обработка Back: сначала `active.handle_back()`, потом `pop()`. Возвращает `true`, если Back обработан
+- **`on_back(ctx) -> bool`** — Decompose-style обработка Back: сначала `active.handle_back(ctx)`, потом `pop()`. Возвращает `true`, если Back обработан. `ctx` пробрасывается в `handle_back()` для доступа к `request_back()`
 - **`active() / active_mut()`** — доступ к активному компоненту
 - **`save() -> SavedStack<C>`** — сериализация стека для save/restore
 - **`restore(saved, factory)`** — восстановление стека из сохранённого состояния
@@ -55,7 +55,7 @@ impl ComponentFactory<Route> for MyFactory {
 
 ```rust
 use egui_android_navigation::{ChildStack, ComponentFactory};
-use egui_android_core::ComponentNode;
+use egui_android_core::{ComponentContext, ComponentNode};
 
 enum Route { Home, Settings }
 
@@ -74,7 +74,8 @@ let mut stack = ChildStack::new();
 stack.push(Route::Home, factory.create(Route::Home));
 stack.push(Route::Settings, factory.create(Route::Settings));
 
-if stack.on_back() {
+let mut ctx = ComponentContext::new();
+if stack.on_back(&mut ctx) {
     // Settings popped, вернулись на Home
 }
 

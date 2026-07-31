@@ -5,10 +5,13 @@
 //!
 //! # Обработка Back (Decompose-style)
 //!
-//! 1. `stack.on_back()` — цепочка внутри ChildStack:
-//!    - `active.handle_back()` — компонент перехватывает (NestedScreen, BackCustomScreen)
+//! 1. Стек/сообщения: экран зовёт `ctx.request_back()` (рисованная кнопка)
+//!    или `handle_back(ctx)` (платформенная). Оба ставят флаг в `ComponentContext`.
+//! 2. `stack.on_back(ctx)` — цепочка внутри ChildStack:
+//!    - `active.handle_back(ctx)` — компонент перехватывает (NestedScreen, BackCustomScreen)
 //!    - `pop()` — стандартное поведение
-//! 2. Если `on_back()` вернул `false` — стек пуст или Home → `finish_requested = true`
+//! 3. Хост читает `ctx.take_back_request()`; если экран запросил back — делает `pop`.
+//! 4. Если `on_back()` вернул `false` — стек пуст или Home → `finish_requested = true`
 
 use egui_android_framework::{
     core::{ComponentContext, LifecycleObserver, UiWrapper},
@@ -74,23 +77,26 @@ impl NavigationHost {
 
     /// Обработать Back.
     ///
-    /// Делегирует `ChildStack::on_back()`.
+    /// Делегирует `ChildStack::on_back(ctx)`.
     /// Если Back не обработан — завершение приложения.
     pub fn on_back(&mut self) {
-        if !self.stack.on_back() {
+        let handled = self.stack.on_back(&mut self.context);
+        // Если компонент перехватил Back и запросил навигацию через ctx.request_back() —
+        // выполняем pop (экран сам попросил закрыться).
+        if self.context.take_back_request() {
+            self.stack.pop();
+        } else if !handled {
             self.context.finish_requested = true;
         }
     }
 
     /// Проверить, запросил ли активный компонент навигацию назад.
     ///
-    /// Вызывается после `handle_dyn()`.
-    /// Если компонент выставил `back_requested` — делаем pop.
+    /// Вызывается после `handle_dyn()` / `handle_back()`.
+    /// Если компонент вызвал `ctx.request_back()` — делаем pop.
     pub fn check_back_request(&mut self) {
-        if let Some(active) = self.stack.active_mut() {
-            if active.take_back_request() {
-                self.on_back();
-            }
+        if self.context.take_back_request() {
+            self.on_back();
         }
     }
 
@@ -110,9 +116,14 @@ impl NavigationHost {
     }
 
     /// Рендеринг с DynDispatcher.
-    pub fn render_dyn(&self, ui: &mut UiWrapper, uidynmsg_tx: &DynDispatcher) {
+    pub fn render_dyn(
+        &self,
+        ui: &mut UiWrapper,
+        uidynmsg_tx: &DynDispatcher,
+        ctx: &ComponentContext,
+    ) {
         if let Some(active) = self.stack.active() {
-            active.render(ui, uidynmsg_tx);
+            active.render(ui, uidynmsg_tx, ctx);
         }
     }
 

@@ -8,7 +8,7 @@
 
 pub use egui_android_framework::core;
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentNode, LifecycleObserver, UiWrapper,
+    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
 };
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
@@ -33,17 +33,12 @@ pub enum StateScreenMsg {
 #[persistent_fields(counter)]
 pub struct StateScreen {
     counter: i32,
-    /// Флаг: запрошена навигация назад после обработки сообщения.
-    /// Проверяется фреймворком через `ComponentNode::take_back_request()`.
-    back_requested: bool,
+    // Поле back_requested не нужно — флаг навигации назад живёт в ComponentContext.
 }
 
 impl StateScreen {
     pub fn new() -> Self {
-        Self {
-            counter: 0,
-            back_requested: false,
-        }
+        Self { counter: 0 }
     }
 }
 
@@ -54,21 +49,25 @@ impl ComponentNode for StateScreen {
         &self,
         ui: &mut UiWrapper,
         dispatch: &::egui_android_framework::runtime::DynDispatcher,
+        ctx: &ComponentContext,
     ) {
         let typed = dispatch.wrap::<StateScreenMsg>();
-        UiComponent::render(self, ui, &typed);
+        UiComponent::render(self, ui, &typed, ctx);
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
         if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
-            UiComponent::handle(self, *typed);
+            UiComponent::handle(self, *typed, ctx);
         } else {
             log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
         }
     }
 
-    fn handle_back(&mut self) -> bool {
-        false
+    fn handle_back(&mut self, ctx: &mut ComponentContext) -> bool {
+        // Платформенная Back: та же кастомная логика, что и у рисованной кнопки.
+        self.counter = 0;
+        ctx.request_back();
+        true // перехватили — ChildStack сам не делает pop, фреймворк выполнит pop
     }
 
     fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
@@ -77,10 +76,6 @@ impl ComponentNode for StateScreen {
 
     fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
         ::egui_android_framework::core::PersistentState::restore_from_boxed(self, state);
-    }
-
-    fn take_back_request(&mut self) -> bool {
-        std::mem::replace(&mut self.back_requested, false)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -96,7 +91,12 @@ impl UiComponent for StateScreen {
     type State = ();
     type Message = StateScreenMsg;
 
-    fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<Self::Message>) {
+    fn render(
+        &self,
+        ui: &mut UiWrapper,
+        dispatch: &Dispatcher<Self::Message>,
+        _ctx: &ComponentContext,
+    ) {
         let c = &Theme::current_from_ui(ui).colors;
 
         Column::new()
@@ -183,7 +183,7 @@ impl UiComponent for StateScreen {
             });
     }
 
-    fn handle(&mut self, msg: Self::Message) {
+    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
         match msg {
             StateScreenMsg::Increment => self.counter += 1,
             StateScreenMsg::Decrement => self.counter -= 1,
@@ -191,7 +191,7 @@ impl UiComponent for StateScreen {
             StateScreenMsg::Back => {
                 // Кастомная логика: сброс + навигация назад
                 self.counter = 0;
-                self.back_requested = true;
+                ctx.request_back();
             }
         }
     }

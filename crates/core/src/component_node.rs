@@ -12,8 +12,13 @@
 //! [`ComponentNode`] — object-safe трейт с type-erased методами:
 //! - `render` через [`DynDispatcher`]
 //! - `handle_dyn` через `Box<dyn Any + Send>`
-//! - `handle_back` — встроенная поддержка BackPressed (как в Decompose)
+//! - `handle_back(ctx)` — встроенная поддержка BackPressed (как в Decompose).
+//!   Через `ctx.request_back()` экран может запросить навигацию назад — единый механизм
 //! - `save_state` / `restore_state` — сохранение состояния для пересоздания Activity
+//!
+//! Все методы, кроме `handle_back`, принимают [`ComponentContext`] (`ctx`),
+//! через который экран запрашивает навигацию назад (`ctx.request_back()`)
+//! и получает доступ к фреймворковому контексту.
 //!
 //! # Реализация через макрос
 //!
@@ -35,6 +40,7 @@
 //! struct StatefulScreen { counter: i32 }
 //! ```
 
+use crate::component_context::ComponentContext;
 use crate::lifecycle::LifecycleObserver;
 use crate::UiWrapper;
 use egui_android_runtime::DynDispatcher;
@@ -47,49 +53,21 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// Отрисовать UI через type-erased dispatcher.
     ///
     /// Реализация должна получить типизированный `Dispatcher<M>` через
-    /// `dispatch.typed::<Self::Message>()` и передать его в View-функцию.
-    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher);
+    /// `dispatch.typed::<Self::Message>()`, передать его в View-функцию вместе с `ctx`.
+    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx: &ComponentContext);
 
     /// Обработать type-erased сообщение от View.
     ///
-    /// Реализация должна downcast'ить `msg` в `Self::Message` и вызвать `handle()`.
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>);
+    /// Реализация должна downcast'ить `msg` в `Self::Message`, вызвать `handle()`
+    /// и передать в него `ctx`. Через `ctx.request_back()` экран может запросить pop.
+    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext);
 
     /// Обработать BackPressed. Возвращает `true`, если Back перехвачен.
     ///
     /// По умолчанию — `false` (Back не обработан, передаётся дальше).
     /// Экран может переопределить для кастомной обработки Back.
-    fn handle_back(&mut self) -> bool {
-        false
-    }
-
-    /// Запросить навигацию назад после обработки сообщения.
-    ///
-    /// Вызывается фреймворком после `handle_dyn()`.
-    /// Если компонент в `handle()` решил, что нужно сделать pop,
-    /// он выставляет флаг `back_requested` и возвращает `true`.
-    ///
-    /// По умолчанию — `false` (навигация не запрошена).
-    ///
-    /// # Пример
-    ///
-    /// ```ignore
-    /// fn handle(&mut self, msg: Self::Message) {
-    ///     match msg {
-    ///         Msg::Back => {
-    ///             // кастомная логика
-    ///             self.some_field = 0;
-    ///             self.back_requested = true;
-    ///         }
-    ///         // ...
-    ///     }
-    /// }
-    ///
-    /// fn take_back_request(&mut self) -> bool {
-    ///     std::mem::replace(&mut self.back_requested, false)
-    /// }
-    /// ```
-    fn take_back_request(&mut self) -> bool {
+    /// `ctx` даёт доступ к `request_back()` — единый механизм запроса навигации.
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
         false
     }
 
@@ -138,9 +116,15 @@ mod tests {
         type State = ();
         type Message = String;
 
-        fn render(&self, _ui: &mut UiWrapper, _dispatch: &Dispatcher<Self::Message>) {}
+        fn render(
+            &self,
+            _ui: &mut UiWrapper,
+            _dispatch: &Dispatcher<Self::Message>,
+            _ctx: &ComponentContext,
+        ) {
+        }
 
-        fn handle(&mut self, msg: String) {
+        fn handle(&mut self, msg: String, _ctx: &mut ComponentContext) {
             self.handled.push(msg);
         }
 
@@ -160,23 +144,36 @@ mod tests {
         impl crate::Component for NoBack {
             type State = ();
             type Message = ();
-            fn render(&self, _ui: &mut UiWrapper, _dispatch: &Dispatcher<Self::Message>) {}
-            fn handle(&mut self, _msg: ()) {}
+            fn render(
+                &self,
+                _ui: &mut UiWrapper,
+                _dispatch: &Dispatcher<Self::Message>,
+                _ctx: &ComponentContext,
+            ) {
+            }
+            fn handle(&mut self, _msg: (), _ctx: &mut ComponentContext) {}
             fn state(&self) -> &Self::State {
                 &()
             }
         }
         impl crate::ComponentNode for NoBack {
-            fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher) {
+            fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx: &ComponentContext) {
                 let typed = dispatch.wrap::<()>();
-                crate::Component::render(self, ui, &typed);
+                crate::Component::render(self, ui, &typed, ctx);
             }
-            fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>) {
+            fn handle_dyn(
+                &mut self,
+                msg: Box<dyn std::any::Any + Send>,
+                ctx: &mut ComponentContext,
+            ) {
                 if let Ok(typed) = msg.downcast::<()>() {
-                    crate::Component::handle(self, *typed);
+                    crate::Component::handle(self, *typed, ctx);
                 } else {
                     log::error!("ComponentNode::handle_dyn: ошибка типа");
                 }
+            }
+            fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
+                false
             }
             fn as_any(&self) -> &dyn std::any::Any {
                 self
@@ -187,6 +184,7 @@ mod tests {
         }
 
         let mut node: Box<dyn ComponentNode> = Box::new(NoBack);
-        assert!(!node.handle_back());
+        let mut ctx = ComponentContext::new();
+        assert!(!node.handle_back(&mut ctx));
     }
 }
