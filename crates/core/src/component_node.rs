@@ -12,13 +12,13 @@
 //! [`ComponentNode`] — object-safe трейт с type-erased методами:
 //! - `render` через [`DynDispatcher`]
 //! - `handle_dyn` через `Box<dyn Any + Send>`
-//! - `handle_back(ctx)` — встроенная поддержка BackPressed (как в Decompose).
-//!   Через `ctx.request_back()` экран может запросить навигацию назад — единый механизм
+//! - `handle_back(ctx) -> BackAction` — единая точка обработки Back
+//!   (и платформенной, и рисованной кнопки).
 //! - `save_state` / `restore_state` — сохранение состояния для пересоздания Activity
 //!
-//! Все методы, кроме `handle_back`, принимают [`ComponentContext`] (`ctx`),
-//! через который экран запрашивает навигацию назад (`ctx.request_back()`)
-//! и получает доступ к фреймворковому контексту.
+//! Все методы, кроме `handle_back`, принимают [`ComponentContext`] (`ctx`).
+//! Рисованная кнопка «← Назад» делегирует в `handle_back` из `Component::handle()`,
+//! платформенная — через `ChildStack::on_back()`. Оба пути сходятся в `handle_back()`.
 //!
 //! # Реализация через макрос
 //!
@@ -60,7 +60,7 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// Обработать type-erased сообщение от View.
     ///
     /// Реализация должна downcast'ить `msg` в `Self::Message`, вызвать `handle()`
-    /// и передать в него `ctx`. Через `ctx.request_back()` экран может запросить pop.
+    /// и передать в него `ctx`. Для кнопки Back `handle()` делегирует в `handle_back()`.
     fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext);
 
     /// Обработать BackPressed — единая точка и для платформенной,

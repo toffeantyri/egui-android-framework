@@ -33,7 +33,7 @@ pub enum StateScreenMsg {
 #[persistent_fields(counter)]
 pub struct StateScreen {
     counter: i32,
-    // Поле back_requested не нужно — флаг навигации назад живёт в ComponentContext.
+    // Флаг Back теперь не нужен — единая точка логики в handle_back() -> BackAction.
 }
 
 impl StateScreen {

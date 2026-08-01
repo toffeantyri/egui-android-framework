@@ -23,8 +23,8 @@
 //! который зарегистрировал callback — через `ComponentContext`.
 //!
 //! **Лучшая практика:** Для экранов с кастомной обработкой Back используйте
-//! `handle_back(ctx)` напрямую (определён в `ComponentNode`) и вызывайте
-//! `ctx.request_back()` для запроса навигации — а не `BackDispatcher`.
+//! `handle_back(ctx) -> BackAction` напрямую (определён в `ComponentNode`),
+//! а не `BackDispatcher`.
 
 /// Результат обработки BackPressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

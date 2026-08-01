@@ -25,7 +25,7 @@
 - **`replace(config, component)`** — заменить верхний компонент (pop + push за один lifecycle-цикл)
 - **`bring_to_front(config, component)`** — добавить на вершину стека, если такого ещё нет
 - **`clear()`** — очистить стек с destroy всех компонентов
-- **`on_back(ctx) -> bool`** — Decompose-style обработка Back: сначала `active.handle_back(ctx)`, потом `pop()`. Возвращает `true`, если Back обработан. `ctx` пробрасывается в `handle_back()` для доступа к `request_back()`
+- **`on_back(ctx) -> BackAction`** — Decompose-style обработка Back. `active.handle_back(ctx)` возвращает `BackAction`: `Handled`/`Pop`/`Finish`/`Propagate`. Если `Propagate` — `pop()` если стек > 1, иначе `Finish`
 - **`active() / active_mut()`** — доступ к активному компоненту
 - **`save() -> SavedStack<C>`** — сериализация стека для save/restore
 - **`restore(saved, factory)`** — восстановление стека из сохранённого состояния

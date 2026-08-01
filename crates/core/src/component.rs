@@ -44,7 +44,7 @@ pub trait Component: LifecycleObserver + Send + 'static {
     /// Компонент не должен вызывать `egui_ctx.run()` сам —
     /// это делает `run.rs`.
     ///
-    /// `ctx` даёт доступ к фреймворковому контексту (напр. [`ComponentContext::request_back`]).
+    /// `ctx` — фреймворковый контекст компонента.
     fn render(
         &self,
         ui: &mut UiWrapper,
@@ -54,8 +54,8 @@ pub trait Component: LifecycleObserver + Send + 'static {
 
     /// Обработать сообщение от View-функции.
     ///
-    /// `ctx` даёт экрану доступ к фреймворковому контексту,
-    /// в т.ч. возможность запросить навигацию назад через [`ComponentContext::request_back`].
+    /// `ctx` — фреймворковый контекст. Для кнопки Back экран должен делегировать
+    /// в `ComponentNode::handle_back(ctx)`, возвращающую [`crate::BackAction`].
     fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext);
 
     /// Получить ссылку на текущее состояние.

@@ -29,14 +29,13 @@ egui — immediate-mode GUI, где состояние хранится в за�
 - Позволяет складывать в `Vec<Box<dyn ComponentNode>>` компоненты с разными типами сообщений
 - `render(&self, ui, &DynDispatcher, ctx)` — type-erased render
 - `handle_dyn(msg, ctx)` — type-erased handle с downcast
-- `handle_back(ctx) -> bool` — Decompose-style обработка Back
+- `handle_back(ctx) -> BackAction` — единая точка обработки Back (Decompose-style)
 - `save_state() / restore_state()` — save/restore для пересоздания Activity
 - Реализуется через `#[derive(ComponentNode)]` (из `egui-android-macros`)
 
-Единый механизм навигации назад — `ctx.request_back()`: экран вызывает его из
-`Component::handle()` (рисованная кнопка «← Назад») или из `handle_back()`
-(платформенная кнопка). Оба входа ставят флаг в `ComponentContext`, хост читает
-его через `take_back_request()` и выполняет `pop` активного экрана.
+Единый механизм навигации назад — `handle_back(ctx) -> BackAction`. Рисованная кнопка
+делегирует в неё из `Component::handle()`, платформенная — через `ChildStack::on_back()`.
+Один метод, ноль дублирования. `BackAction` = `Handled`/`Pop`/`Finish`/`Propagate`.
 
 ### `LifecycleObserver`
 - `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`
@@ -52,8 +51,6 @@ egui — immediate-mode GUI, где состояние хранится в за�
 - Контекст компонента (не generic)
 - `back_dispatcher: BackDispatcher` — регистрация кастомных обработчиков Back
 - `finish_requested: bool` — флаг завершения приложения
-- `request_back()` — единый способ запросить навигацию назад (из `handle` / `handle_back`)
-- `take_back_request()` — чтение и сброс запроса назад (вызывается хостом)
 
 ### `BackDispatcher`
 - Центральный менеджер кнопки Back

@@ -426,14 +426,15 @@ Object-safe трейт для хранения компонента в `ChildSta
 Методы:
 - `render()` — отрисовка через DynDispatcher
 - `handle_dyn()` — type-erased обработка сообщений
-- `handle_back() -> bool` — кастомный перехват Back (Decompose-style)
+- `handle_back() -> BackAction` — единая точка обработки Back (Decompose-style)
 - `save_state()` / `restore_state()` — сохранение состояния
-- `take_back_request() -> bool` — флаг «сделать Back после handle»
 - `as_any()` / `as_any_mut()` — downcast для тестов
 
 ### Обработка Back (единая система)
 
-Две точки входа — единая цепочка обработки:
+Один метод. Один enum. Ноль дублирования.
+
+Две точки входа — сходятся в `handle_back()`:
 
 ```
 Точка входа A: Системный Back (Android)
@@ -442,28 +443,32 @@ Object-safe трейт для хранения компонента в `ChildSta
       → app.on_back_pressed()
         → NavigationHost::on_back()
           → ChildStack::on_back()
+            → active.handle_back(ctx)
 
 Точка входа B: Кнопка "← Назад" в UI
-  dispatch(RootMsg::Back | StateScreenMsg::Back)
+  dispatch(Msg::Back)
     → DynDispatcher
-      → в app.rs::frame():
-        → downcast<RootMsg>? → handle_msg(RootMsg::Back) → on_back()
-        → downcast не RootMsg? → handle_dyn() → handle()
-          → если компонент выставил back_requested → take_back_request() → on_back()
-
-ChildStack::on_back():
-  1. active.handle_back()       — кастомный перехват (NestedScreen, BackCustomScreen)
-  2. active.take_back_request() — флаг "сделать что-то + pop" (StateScreen)
-  3. pop()                      — если стек > 1
-  4. finish_requested = true     — если стек = 1 (Home)
+      → handle_dyn() → handle()
+        → self.handle_back(ctx)
 ```
 
+`ComponentNode::handle_back(ctx) -> BackAction`:
+- `Handled` — компонент полностью обработал, стек не трогать
+- `Pop` — компонент просит pop текущего экрана
+- `Finish` — компонент просит завершить приложение
+- `Propagate` — компонент не обрабатывает, передать родительскому стеку
+
+`ChildStack::on_back(ctx) -> BackAction`:
+  1. `active.handle_back(ctx)` — кастомный перехват (NestedScreen, BackCustomScreen)
+  2. `Pop` → `pop()`; `Propagate` → `pop()` если стек > 1
+  3. Стек = 1 (Home) → `Finish`
+
 **Правила:**
-- Системный Back и кнопка "← Назад" в UI проходят одну цепочку
-- Компонент с `handle_back() -> true` перехватывает Back, pop не делается
-- Компонент выставляет `back_requested = true` в `handle()`, фреймворк делает pop
-- Для кастомной логики без pop используется `handle_back()`
-- Для кастомной логики + pop используется `take_back_request()`
+- Рисованная кнопка делегирует в `handle_back()` из `Component::handle()`
+- Платформенная кнопка идёт через `ChildStack::on_back()` → `handle_back()`
+- Кастомная логика живёт ТОЛЬКО в `handle_back()`
+- `BackAction::Pop` — единственный способ «логика + pop»
+- `NavigationHost` при `Finish` выставляет `finish_requested = true`
 
 ---
 

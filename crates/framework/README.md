@@ -49,7 +49,7 @@ egui — отличный immediate-mode GUI, но для создания по�
 - ✅ **MVI-архитектура** — Component + Widget + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
 - ✅ **Compose-like UI** — Column, Row, Stack (с двухфазным measure→layout), LazyColumn. Модификаторы: padding, background, border, clip, shadow, alpha, width, height, width_in, height_in, fill_max_width, clickable, wrap_content, size. Анимации: Fade, Slide, AnimatedVisibility. Тема: Material Design 3 (light/dark)
 - ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy)
-- ✅ **Кнопка Back** — единый механизм `ctx.request_back()`: экран вызывает его из `Component::handle()` (рисованная кнопка) или из `handle_back()` (платформенная кнопка). Оба входа ставят флаг в `ComponentContext`, хост делает `pop` активного экрана
+- ✅ **Кнопка Back** — единая точка `handle_back(ctx) -> BackAction`: рисованная кнопка делегирует в неё из `Component::handle()`, платформенная — через `ChildStack::on_back()`. Один метод, ноль дублирования.
 - ✅ **Темы** — Material Design 3 light/dark с полной палитрой, типографикой, скруглениями. Автоматическое определение системной темы
 - ✅ **Системные панели** — автоматическая обработка insets (status bar, navigation bar), смена цвета панелей под тему
 - ✅ **Локальное UI-состояние** — `remember<T>()` (аналог Compose `remember`). Хранится между кадрами, не требует мутабельного доступа

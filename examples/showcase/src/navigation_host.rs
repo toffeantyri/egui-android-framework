@@ -5,13 +5,12 @@
 //!
 //! # Обработка Back (Decompose-style)
 //!
-//! 1. Стек/сообщения: экран зовёт `ctx.request_back()` (рисованная кнопка)
-//!    или `handle_back(ctx)` (платформенная). Оба ставят флаг в `ComponentContext`.
-//! 2. `stack.on_back(ctx)` — цепочка внутри ChildStack:
-//!    - `active.handle_back(ctx)` — компонент перехватывает (NestedScreen, BackCustomScreen)
-//!    - `pop()` — стандартное поведение
-//! 3. Хост читает `ctx.take_back_request()`; если экран запросил back — делает `pop`.
-//! 4. Если `on_back()` вернул `false` — стек пуст или Home → `finish_requested = true`
+//! 1. Стек/сообщения: рисованная кнопка `Msg::Back` → `handle()` делегирует в
+//!    `handle_back(ctx)`; платформенная — через `on_back_pressed()` → `on_back()`.
+//! 2. `stack.on_back(ctx)` — интерпретирует `BackAction`:
+//!    - `Handled` — ничего; `Pop` — pop; `Finish` — завершение.
+//!    - `Propagate` — стандартный pop, либо `Finish` если стек пуст/Home.
+//! 3. Если `on_back()` вернул `Finish` — `finish_requested = true`
 
 use egui_android_framework::{
     core::{BackAction, ComponentContext, LifecycleObserver, UiWrapper},
