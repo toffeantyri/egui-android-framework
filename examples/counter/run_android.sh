@@ -15,8 +15,9 @@ set -euo pipefail
 #
 # Использование:
 #   ./run_android.sh                  # сборка
-#   ./run_android.sh --run           # сборка + установка + логи
-#   ./run_android.sh --release       # release-сборка
+#   ./run_android.sh --clean          # чистая сборка (очистка Gradle)
+#   ./run_android.sh --run            # сборка + установка + логи
+#   ./run_android.sh --release        # release-сборка
 #
 # Поддерживает: Linux, macOS, Windows (Git Bash / MSYS2 / WSL)
 # ============================================================
@@ -82,6 +83,7 @@ CARGO_PROFILE="debug"
 GRADLE_TASK="assembleDebug"
 INSTALL=false
 SHOW_LOGS=false
+CLEAN=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -89,6 +91,7 @@ for arg in "$@"; do
             CARGO_PROFILE="release"
             GRADLE_TASK="assembleRelease"
             ;;
+        --clean) CLEAN=true ;;
         --install) INSTALL=true ;;
         --log) SHOW_LOGS=true ;;
         --run)
@@ -155,6 +158,12 @@ echo "  $JNI_DIR/$TARGET/$LIB_NAME"
 echo ""
 echo "=== 3/4: Сборка APK ==="
 cd "$ANDROID_DIR"
+
+if [ "$CLEAN" = true ]; then
+    echo "  --clean: очищаем прошлую сборку Gradle"
+    ./gradlew clean
+fi
+
 APP_LIB_NAME="$APP_LIB_NAME" APP_PACKAGE="$APP_PACKAGE" ./gradlew "$GRADLE_TASK"
 
 APK_PATH="app/build/outputs/apk/$CARGO_PROFILE/app-$CARGO_PROFILE.apk"
