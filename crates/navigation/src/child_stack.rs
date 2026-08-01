@@ -311,12 +311,17 @@ mod tests {
             let typed = dispatch.wrap::<()>();
             Component::render(self, ui, &typed, ctx);
         }
-        fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
+        fn handle_dyn(
+            &mut self,
+            msg: Box<dyn std::any::Any + Send>,
+            ctx: &mut ComponentContext,
+        ) -> BackAction {
             if let Ok(typed) = msg.downcast::<()>() {
                 Component::handle(self, *typed, ctx);
             } else {
                 log::error!("ComponentNode::handle_dyn: ошибка типа");
             }
+            BackAction::Propagate
         }
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -417,7 +422,12 @@ mod tests {
             _ctx: &ComponentContext,
         ) {
         }
-        fn handle_dyn(&mut self, _msg: Box<dyn std::any::Any + Send>, _ctx: &mut ComponentContext) {
+        fn handle_dyn(
+            &mut self,
+            _msg: Box<dyn std::any::Any + Send>,
+            _ctx: &mut ComponentContext,
+        ) -> BackAction {
+            BackAction::Propagate
         }
         fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
             self.back_called = true;

@@ -48,12 +48,17 @@ impl ComponentNode for BackCustomScreen {
         UiComponent::render(self, ui, &typed, ctx);
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
+    fn handle_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> BackAction {
         if let Ok(typed) = msg.downcast::<RootMsg>() {
             UiComponent::handle(self, *typed, ctx);
         } else {
             log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
         }
+        BackAction::Propagate
     }
 
     /// Кастомная обработка Back: переключает цвет фона.

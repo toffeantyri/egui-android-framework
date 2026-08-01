@@ -263,7 +263,7 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
                 &mut self,
                 msg: Box<dyn std::any::Any + Send>,
                 ctx: &mut ::egui_android_framework::core::ComponentContext,
-            ) {
+            ) -> ::egui_android_framework::core::BackAction {
                 if let Ok(typed) = msg.downcast::<#msg_type>() {
                     ::egui_android_framework::core::Component::handle(self, *typed, ctx);
                 } else {
@@ -272,6 +272,7 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
                         std::any::type_name::<#msg_type>()
                     );
                 }
+                ::egui_android_framework::core::BackAction::Propagate
             }
 
             fn handle_back(&mut self, _ctx: &mut ::egui_android_framework::core::ComponentContext) -> ::egui_android_framework::core::BackAction {

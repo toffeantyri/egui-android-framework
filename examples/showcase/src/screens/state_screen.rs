@@ -55,12 +55,21 @@ impl ComponentNode for StateScreen {
         Component::render(self, ui, &typed, ctx);
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
+    fn handle_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> BackAction {
         if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
+            if matches!(&*typed, StateScreenMsg::Back) {
+                // Рисованная кнопка «← Назад» — единая точка через handle_back.
+                return self.handle_back(ctx);
+            }
             Component::handle(self, *typed, ctx);
         } else {
             log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
         }
+        BackAction::Propagate
     }
 
     fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
@@ -182,15 +191,13 @@ impl Component for StateScreen {
             });
     }
 
-    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
+    fn handle(&mut self, msg: Self::Message, _ctx: &mut ComponentContext) {
         match msg {
             StateScreenMsg::Increment => self.counter += 1,
             StateScreenMsg::Decrement => self.counter -= 1,
             StateScreenMsg::Reset => self.counter = 0,
-            StateScreenMsg::Back => {
-                // Рисованная кнопка — делегируем в единую точку handle_back.
-                self.handle_back(ctx);
-            }
+            // Back обрабатывается в handle_dyn через handle_back — здесь нет.
+            StateScreenMsg::Back => {}
         }
     }
 
@@ -213,12 +220,19 @@ mod tests {
     }
 
     #[test]
-    fn handle_msg_back_delegates_to_handle_back() {
+    fn handle_dyn_back_returns_pop_and_resets() {
         let mut screen = StateScreen::new();
         screen.counter = 99;
         let mut ctx = ComponentContext::new();
-        screen.handle(StateScreenMsg::Back, &mut ctx);
-        // handle_back уже сбросил counter (через делегирование)
-        assert_eq!(screen.counter, 0);
+        let action = screen.handle_dyn(Box::new(StateScreenMsg::Back), &mut ctx);
+        assert_eq!(
+            action,
+            BackAction::Pop,
+            "рисованная Back должна вернуть Pop"
+        );
+        assert_eq!(
+            screen.counter, 0,
+            "кастомная логика сброса должна выполниться"
+        );
     }
 }

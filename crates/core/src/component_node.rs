@@ -60,8 +60,16 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// Обработать type-erased сообщение от View.
     ///
     /// Реализация должна downcast'ить `msg` в `Self::Message`, вызвать `handle()`
-    /// и передать в него `ctx`. Для кнопки Back `handle()` делегирует в `handle_back()`.
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext);
+    /// и передать в него `ctx`.
+    ///
+    /// Возвращает [`BackAction`]: если сообщение — это кнопка «← Назад», экран
+    /// должен вернуть результат своей `handle_back()` (или `Propagate`), что
+    /// поднимает навигацию назад вверх по вложенным стекам.
+    fn handle_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> BackAction;
 
     /// Обработать BackPressed — единая точка и для платформенной,
     /// и для рисованной кнопки «← Назад».
@@ -166,12 +174,13 @@ mod tests {
                 &mut self,
                 msg: Box<dyn std::any::Any + Send>,
                 ctx: &mut ComponentContext,
-            ) {
+            ) -> BackAction {
                 if let Ok(typed) = msg.downcast::<()>() {
                     crate::Component::handle(self, *typed, ctx);
                 } else {
                     log::error!("ComponentNode::handle_dyn: ошибка типа");
                 }
+                BackAction::Propagate
             }
             fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
                 BackAction::Propagate

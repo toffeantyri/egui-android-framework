@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 
 use egui_android_framework::{
-    core::{LifecycleObserver, UiWrapper},
+    core::{BackAction, LifecycleObserver, UiWrapper},
     platform::Waker,
     runtime::{
         Application, DynDispatcher, RuntimeConfig, RuntimeContext, SavedStack, SavedState,
@@ -185,11 +185,21 @@ impl Application for ShowcaseApplication {
                 }
                 Err(msg) => {
                     log::trace!("Получено не-RootMsg сообщение — пробрасываем в handle_dyn()");
-                    {
+                    let action = {
                         let ctx = &mut self.root.context;
                         if let Some(active) = self.root.stack.active_mut() {
-                            active.handle_dyn(msg, ctx);
+                            active.handle_dyn(msg, ctx)
+                        } else {
+                            BackAction::Propagate
                         }
+                    };
+                    // Если активный экран попросил навигацию назад (Pop/Propagate) —
+                    // выполняем on_back корневого стека (pop или завершение).
+                    match action {
+                        BackAction::Pop | BackAction::Propagate => {
+                            self.root.on_back();
+                        }
+                        _ => {}
                     }
                 }
             }

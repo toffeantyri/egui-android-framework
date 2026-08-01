@@ -29,8 +29,6 @@ use serde::{Deserialize, Serialize};
 
 /// Подэкран слоя 1: A, B или C.
 /// Содержит только заголовок и кнопку «← Назад».
-#[derive(egui_android_framework::ComponentNode)]
-#[component_message(NestedMsg)]
 pub struct Layer1Sub {
     label: String,
 }
@@ -80,20 +78,40 @@ impl UiComponent for Layer1Sub {
         });
     }
 
-    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
-        match msg {
-            NestedMsg::Back => {
-                self.handle_back(ctx);
-            }
-            _ => {}
-        }
-    }
+    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
     }
 }
 
-// ─── NestedScreen ──────────────────────────────────────────────────────────
+impl ComponentNode for Layer1Sub {
+    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx: &ComponentContext) {
+        let typed = dispatch.wrap::<NestedMsg>();
+        UiComponent::render(self, ui, &typed, ctx);
+    }
+
+    fn handle_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> BackAction {
+        if let Ok(typed) = msg.downcast::<NestedMsg>() {
+            // Кнопка «← Назад» — подэкран просит закрыть себя (поп родителем).
+            if matches!(&*typed, NestedMsg::Back) {
+                return BackAction::Pop;
+            }
+            UiComponent::handle(self, *typed, ctx);
+        }
+        BackAction::Propagate
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
 
 /// Экран с двухуровневой вложенной навигацией (Decompose-style).
 ///
@@ -215,19 +233,16 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
         });
     }
 
-    fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
-        // Сначала пробуем делегировать активному вложенному подэкрану (рекурсия вглубь).
-        // Как и корневой ChildStack, активный экран получает сообщение первым.
-        if let Some(active) = self.stack.active_mut() {
-            active.handle_dyn(msg, ctx);
-            return;
-        }
-
-        // Активных подэкранов нет — обрабатываем сообщения меню слоя 1.
+    fn handle_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> BackAction {
+        // Сначала пробуем распознать собственное сообщение (меню слоя 1).
         match msg.downcast::<NestedMsg>() {
             Ok(m) => {
                 log::debug!("NestedScreen: NestedMsg = {:?}", m);
-                match *m {
+                return match *m {
                     NestedMsg::Navigate(r) => {
                         let component: Box<dyn ComponentNode> = match &r {
                             NestedRoute::Layer2 => {
@@ -236,17 +251,27 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
                             r => Box::new(Layer1Sub::from_route(r)),
                         };
                         self.stack.push(r.clone(), component);
+                        // Обработано — не поднимаем и не закрываем подэкран.
+                        BackAction::Handled
                     }
-                    NestedMsg::Back => {
-                        // Обрабатывается через ComponentNode::handle_back во внешнем стеке.
-                    }
-                }
+                    NestedMsg::Back => self.handle_back(ctx),
+                };
             }
+            // Чужое сообщение — делегируем активному подэкрану.
             Err(msg) => {
-                log::error!(
-                    "NestedScreen::handle_dyn: не удалось downcast — ожидался NestedMsg, получен {:?}",
-                    std::any::type_name_of_val(&msg)
-                );
+                if let Some(active) = self.stack.active_mut() {
+                    return match active.handle_dyn(msg, ctx) {
+                        // Подэкран попросил закрыть себя (кнопка «← Назад»)
+                        // или не обработал (Propagate) — закрываем активный подэкран.
+                        BackAction::Pop | BackAction::Propagate => {
+                            self.stack.pop();
+                            BackAction::Handled
+                        }
+                        BackAction::Handled => BackAction::Handled,
+                        BackAction::Finish => BackAction::Finish,
+                    };
+                }
+                BackAction::Propagate
             }
         }
     }
@@ -329,5 +354,30 @@ mod tests {
         let mut screen = NestedScreen::new();
         let mut ctx = ComponentContext::new();
         assert_eq!(screen.handle_back(&mut ctx), BackAction::Propagate);
+    }
+
+    #[test]
+    fn back_button_on_subscreen_closes_only_that_subscreen() {
+        // Nested -> Layer2 (активен Layer2Screen) -> открыт подэкран X.
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+        screen.handle_dyn(Box::new(NestedMsg::Navigate(NestedRoute::Layer2)), &mut ctx);
+        screen.handle_dyn(
+            Box::new(NestedLayer2Msg::Navigate(NestedLayer2Route::X)),
+            &mut ctx,
+        );
+
+        // Кнопка «← Назад» на подэкране X шлёт NestedLayer2Msg::Back.
+        let action = screen.handle_dyn(Box::new(NestedLayer2Msg::Back), &mut ctx);
+        assert_eq!(action, BackAction::Handled, "подэкран закрыт пойман");
+
+        // Подэкран X закрылся, но Layer2Screen и NestedScreen остались.
+        let layer2 = screen.stack.active().unwrap();
+        let layer2 = layer2
+            .as_any()
+            .downcast_ref::<crate::screens::layer2_screen::Layer2Screen>()
+            .unwrap();
+        assert_eq!(layer2.stack.len(), 0, "X закрыт внутри слоя 2");
+        assert_eq!(screen.stack.len(), 1, "Layer2 остался в NestedScreen");
     }
 }
