@@ -239,10 +239,19 @@ impl ::egui_android_framework::core::ComponentNode for Layer2Screen {
         }
     }
 
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
-        if !self.stack.is_empty() {
-            self.stack.pop();
-            return BackAction::Handled;
+    fn handle_back(&mut self, ctx: &mut ComponentContext) -> BackAction {
+        // Рекурсивно вглубь: активный подэкран обрабатывает Back первым,
+        // чтобы системная Back закрывала самый глубокий экран (X).
+        if let Some(active) = self.stack.active_mut() {
+            return match active.handle_back(ctx) {
+                // Подэкран просит закрыть себя или не обработал — закрываем его.
+                BackAction::Pop | BackAction::Propagate => {
+                    self.stack.pop();
+                    BackAction::Handled
+                }
+                BackAction::Handled => BackAction::Handled,
+                BackAction::Finish => BackAction::Finish,
+            };
         }
         // Стек пуст — передаём родительскому стеку.
         BackAction::Propagate

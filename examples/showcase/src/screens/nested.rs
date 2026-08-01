@@ -276,10 +276,20 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
         }
     }
 
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
-        if !self.stack.is_empty() {
-            self.stack.pop();
-            return BackAction::Handled;
+    fn handle_back(&mut self, ctx: &mut ComponentContext) -> BackAction {
+        // Рекурсивно вглубь: активный подэкран обрабатывает Back первым,
+        // чтобы системная Back закрывала самый глубокий экран (X), а не прыгала
+        // через несколько уровней сразу.
+        if let Some(active) = self.stack.active_mut() {
+            return match active.handle_back(ctx) {
+                // Подэкран просит закрыть себя или не обработал — закрываем его.
+                BackAction::Pop | BackAction::Propagate => {
+                    self.stack.pop();
+                    BackAction::Handled
+                }
+                BackAction::Handled => BackAction::Handled,
+                BackAction::Finish => BackAction::Finish,
+            };
         }
         // Внутренний стек пуст — передаём родительскому стеку.
         BackAction::Propagate
@@ -379,5 +389,27 @@ mod tests {
             .unwrap();
         assert_eq!(layer2.stack.len(), 0, "X закрыт внутри слоя 2");
         assert_eq!(screen.stack.len(), 1, "Layer2 остался в NestedScreen");
+    }
+
+    #[test]
+    fn platform_back_on_subscreen_closes_only_that_subscreen() {
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+        screen.handle_dyn(Box::new(NestedMsg::Navigate(NestedRoute::Layer2)), &mut ctx);
+        screen.handle_dyn(
+            Box::new(NestedLayer2Msg::Navigate(NestedLayer2Route::X)),
+            &mut ctx,
+        );
+
+        let action = screen.handle_back(&mut ctx);
+        assert_eq!(action, BackAction::Handled);
+
+        let layer2 = screen.stack.active().unwrap();
+        let layer2 = layer2
+            .as_any()
+            .downcast_ref::<crate::screens::layer2_screen::Layer2Screen>()
+            .unwrap();
+        assert_eq!(layer2.stack.len(), 0, "X закрыт слоем 2");
+        assert_eq!(screen.stack.len(), 1, "Layer2 остался");
     }
 }
