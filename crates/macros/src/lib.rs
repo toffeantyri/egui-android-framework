@@ -274,8 +274,8 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
                 }
             }
 
-            fn handle_back(&mut self, _ctx: &mut ::egui_android_framework::core::ComponentContext) -> bool {
-                false
+            fn handle_back(&mut self, _ctx: &mut ::egui_android_framework::core::ComponentContext) -> ::egui_android_framework::core::BackAction {
+                ::egui_android_framework::core::BackAction::Propagate
             }
 
             #save_restore

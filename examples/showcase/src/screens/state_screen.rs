@@ -8,7 +8,7 @@
 
 pub use egui_android_framework::core;
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
+    BackAction, Component, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
 };
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
@@ -52,22 +52,21 @@ impl ComponentNode for StateScreen {
         ctx: &ComponentContext,
     ) {
         let typed = dispatch.wrap::<StateScreenMsg>();
-        UiComponent::render(self, ui, &typed, ctx);
+        Component::render(self, ui, &typed, ctx);
     }
 
     fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
         if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
-            UiComponent::handle(self, *typed, ctx);
+            Component::handle(self, *typed, ctx);
         } else {
             log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
         }
     }
 
-    fn handle_back(&mut self, ctx: &mut ComponentContext) -> bool {
-        // Платформенная Back: та же кастомная логика, что и у рисованной кнопки.
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        // Единая точка кастомной логики — и для рисованной, и для платформенной кнопки.
         self.counter = 0;
-        ctx.request_back();
-        true // перехватили — ChildStack сам не делает pop, фреймворк выполнит pop
+        BackAction::Pop
     }
 
     fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
@@ -87,7 +86,7 @@ impl ComponentNode for StateScreen {
     }
 }
 
-impl UiComponent for StateScreen {
+impl Component for StateScreen {
     type State = ();
     type Message = StateScreenMsg;
 
@@ -189,14 +188,37 @@ impl UiComponent for StateScreen {
             StateScreenMsg::Decrement => self.counter -= 1,
             StateScreenMsg::Reset => self.counter = 0,
             StateScreenMsg::Back => {
-                // Кастомная логика: сброс + навигация назад
-                self.counter = 0;
-                ctx.request_back();
+                // Рисованная кнопка — делегируем в единую точку handle_back.
+                self.handle_back(ctx);
             }
         }
     }
 
     fn state(&self) -> &Self::State {
         &()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_resets_counter_and_pops() {
+        let mut screen = StateScreen::new();
+        screen.counter = 42;
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Pop);
+        assert_eq!(screen.counter, 0);
+    }
+
+    #[test]
+    fn handle_msg_back_delegates_to_handle_back() {
+        let mut screen = StateScreen::new();
+        screen.counter = 99;
+        let mut ctx = ComponentContext::new();
+        screen.handle(StateScreenMsg::Back, &mut ctx);
+        // handle_back уже сбросил counter (через делегирование)
+        assert_eq!(screen.counter, 0);
     }
 }

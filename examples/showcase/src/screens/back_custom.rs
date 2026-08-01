@@ -5,7 +5,8 @@
 //! возвращается на Home только при повторном Back (через back_fallback).
 
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
+    BackAction, Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver,
+    UiWrapper,
 };
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
@@ -56,14 +57,14 @@ impl ComponentNode for BackCustomScreen {
     }
 
     /// Кастомная обработка Back: переключает цвет фона.
-    /// Первый вызов — переключение (true), второй — pop (false).
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
+    /// Первый вызов — переключение (Handled), второй — Propagate.
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
         match self.bg {
             BgColor::Blue => {
                 self.bg = BgColor::Green;
-                true
+                BackAction::Handled
             }
-            BgColor::Green => false,
+            BgColor::Green => BackAction::Propagate,
         }
     }
 
@@ -149,9 +150,46 @@ impl UiComponent for BackCustomScreen {
             });
     }
 
-    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
+    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
+        match msg {
+            RootMsg::Back => {
+                self.handle_back(ctx);
+            }
+            _ => {}
+        }
+    }
 
     fn state(&self) -> &Self::State {
         &()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_back_intercepts() {
+        let mut screen = BackCustomScreen::new();
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Handled);
+        assert_eq!(screen.bg, BgColor::Green);
+    }
+
+    #[test]
+    fn second_back_propagates() {
+        let mut screen = BackCustomScreen::new();
+        screen.bg = BgColor::Green;
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Propagate);
+    }
+
+    #[test]
+    fn handle_msg_back_delegates_to_handle_back() {
+        let mut screen = BackCustomScreen::new();
+        let mut ctx = ComponentContext::new();
+        screen.handle(RootMsg::Back, &mut ctx);
+        // Первый вызов перехватывает
+        assert_eq!(screen.bg, BgColor::Green);
     }
 }

@@ -40,6 +40,7 @@
 //! struct StatefulScreen { counter: i32 }
 //! ```
 
+use crate::back_action::BackAction;
 use crate::component_context::ComponentContext;
 use crate::lifecycle::LifecycleObserver;
 use crate::UiWrapper;
@@ -62,13 +63,13 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// и передать в него `ctx`. Через `ctx.request_back()` экран может запросить pop.
     fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext);
 
-    /// Обработать BackPressed. Возвращает `true`, если Back перехвачен.
+    /// Обработать BackPressed — единая точка и для платформенной,
+    /// и для рисованной кнопки «← Назад».
     ///
-    /// По умолчанию — `false` (Back не обработан, передаётся дальше).
-    /// Экран может переопределить для кастомной обработки Back.
-    /// `ctx` даёт доступ к `request_back()` — единый механизм запроса навигации.
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
-        false
+    /// По умолчанию — [`BackAction::Propagate`] (Back не обработан, передаётся дальше).
+    /// Экран может переопределить для кастомной логики.
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        BackAction::Propagate
     }
 
     /// Сохранить состояние компонента для восстановления после пересоздания.
@@ -172,8 +173,8 @@ mod tests {
                     log::error!("ComponentNode::handle_dyn: ошибка типа");
                 }
             }
-            fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
-                false
+            fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+                BackAction::Propagate
             }
             fn as_any(&self) -> &dyn std::any::Any {
                 self
@@ -185,6 +186,6 @@ mod tests {
 
         let mut node: Box<dyn ComponentNode> = Box::new(NoBack);
         let mut ctx = ComponentContext::new();
-        assert!(!node.handle_back(&mut ctx));
+        assert_eq!(node.handle_back(&mut ctx), BackAction::Propagate);
     }
 }

@@ -1,8 +1,6 @@
 //! ThemesScreen — демонстрация тем (light/dark).
 
-use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
-};
+use egui_android_framework::core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -31,7 +29,7 @@ impl ThemesScreen {
 
 impl LifecycleObserver for ThemesScreen {}
 
-impl UiComponent for ThemesScreen {
+impl Component for ThemesScreen {
     type State = ();
     type Message = RootMsg;
 

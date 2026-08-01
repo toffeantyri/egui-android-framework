@@ -26,7 +26,7 @@
 //! и `Application::on_restore_state()`.
 
 use crate::ComponentFactory;
-use egui_android_core::{ComponentContext, ComponentNode};
+use egui_android_core::{BackAction, ComponentContext, ComponentNode};
 use egui_android_runtime::SavedStack;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
@@ -161,33 +161,36 @@ where
     /// Обработать системный Back.
     ///
     /// Цепочка (как в Decompose):
-    /// 1. `active.handle_back(ctx)` — даём активному компоненту перехватить
-    ///    (NestedScreen, BackCustomScreen). Если вернул `true` — Back обработан.
-    /// 2. Если стек > 1 — делаем `pop()`. Back обработан.
-    /// 3. Если стек = 1 (Home) — возвращаем `false`.
-    ///    Вызывающий (`NavigationHost`) должен установить `finish_requested = true`.
-    ///
-    /// `ctx` — контекст компонента, пробрасывается в `handle_back()`, чтобы
-    /// компонент мог запросить навигацию через [`ComponentContext::request_back`].
-    ///
-    /// Возвращает `true`, если Back обработан (шаг 1 или 2).
-    /// Возвращает `false`, если нужно завершить приложение (шаг 3).
-    pub fn on_back(&mut self, ctx: &mut ComponentContext) -> bool {
+    /// 1. `active.handle_back(ctx)` — кастомный перехват компонента.
+    ///    Возвращает `BackAction`:
+    ///    - `Handled` — компонент полностью обработал, ничего не делаем.
+    ///    - `Pop` — делаем `pop()` активного экрана, возвращаем `Handled`.
+    ///    - `Finish` — немедленное завершение приложения.
+    ///    - `Propagate` — компонент не обработал, идём дальше.
+    /// 2. Если компонент не обработал (`Propagate`) и стек > 1 — `pop()`.
+    /// 3. Если стек = 1 (Home) — возвращаем `Finish`.
+    pub fn on_back(&mut self, ctx: &mut ComponentContext) -> BackAction {
         // Шаг 1: активный компонент может сам обработать Back
         if let Some(active) = self.items.last_mut() {
-            if active.component.handle_back(ctx) {
-                return true;
+            match active.component.handle_back(ctx) {
+                BackAction::Handled => return BackAction::Handled,
+                BackAction::Pop => {
+                    self.pop();
+                    return BackAction::Handled;
+                }
+                BackAction::Finish => return BackAction::Finish,
+                BackAction::Propagate => {} // не обработал — идём дальше
             }
         }
 
         // Шаг 2: стандартное поведение — pop из стека
         if self.items.len() > 1 {
             self.pop();
-            return true;
+            return BackAction::Handled;
         }
 
         // Шаг 3: Home — завершение приложения
-        false
+        BackAction::Finish
     }
 }
 
@@ -378,7 +381,7 @@ mod tests {
     /// Реализует ComponentNode напрямую (не Component), чтобы переопределить handle_back.
     struct BackComp {
         /// Что вернуть из handle_back()
-        pub handle_back_result: bool,
+        pub handle_back_result: BackAction,
         /// Был ли вызван handle_back
         pub back_called: bool,
     }
@@ -386,13 +389,19 @@ mod tests {
     impl BackComp {
         fn new_intercepting() -> Self {
             Self {
-                handle_back_result: true,
+                handle_back_result: BackAction::Handled,
                 back_called: false,
             }
         }
         fn new_passthrough() -> Self {
             Self {
-                handle_back_result: false,
+                handle_back_result: BackAction::Propagate,
+                back_called: false,
+            }
+        }
+        fn new_pop() -> Self {
+            Self {
+                handle_back_result: BackAction::Pop,
                 back_called: false,
             }
         }
@@ -410,7 +419,7 @@ mod tests {
         }
         fn handle_dyn(&mut self, _msg: Box<dyn std::any::Any + Send>, _ctx: &mut ComponentContext) {
         }
-        fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
+        fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
             self.back_called = true;
             self.handle_back_result
         }
@@ -423,26 +432,20 @@ mod tests {
     }
 
     #[test]
-    fn on_back_empty_stack_returns_false() {
+    fn on_back_empty_stack_returns_finish() {
         let mut s: ChildStack<&str> = ChildStack::new();
         let mut ctx = ComponentContext::new();
-        assert!(
-            !s.on_back(&mut ctx),
-            "Пустой стек: on_back должен вернуть false"
-        );
+        assert_eq!(s.on_back(&mut ctx), BackAction::Finish);
         assert!(s.is_empty());
     }
 
     #[test]
-    fn on_back_single_item_returns_false() {
+    fn on_back_single_item_returns_finish() {
         let mut s: ChildStack<&str> = ChildStack::new();
         s.push("home", Box::new(BackComp::new_passthrough()));
         assert_eq!(s.len(), 1);
         let mut ctx = ComponentContext::new();
-        assert!(
-            !s.on_back(&mut ctx),
-            "Один элемент (Home): on_back должен вернуть false"
-        );
+        assert_eq!(s.on_back(&mut ctx), BackAction::Finish);
         assert_eq!(s.len(), 1, "Стек не должен измениться");
     }
 
@@ -453,7 +456,7 @@ mod tests {
         s.push("details", Box::new(BackComp::new_passthrough()));
         assert_eq!(s.len(), 2);
         let mut ctx = ComponentContext::new();
-        assert!(s.on_back(&mut ctx), "Стек > 1: on_back должен вернуть true");
+        assert_eq!(s.on_back(&mut ctx), BackAction::Handled);
         assert_eq!(s.len(), 1, "Должен остаться 1 элемент");
         assert_eq!(s.active_config(), Some(&"home"));
     }
@@ -468,10 +471,7 @@ mod tests {
         let mut ctx = ComponentContext::new();
 
         let result = s.on_back(&mut ctx);
-        assert!(
-            result,
-            "Компонент перехватил Back: on_back должен вернуть true"
-        );
+        assert_eq!(result, BackAction::Handled);
         assert_eq!(
             s.len(),
             2,
@@ -486,108 +486,34 @@ mod tests {
 
     #[test]
     fn on_back_active_passthrough_then_pop() {
-        // Первый компонент перехватывает (диалог внутри экрана),
-        // после его pop следующий пропускает → pop ещё раз
+        // Первый компонент пропускает (Propagate) → pop до home
         let mut s: ChildStack<&str> = ChildStack::new();
         s.push("home", Box::new(BackComp::new_passthrough()));
         s.push("screen", Box::new(BackComp::new_passthrough()));
         assert_eq!(s.len(), 2);
         let mut ctx = ComponentContext::new();
 
-        // Первый Back: экран пропускает → pop до home
-        assert!(s.on_back(&mut ctx));
+        assert_eq!(s.on_back(&mut ctx), BackAction::Handled);
         assert_eq!(s.len(), 1);
         assert_eq!(s.active_config(), Some(&"home"));
 
-        // Второй Back: home пропускает → false (завершение)
-        assert!(!s.on_back(&mut ctx));
+        // Второй Back: home пропускает → Finish
+        assert_eq!(s.on_back(&mut ctx), BackAction::Finish);
         assert_eq!(s.len(), 1, "Home не удаляется");
     }
 
-    /// Компонент, который в `handle()` вызывает `ctx.request_back()`.
-    /// Имитирует рисованную кнопку «← Назад» (сообщение Back).
-    struct RequestBackComp;
-    impl LifecycleObserver for RequestBackComp {}
-    impl Component for RequestBackComp {
-        type State = ();
-        type Message = &'static str;
-        fn render(
-            &self,
-            _ui: &mut UiWrapper,
-            _d: &Dispatcher<Self::Message>,
-            _ctx: &ComponentContext,
-        ) {
-        }
-        fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
-            if msg == "Back" {
-                ctx.request_back();
-            }
-        }
-        fn state(&self) -> &Self::State {
-            &()
-        }
-    }
-    impl egui_android_core::ComponentNode for RequestBackComp {
-        fn render(
-            &self,
-            ui: &mut UiWrapper,
-            dispatch: &egui_android_runtime::DynDispatcher,
-            ctx: &ComponentContext,
-        ) {
-            let typed = dispatch.wrap::<&'static str>();
-            Component::render(self, ui, &typed, ctx);
-        }
-        fn handle_dyn(&mut self, msg: Box<dyn std::any::Any + Send>, ctx: &mut ComponentContext) {
-            if let Ok(typed) = msg.downcast::<&'static str>() {
-                Component::handle(self, *typed, ctx);
-            }
-        }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-            self
-        }
-    }
-
     #[test]
-    fn request_back_in_handle_triggers_pop() {
-        // Имитация хоста: handle_dyn(Back) → pop, если ctx.request_back() вызван.
+    fn on_back_component_requests_pop() {
+        // Компонент возвращает BackAction::Pop → делаем pop
         let mut s: ChildStack<&str> = ChildStack::new();
-        s.push("home", Box::new(RequestBackComp));
-        s.push("details", Box::new(RequestBackComp));
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("pop_me", Box::new(BackComp::new_pop()));
         assert_eq!(s.len(), 2);
         let mut ctx = ComponentContext::new();
 
-        // Активный экран обрабатывает сообщение Back и вызывает request_back.
-        if let Some(active) = s.active_mut() {
-            active.handle_dyn(Box::new("Back"), &mut ctx);
-        }
-        // Хост читает флаг и делает pop.
-        if ctx.take_back_request() {
-            s.pop();
-        }
-
-        assert_eq!(s.len(), 1, "после Back должен остаться 1 элемент");
+        assert_eq!(s.on_back(&mut ctx), BackAction::Handled);
+        assert_eq!(s.len(), 1, "pop должен сработать");
         assert_eq!(s.active_config(), Some(&"home"));
-    }
-
-    #[test]
-    fn non_back_message_does_not_trigger_pop() {
-        // Сообщение, не запрашивающее back, не должно приводить к pop.
-        let mut s: ChildStack<&str> = ChildStack::new();
-        s.push("home", Box::new(RequestBackComp));
-        s.push("details", Box::new(RequestBackComp));
-        assert_eq!(s.len(), 2);
-        let mut ctx = ComponentContext::new();
-
-        if let Some(active) = s.active_mut() {
-            active.handle_dyn(Box::new("Navigate"), &mut ctx);
-        }
-        let requested = ctx.take_back_request();
-
-        assert!(!requested, "Navigate не должен запрашивать back");
-        assert_eq!(s.len(), 2, "стек не меняется без запроса back");
     }
 }
 

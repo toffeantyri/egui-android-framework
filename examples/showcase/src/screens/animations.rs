@@ -1,8 +1,6 @@
 //! AnimationsScreen — демонстрация анимаций AnimatedVisibility, Fade, Slide, AnimationExt.
 
-use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
-};
+use egui_android_framework::core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     animation::{AnimatedVisibility, AnimationExt, SlideDirection},
@@ -29,7 +27,7 @@ impl AnimationsScreen {
 
 impl LifecycleObserver for AnimationsScreen {}
 
-impl UiComponent for AnimationsScreen {
+impl Component for AnimationsScreen {
     type State = ();
     type Message = RootMsg;
 

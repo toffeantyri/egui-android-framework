@@ -14,7 +14,7 @@
 //! 4. Если `on_back()` вернул `false` — стек пуст или Home → `finish_requested = true`
 
 use egui_android_framework::{
-    core::{ComponentContext, LifecycleObserver, UiWrapper},
+    core::{BackAction, ComponentContext, LifecycleObserver, UiWrapper},
     navigation::{ChildStack, ComponentFactory},
     runtime::{DynDispatcher, SavedStack, StateStore},
 };
@@ -77,26 +77,12 @@ impl NavigationHost {
 
     /// Обработать Back.
     ///
-    /// Делегирует `ChildStack::on_back(ctx)`.
-    /// Если Back не обработан — завершение приложения.
+    /// Делегирует `ChildStack::on_back(ctx)`, интерпретирует `BackAction`:
+    /// - `Finish` → `finish_requested = true`.
+    /// - Все остальные варианты уже обработаны стеком (`Handled`/`Pop` → pop выполнен).
     pub fn on_back(&mut self) {
-        let handled = self.stack.on_back(&mut self.context);
-        // Если компонент перехватил Back и запросил навигацию через ctx.request_back() —
-        // выполняем pop (экран сам попросил закрыться).
-        if self.context.take_back_request() {
-            self.stack.pop();
-        } else if !handled {
+        if self.stack.on_back(&mut self.context) == BackAction::Finish {
             self.context.finish_requested = true;
-        }
-    }
-
-    /// Проверить, запросил ли активный компонент навигацию назад.
-    ///
-    /// Вызывается после `handle_dyn()` / `handle_back()`.
-    /// Если компонент вызвал `ctx.request_back()` — делаем pop.
-    pub fn check_back_request(&mut self) {
-        if self.context.take_back_request() {
-            self.on_back();
         }
     }
 

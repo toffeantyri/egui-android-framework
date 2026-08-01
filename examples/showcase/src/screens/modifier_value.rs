@@ -11,9 +11,7 @@
 //! Все цвета берутся из текущей Material Design 3 темы.
 
 use egui::Color32;
-use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, LifecycleObserver, UiWrapper,
-};
+use egui_android_framework::core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
     containers::Column,
@@ -62,7 +60,7 @@ impl ModifierValueScreen {
 
 impl LifecycleObserver for ModifierValueScreen {}
 
-impl UiComponent for ModifierValueScreen {
+impl Component for ModifierValueScreen {
     type State = ();
     type Message = RootMsg;
 

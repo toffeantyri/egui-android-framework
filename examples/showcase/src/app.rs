@@ -191,8 +191,6 @@ impl Application for ShowcaseApplication {
                             active.handle_dyn(msg, ctx);
                         }
                     }
-                    // После handle_dyn проверяем, запросил ли компонент Back
-                    self.root.check_back_request();
                 }
             }
         }

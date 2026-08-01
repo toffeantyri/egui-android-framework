@@ -19,8 +19,8 @@
 //! Это позволяет добавлять новые слои без изменения существующего кода.
 
 use egui_android_framework::core::{
-    Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver, PersistentState,
-    UiWrapper,
+    BackAction, Component as UiComponent, ComponentContext, ComponentNode, LifecycleObserver,
+    PersistentState, UiWrapper,
 };
 use egui_android_framework::navigation::{ChildStack, ComponentFactory};
 use egui_android_framework::runtime::{Dispatcher, DynDispatcher, SavedStack};
@@ -87,7 +87,14 @@ impl UiComponent for Layer1Sub {
         });
     }
 
-    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
+    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
+        match msg {
+            NestedMsg::Back => {
+                self.handle_back(ctx);
+            }
+            _ => {}
+        }
+    }
     fn state(&self) -> &Self::State {
         &()
     }
@@ -143,7 +150,14 @@ impl UiComponent for Layer2Sub {
         });
     }
 
-    fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
+    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
+        match msg {
+            NestedLayer2Msg::Back => {
+                self.handle_back(ctx);
+            }
+            _ => {}
+        }
+    }
     fn state(&self) -> &Self::State {
         &()
     }
@@ -323,15 +337,7 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
                         .stack_layer1
                         .push(r.clone(), Box::new(Layer1Sub::from_route(&r))),
                     NestedMsg::Back => {
-                        if self.layer2_open {
-                            self.stack_layer2.clear();
-                            self.layer2_open = false;
-                        } else if !self.stack_layer1.is_empty() {
-                            self.stack_layer1.pop();
-                        } else {
-                            // Внутренние стеки пусты — передаём навигацию назад в корневой стек.
-                            ctx.request_back();
-                        }
+                        self.handle_back(ctx);
                     }
                     NestedMsg::OpenLayer2 => self.layer2_open = true,
                 }
@@ -362,20 +368,21 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
         }
     }
 
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> bool {
+    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
         if self.layer2_open {
             if !self.stack_layer2.is_empty() {
                 self.stack_layer2.pop();
-                return true;
+                return BackAction::Handled;
             }
             self.layer2_open = false;
-            return true;
+            return BackAction::Handled;
         }
-        if self.stack_layer1.is_empty() {
-            return false;
+        if !self.stack_layer1.is_empty() {
+            self.stack_layer1.pop();
+            return BackAction::Handled;
         }
-        self.stack_layer1.pop();
-        true
+        // Все внутренние стеки пусты — передаём родительскому стеку.
+        BackAction::Propagate
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -391,5 +398,50 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
 
     fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
         PersistentState::restore_from_boxed(self, state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_back_layer2_first() {
+        let mut screen = NestedScreen::new();
+        screen.layer2_open = true;
+        screen
+            .stack_layer2
+            .push(NestedLayer2Route::X, Box::new(Layer2Sub::new("X")));
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Handled);
+        assert!(screen.stack_layer2.is_empty());
+        assert!(screen.layer2_open); // слой 2 ещё «открыт» кнопками
+    }
+
+    #[test]
+    fn handle_back_closes_layer2() {
+        let mut screen = NestedScreen::new();
+        screen.layer2_open = true;
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Handled);
+        assert!(!screen.layer2_open);
+    }
+
+    #[test]
+    fn handle_back_layer1() {
+        let mut screen = NestedScreen::new();
+        screen
+            .stack_layer1
+            .push(NestedRoute::A, Box::new(Layer1Sub::new("A")));
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Handled);
+        assert!(screen.stack_layer1.is_empty());
+    }
+
+    #[test]
+    fn handle_back_empty_propagates() {
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+        assert_eq!(screen.handle_back(&mut ctx), BackAction::Propagate);
     }
 }
