@@ -199,7 +199,10 @@ impl Application for ShowcaseApplication {
                         BackAction::Pop | BackAction::Propagate => {
                             self.root.on_back();
                         }
-                        _ => {}
+                        BackAction::Finish => {
+                            self.root.context.finish_requested = true;
+                        }
+                        BackAction::Handled => {}
                     }
                 }
             }

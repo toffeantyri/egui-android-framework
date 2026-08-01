@@ -254,7 +254,17 @@ impl ::egui_android_framework::core::ComponentNode for NestedScreen {
                         // Обработано — не поднимаем и не закрываем подэкран.
                         BackAction::Handled
                     }
-                    NestedMsg::Back => self.handle_back(ctx),
+                    NestedMsg::Back => {
+                        if self.stack.is_empty() {
+                            // Меню без подэкранов — просим родительский стек сделать pop.
+                            // app.rs вызовет on_back() → handle_back() (один раз).
+                            BackAction::Propagate
+                        } else {
+                            // Есть активный подэкран — обрабатываем здесь:
+                            // handle_back рекурсивно закроет подэкран и вернёт Handled.
+                            self.handle_back(ctx)
+                        }
+                    }
                 };
             }
             // Чужое сообщение — делегируем активному подэкрану.
@@ -411,5 +421,77 @@ mod tests {
             .unwrap();
         assert_eq!(layer2.stack.len(), 0, "X закрыт слоем 2");
         assert_eq!(screen.stack.len(), 1, "Layer2 остался");
+    }
+
+    /// Проверяет, что handle_dyn для NestedMsg::Back на пустом меню
+    /// НЕ вызывает handle_back, а возвращает Propagate.
+    ///
+    /// Баг: раньше handle_dyn вызывал self.handle_back(ctx),
+    /// а затем app.rs вызывал on_back() → handle_back() повторно.
+    #[test]
+    fn handle_dyn_back_empty_menu_returns_propagate() {
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+
+        // Пустой внутренний стек — меню слоя 1.
+        // Кнопка «← Назад» шлёт NestedMsg::Back.
+        let action = screen.handle_dyn(Box::new(NestedMsg::Back), &mut ctx);
+
+        assert_eq!(
+            action,
+            BackAction::Propagate,
+            "handle_dyn для Back на пустом меню должен вернуть Propagate"
+        );
+        assert!(screen.stack.is_empty(), "внутренний стек не изменился");
+    }
+
+    /// Проверяет, что handle_dyn для NestedMsg::Back при наличии подэкрана
+    /// вызывает handle_back (ровно 1 раз) и возвращает Handled.
+    ///
+    /// Это корректный кейс: подэкран шлёт Back, родительский NestedScreen
+    /// обрабатывает это через handle_back (pop подэкрана).
+    /// app.rs получает Handled и не вызывает on_back повторно.
+    #[test]
+    fn handle_dyn_back_with_subscreen_calls_handle_back_once() {
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+        // Добавляем подэкран A
+        screen
+            .stack
+            .push(NestedRoute::A, Box::new(Layer1Sub::new("A")));
+        assert_eq!(screen.stack.len(), 1);
+
+        // Рисованная кнопка на подэкране A шлёт NestedMsg::Back
+        let action = screen.handle_dyn(Box::new(NestedMsg::Back), &mut ctx);
+
+        assert_eq!(
+            action,
+            BackAction::Handled,
+            "handle_dyn с подэкраном должен вернуть Handled (подэкран закрыт)"
+        );
+        assert!(screen.stack.is_empty(), "подэкран A должен быть закрыт");
+    }
+
+    /// Полная цепочка: NestedScreen (пустое меню) → handle_dyn Back →
+    /// Propagate → app.rs → on_back() → handle_back → Propagate →
+    /// корневой стек pop.
+    /// Проверяет, что handle_back вызывается ровно 1 раз из on_back.
+    #[test]
+    fn full_chain_empty_menu_back_called_once() {
+        let mut screen = NestedScreen::new();
+        let mut ctx = ComponentContext::new();
+
+        // Шаг 1: handle_dyn возвращает Propagate (не вызывает handle_back)
+        let action = screen.handle_dyn(Box::new(NestedMsg::Back), &mut ctx);
+        assert_eq!(action, BackAction::Propagate);
+        assert!(screen.stack.is_empty());
+
+        // Шаг 2: симуляция ChildStack::on_back → handle_back (единственный вызов)
+        let action2 = screen.handle_back(&mut ctx);
+        assert_eq!(
+            action2,
+            BackAction::Propagate,
+            "handle_back на пустом стеке возвращает Propagate"
+        );
     }
 }

@@ -217,7 +217,15 @@ impl ::egui_android_framework::core::ComponentNode for Layer2Screen {
                         // Обработано — не поднимаем и не закрываем подэкран.
                         BackAction::Handled
                     }
-                    NestedLayer2Msg::Back => self.handle_back(ctx),
+                    NestedLayer2Msg::Back => {
+                        if self.stack.is_empty() {
+                            // Меню без подэкранов — просим родительский стек сделать pop.
+                            BackAction::Propagate
+                        } else {
+                            // Есть активный подэкран — обрабатываем здесь.
+                            self.handle_back(ctx)
+                        }
+                    }
                 };
             }
             // Чужое сообщение — делегируем активному подэкрану.
@@ -306,5 +314,62 @@ mod tests {
         let mut screen = Layer2Screen::new();
         let mut ctx = ComponentContext::new();
         assert_eq!(screen.handle_back(&mut ctx), BackAction::Propagate);
+    }
+
+    /// Проверяет, что handle_dyn для NestedLayer2Msg::Back на пустом меню
+    /// НЕ вызывает handle_back, а возвращает Propagate.
+    #[test]
+    fn handle_dyn_back_empty_menu_returns_propagate() {
+        let mut screen = Layer2Screen::new();
+        let mut ctx = ComponentContext::new();
+
+        // Пустой внутренний стек — меню слоя 2.
+        let action = screen.handle_dyn(Box::new(NestedLayer2Msg::Back), &mut ctx);
+
+        assert_eq!(
+            action,
+            BackAction::Propagate,
+            "handle_dyn для Back на пустом меню должен вернуть Propagate"
+        );
+        assert!(screen.stack.is_empty(), "внутренний стек не изменился");
+    }
+
+    /// Проверяет, что handle_dyn для Back при наличии подэкрана
+    /// вызывает handle_back (ровно 1 раз) и возвращает Handled.
+    #[test]
+    fn handle_dyn_back_with_subscreen_calls_handle_back_once() {
+        let mut screen = Layer2Screen::new();
+        let mut ctx = ComponentContext::new();
+        // Добавляем подэкран X
+        screen
+            .stack
+            .push(NestedLayer2Route::X, Box::new(Layer2Sub::new("X")));
+        assert_eq!(screen.stack.len(), 1);
+
+        let action = screen.handle_dyn(Box::new(NestedLayer2Msg::Back), &mut ctx);
+
+        assert_eq!(
+            action,
+            BackAction::Handled,
+            "handle_dyn с подэкраном должен вернуть Handled (подэкран закрыт)"
+        );
+        assert!(screen.stack.is_empty(), "подэкран X должен быть закрыт");
+    }
+
+    /// Полная цепочка: пустое меню → handle_dyn Back →
+    /// Propagate → родитель вызовет on_back → handle_back.
+    #[test]
+    fn full_chain_empty_menu_back_called_once() {
+        let mut screen = Layer2Screen::new();
+        let mut ctx = ComponentContext::new();
+
+        // Шаг 1: handle_dyn возвращает Propagate
+        let action = screen.handle_dyn(Box::new(NestedLayer2Msg::Back), &mut ctx);
+        assert_eq!(action, BackAction::Propagate);
+        assert!(screen.stack.is_empty());
+
+        // Шаг 2: handle_back — единственный вызов
+        let action2 = screen.handle_back(&mut ctx);
+        assert_eq!(action2, BackAction::Propagate);
     }
 }

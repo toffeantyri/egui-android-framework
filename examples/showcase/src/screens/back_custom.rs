@@ -156,11 +156,12 @@ impl UiComponent for BackCustomScreen {
             });
     }
 
-    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
+    fn handle(&mut self, msg: Self::Message, _ctx: &mut ComponentContext) {
         match msg {
-            RootMsg::Back => {
-                self.handle_back(ctx);
-            }
+            // RootMsg::Back перехватывается в app.rs централизованно:
+            // downcast::<RootMsg>() → Ok → handle_msg → on_back → handle_back.
+            // Не вызываем handle_back здесь — иначе будет двойной вызов.
+            RootMsg::Back => {}
             _ => {}
         }
     }
@@ -173,7 +174,10 @@ impl UiComponent for BackCustomScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::navigation_host::RootMsg;
+    use egui_android_framework::core::{BackAction, ComponentContext};
 
+    /// handle_back — единая точка: первый вызов перехватывает Back.
     #[test]
     fn first_back_intercepts() {
         let mut screen = BackCustomScreen::new();
@@ -182,6 +186,7 @@ mod tests {
         assert_eq!(screen.bg, BgColor::Green);
     }
 
+    /// Второй вызов handle_back — Propagate (цвет уже зелёный).
     #[test]
     fn second_back_propagates() {
         let mut screen = BackCustomScreen::new();
@@ -190,12 +195,64 @@ mod tests {
         assert_eq!(screen.handle_back(&mut ctx), BackAction::Propagate);
     }
 
+    /// handle() для RootMsg::Back НЕ вызывает handle_back.
+    ///
+    /// RootMsg::Back перехватывается в app.rs централизованно
+    /// (downcast::<RootMsg>() → Ok → handle_msg → on_back → handle_back).
+    /// handle() не должен дублировать этот вызов.
     #[test]
-    fn handle_msg_back_delegates_to_handle_back() {
+    fn handle_msg_back_does_not_call_handle_back() {
         let mut screen = BackCustomScreen::new();
         let mut ctx = ComponentContext::new();
         screen.handle(RootMsg::Back, &mut ctx);
-        // Первый вызов перехватывает
-        assert_eq!(screen.bg, BgColor::Green);
+        assert_eq!(
+            screen.bg,
+            BgColor::Blue,
+            "handle() для Back НЕ должен вызывать handle_back — цвет не меняется"
+        );
+    }
+
+    /// handle_dyn(RootMsg::Back) — запасной путь, если сообщение
+    /// не перехвачено в app.rs. Тоже не должен вызывать handle_back.
+    ///
+    /// Возвращает Handled (сообщение обработано через handle()),
+    /// но handle_back НЕ вызывается — это делает on_back().
+    #[test]
+    fn handle_dyn_back_does_not_call_handle_back() {
+        let mut screen = BackCustomScreen::new();
+        let mut ctx = ComponentContext::new();
+
+        let action = screen.handle_dyn(Box::new(RootMsg::Back), &mut ctx);
+
+        // handle_dyn вызывает handle() (который ничего не делает для Back),
+        // затем возвращает Handled. handle_back НЕ вызывается.
+        assert_eq!(
+            action,
+            BackAction::Handled,
+            "handle_dyn для RootMsg::Back возвращает Handled"
+        );
+        assert_eq!(
+            screen.bg,
+            BgColor::Blue,
+            "handle_dyn НЕ вызывает handle_back — bg не изменился"
+        );
+    }
+
+    /// Полная цепочка: handle() → handle_back.
+    /// Проверяет, что handle_back вызывается ровно 1 раз
+    /// (handle() его не вызывает, только симулированный on_back).
+    #[test]
+    fn full_chain_handle_back_called_once() {
+        let mut screen = BackCustomScreen::new();
+        let mut ctx = ComponentContext::new();
+
+        // Шаг 1: handle() — симуляция app.rs → handle_msg(RootMsg::Back)
+        screen.handle(RootMsg::Back, &mut ctx);
+        assert_eq!(screen.bg, BgColor::Blue, "handle() не меняет bg");
+
+        // Шаг 2: симуляция on_back → ChildStack::on_back → handle_back
+        let action = screen.handle_back(&mut ctx);
+        assert_eq!(action, BackAction::Handled);
+        assert_eq!(screen.bg, BgColor::Green, "handle_back переключил цвет");
     }
 }

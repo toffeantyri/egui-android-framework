@@ -62,8 +62,10 @@ impl ComponentNode for StateScreen {
     ) -> BackAction {
         if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
             if matches!(&*typed, StateScreenMsg::Back) {
-                // Рисованная кнопка «← Назад» — единая точка через handle_back.
-                return self.handle_back(ctx);
+                // Не вызываем handle_back здесь — app.rs вызовет on_back(),
+                // который дойдёт до handle_back через ChildStack::on_back().
+                // Возвращаем Propagate, чтобы app.rs знал, что нужен pop.
+                return BackAction::Propagate;
             }
             // Обычное (не-навигационное) сообщение — обработано, pop не нужен.
             Component::handle(self, *typed, ctx);
@@ -197,7 +199,10 @@ impl Component for StateScreen {
             StateScreenMsg::Increment => self.counter += 1,
             StateScreenMsg::Decrement => self.counter -= 1,
             StateScreenMsg::Reset => self.counter = 0,
-            // Back обрабатывается в handle_dyn через handle_back — здесь нет.
+            // Back не обрабатывается в handle().
+            // Рисованная кнопка Back → handle_dyn возвращает Propagate →
+            // app.rs вызывает on_back() → handle_back().
+            // Платформенная кнопка → on_back_pressed() → on_back() → handle_back().
             StateScreenMsg::Back => {}
         }
     }
@@ -211,6 +216,8 @@ impl Component for StateScreen {
 mod tests {
     use super::*;
 
+    /// handle_back — единая точка кастомной логики.
+    /// Проверяет базовый контракт: сброс + Pop.
     #[test]
     fn back_resets_counter_and_pops() {
         let mut screen = StateScreen::new();
@@ -220,23 +227,29 @@ mod tests {
         assert_eq!(screen.counter, 0);
     }
 
+    /// handle_dyn для Back НЕ вызывает handle_back.
+    ///
+    /// Контракт: handle_dyn должен вернуть Propagate и не менять состояние.
+    /// app.rs получит Propagate → вызовет on_back() → handle_back()
+    /// будет вызван ровно один раз через ChildStack::on_back().
     #[test]
-    fn handle_dyn_back_returns_pop_and_resets() {
+    fn handle_dyn_back_returns_propagate_and_does_not_reset() {
         let mut screen = StateScreen::new();
         screen.counter = 99;
         let mut ctx = ComponentContext::new();
         let action = screen.handle_dyn(Box::new(StateScreenMsg::Back), &mut ctx);
         assert_eq!(
             action,
-            BackAction::Pop,
-            "рисованная Back должна вернуть Pop"
+            BackAction::Propagate,
+            "handle_dyn для Back должен вернуть Propagate, не Pop"
         );
         assert_eq!(
-            screen.counter, 0,
-            "кастомная логика сброса должна выполниться"
+            screen.counter, 99,
+            "handle_dyn НЕ должен вызывать handle_back — counter не сбрасывается"
         );
     }
 
+    /// Обычное сообщение не должно интерпретироваться как навигационное.
     #[test]
     fn increment_does_not_trigger_back() {
         let mut screen = StateScreen::new();
@@ -249,5 +262,39 @@ mod tests {
             "обычное сообщение не должно быть 'назад' (иначе произойдёт pop)"
         );
         assert_eq!(screen.counter, 11);
+    }
+
+    /// Полная цепочка рисованной кнопки Back — проверка на отсутствие двойного вызова.
+    ///
+    /// Имитирует реальный поток app.rs:frame():
+    /// 1. handle_dyn(Back) → Propagate (состояние НЕ меняется)
+    /// 2. app.rs: Propagate → on_back() → ChildStack::on_back()
+    /// 3. ChildStack::on_back() → handle_back() — единственный вызов
+    /// 4. handle_back: counter = 0; Pop
+    ///
+    /// Если бы handle_dyn сам вызывал handle_back (старый баг),
+    /// то counter обнулился бы уже на шаге 1, и шаг 3 задвоил бы операцию.
+    #[test]
+    fn full_chain_handle_back_called_once() {
+        let mut screen = StateScreen::new();
+        screen.counter = 42;
+        let mut ctx = ComponentContext::new();
+
+        // Шаг 1: симуляция app.rs → active.handle_dyn(msg, ctx)
+        let action = screen.handle_dyn(Box::new(StateScreenMsg::Back), &mut ctx);
+        assert_eq!(action, BackAction::Propagate);
+        assert_eq!(screen.counter, 42, "шаг 1: handle_dyn НЕ меняет состояние");
+
+        // Шаг 2: симуляция ChildStack::on_back(ctx) → handle_back
+        let action2 = screen.handle_back(&mut ctx);
+        assert_eq!(action2, BackAction::Pop);
+        assert_eq!(
+            screen.counter, 0,
+            "шаг 2: handle_back вызван ровно один раз, counter сброшен"
+        );
+
+        // Если бы handle_back был вызван дважды (баг), counter уже был бы 0
+        // на шаге 1, и здесь мы бы не заметили разницы (идемпотентность).
+        // Ключевое доказательство — ассерт на шаге 1: counter == 42.
     }
 }
