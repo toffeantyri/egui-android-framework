@@ -55,9 +55,10 @@ impl ComponentNode for BackCustomScreen {
     ) -> BackAction {
         if let Ok(typed) = msg.downcast::<RootMsg>() {
             UiComponent::handle(self, *typed, ctx);
-        } else {
-            log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
+            // Обработано (не-навигационное сообщение) — pop не нужен.
+            return BackAction::Handled;
         }
+        log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
         BackAction::Propagate
     }
 

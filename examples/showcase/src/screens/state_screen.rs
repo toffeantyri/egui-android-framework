@@ -65,10 +65,11 @@ impl ComponentNode for StateScreen {
                 // Рисованная кнопка «← Назад» — единая точка через handle_back.
                 return self.handle_back(ctx);
             }
+            // Обычное (не-навигационное) сообщение — обработано, pop не нужен.
             Component::handle(self, *typed, ctx);
-        } else {
-            log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
+            return BackAction::Handled;
         }
+        log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
         BackAction::Propagate
     }
 
@@ -234,5 +235,19 @@ mod tests {
             screen.counter, 0,
             "кастомная логика сброса должна выполниться"
         );
+    }
+
+    #[test]
+    fn increment_does_not_trigger_back() {
+        let mut screen = StateScreen::new();
+        screen.counter = 10;
+        let mut ctx = ComponentContext::new();
+        let action = screen.handle_dyn(Box::new(StateScreenMsg::Increment), &mut ctx);
+        assert_eq!(
+            action,
+            BackAction::Handled,
+            "обычное сообщение не должно быть 'назад' (иначе произойдёт pop)"
+        );
+        assert_eq!(screen.counter, 11);
     }
 }
