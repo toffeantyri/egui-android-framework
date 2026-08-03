@@ -59,20 +59,20 @@ impl ComponentNode for StateScreen {
         &mut self,
         msg: Box<dyn std::any::Any + Send>,
         ctx: &mut ComponentContext,
-    ) -> BackAction {
+    ) -> Option<BackAction> {
         if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
             if matches!(&*typed, StateScreenMsg::Back) {
                 // Не вызываем handle_back здесь — app.rs вызовет on_back(),
                 // который дойдёт до handle_back через ChildStack::on_back().
                 // Возвращаем Propagate, чтобы app.rs знал, что нужен pop.
-                return BackAction::Propagate;
+                return Some(BackAction::Propagate);
             }
-            // Обычное (не-навигационное) сообщение — обработано, pop не нужен.
+            // Обычное (не-навигационное) сообщение — обработано, навигация не требуется.
             Component::handle(self, *typed, ctx);
-            return BackAction::Handled;
+            return None;
         }
         log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
-        BackAction::Propagate
+        Some(BackAction::Propagate)
     }
 
     fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
@@ -240,8 +240,8 @@ mod tests {
         let action = screen.handle_dyn(Box::new(StateScreenMsg::Back), &mut ctx);
         assert_eq!(
             action,
-            BackAction::Propagate,
-            "handle_dyn для Back должен вернуть Propagate, не Pop"
+            Some(BackAction::Propagate),
+            "handle_dyn для Back должен вернуть Some(Propagate)"
         );
         assert_eq!(
             screen.counter, 99,
@@ -257,9 +257,8 @@ mod tests {
         let mut ctx = ComponentContext::new();
         let action = screen.handle_dyn(Box::new(StateScreenMsg::Increment), &mut ctx);
         assert_eq!(
-            action,
-            BackAction::Handled,
-            "обычное сообщение не должно быть 'назад' (иначе произойдёт pop)"
+            action, None,
+            "обычное сообщение должно вернуть None (не навигация)"
         );
         assert_eq!(screen.counter, 11);
     }
@@ -282,7 +281,7 @@ mod tests {
 
         // Шаг 1: симуляция app.rs → active.handle_dyn(msg, ctx)
         let action = screen.handle_dyn(Box::new(StateScreenMsg::Back), &mut ctx);
-        assert_eq!(action, BackAction::Propagate);
+        assert_eq!(action, Some(BackAction::Propagate));
         assert_eq!(screen.counter, 42, "шаг 1: handle_dyn НЕ меняет состояние");
 
         // Шаг 2: симуляция ChildStack::on_back(ctx) → handle_back

@@ -51,13 +51,13 @@ impl ComponentNode for CounterComp {
         &mut self,
         msg: Box<dyn std::any::Any + Send>,
         ctx: &mut egui_android_core::ComponentContext,
-    ) -> egui_android_core::BackAction {
+    ) -> Option<egui_android_core::BackAction> {
         if let Ok(typed) = msg.downcast::<()>() {
             Component::handle(self, *typed, ctx);
         } else {
             log::error!("ComponentNode::handle_dyn: ошибка типа");
         }
-        egui_android_core::BackAction::Propagate
+        None
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self

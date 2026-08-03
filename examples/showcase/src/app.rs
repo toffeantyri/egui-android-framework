@@ -190,19 +190,22 @@ impl Application for ShowcaseApplication {
                         if let Some(active) = self.root.stack.active_mut() {
                             active.handle_dyn(msg, ctx)
                         } else {
-                            BackAction::Propagate
+                            Some(BackAction::Propagate)
                         }
                     };
-                    // Если активный экран попросил навигацию назад (Pop/Propagate) —
-                    // выполняем on_back корневого стека (pop или завершение).
+                    // Интерпретируем Option<BackAction>:
+                    // - None — обычное сообщение, навигация не требуется.
+                    // - Some(Pop|Propagate) — навигационное сообщение, вызываем on_back.
+                    // - Some(Handled) — навигация обработана компонентом.
+                    // - Some(Finish) — завершить приложение.
                     match action {
-                        BackAction::Pop | BackAction::Propagate => {
+                        Some(BackAction::Pop) | Some(BackAction::Propagate) => {
                             self.root.on_back();
                         }
-                        BackAction::Finish => {
+                        Some(BackAction::Finish) => {
                             self.root.context.finish_requested = true;
                         }
-                        BackAction::Handled => {}
+                        _ => {}
                     }
                 }
             }

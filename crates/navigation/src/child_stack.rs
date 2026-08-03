@@ -315,13 +315,13 @@ mod tests {
             &mut self,
             msg: Box<dyn std::any::Any + Send>,
             ctx: &mut ComponentContext,
-        ) -> BackAction {
+        ) -> Option<BackAction> {
             if let Ok(typed) = msg.downcast::<()>() {
                 Component::handle(self, *typed, ctx);
             } else {
                 log::error!("ComponentNode::handle_dyn: ошибка типа");
             }
-            BackAction::Propagate
+            None
         }
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -426,8 +426,8 @@ mod tests {
             &mut self,
             _msg: Box<dyn std::any::Any + Send>,
             _ctx: &mut ComponentContext,
-        ) -> BackAction {
-            BackAction::Propagate
+        ) -> Option<BackAction> {
+            None
         }
         fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
             self.back_called = true;

@@ -52,14 +52,14 @@ impl ComponentNode for BackCustomScreen {
         &mut self,
         msg: Box<dyn std::any::Any + Send>,
         ctx: &mut ComponentContext,
-    ) -> BackAction {
+    ) -> Option<BackAction> {
         if let Ok(typed) = msg.downcast::<RootMsg>() {
             UiComponent::handle(self, *typed, ctx);
-            // Обработано (не-навигационное сообщение) — pop не нужен.
-            return BackAction::Handled;
+            // Обычное сообщение обработано — навигация не требуется.
+            return None;
         }
         log::error!("BackCustomScreen::handle_dyn: ожидался RootMsg");
-        BackAction::Propagate
+        Some(BackAction::Propagate)
     }
 
     /// Кастомная обработка Back: переключает цвет фона.
@@ -225,11 +225,10 @@ mod tests {
         let action = screen.handle_dyn(Box::new(RootMsg::Back), &mut ctx);
 
         // handle_dyn вызывает handle() (который ничего не делает для Back),
-        // затем возвращает Handled. handle_back НЕ вызывается.
+        // затем возвращает None. handle_back НЕ вызывается.
         assert_eq!(
-            action,
-            BackAction::Handled,
-            "handle_dyn для RootMsg::Back возвращает Handled"
+            action, None,
+            "handle_dyn для RootMsg::Back возвращает None (не навигация)"
         );
         assert_eq!(
             screen.bg,

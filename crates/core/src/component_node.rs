@@ -62,14 +62,17 @@ pub trait ComponentNode: LifecycleObserver + Send + 'static {
     /// Реализация должна downcast'ить `msg` в `Self::Message`, вызвать `handle()`
     /// и передать в него `ctx`.
     ///
-    /// Возвращает [`BackAction`]: если сообщение — это кнопка «← Назад», экран
-    /// должен вернуть результат своей `handle_back()` (или `Propagate`), что
-    /// поднимает навигацию назад вверх по вложенным стекам.
+    /// Возвращает `Option<`[`BackAction`]`>`:
+    /// - `None` — обычное (не навигационное) сообщение, навигация не требуется.
+    /// - `Some(Handled)` — навигационное сообщение обработано, pop не нужен.
+    /// - `Some(Pop)` — компонент просит pop.
+    /// - `Some(Finish)` — компонент просит завершить приложение.
+    /// - `Some(Propagate)` — навигационное сообщение, передать родителю.
     fn handle_dyn(
         &mut self,
         msg: Box<dyn std::any::Any + Send>,
         ctx: &mut ComponentContext,
-    ) -> BackAction;
+    ) -> Option<BackAction>;
 
     /// Обработать BackPressed — единая точка и для платформенной,
     /// и для рисованной кнопки «← Назад».
@@ -174,13 +177,13 @@ mod tests {
                 &mut self,
                 msg: Box<dyn std::any::Any + Send>,
                 ctx: &mut ComponentContext,
-            ) -> BackAction {
+            ) -> Option<BackAction> {
                 if let Ok(typed) = msg.downcast::<()>() {
                     crate::Component::handle(self, *typed, ctx);
                 } else {
                     log::error!("ComponentNode::handle_dyn: ошибка типа");
                 }
-                BackAction::Propagate
+                None
             }
             fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
                 BackAction::Propagate

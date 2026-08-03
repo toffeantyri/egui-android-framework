@@ -263,17 +263,17 @@ pub fn derive_component_node(input: TokenStream) -> TokenStream {
                 &mut self,
                 msg: Box<dyn std::any::Any + Send>,
                 ctx: &mut ::egui_android_framework::core::ComponentContext,
-            ) -> ::egui_android_framework::core::BackAction {
+            ) -> Option<::egui_android_framework::core::BackAction> {
                 if let Ok(typed) = msg.downcast::<#msg_type>() {
                     ::egui_android_framework::core::Component::handle(self, *typed, ctx);
-                    // Обычное (не-навигационное) сообщение обработано — pop не нужен.
-                    return ::egui_android_framework::core::BackAction::Handled;
+                    // Обычное (не-навигационное) сообщение обработано — навигация не требуется.
+                    return None;
                 }
                 log::error!(
                     "ComponentNode::handle_dyn: ошибка типа сообщения — ожидался {}, получен неизвестный тип",
                     std::any::type_name::<#msg_type>()
                 );
-                ::egui_android_framework::core::BackAction::Propagate
+                Some(::egui_android_framework::core::BackAction::Propagate)
             }
 
             fn handle_back(&mut self, _ctx: &mut ::egui_android_framework::core::ComponentContext) -> ::egui_android_framework::core::BackAction {
