@@ -137,6 +137,11 @@ pub struct TextEdit<M> {
 
     /// Действие кнопки IME.
     ime_action: ImeAction,
+
+    /// Внутренний отступ (margin) поля — пространство между текстом и рамкой/фоном
+    /// поля. Внешний отступ (spacing между виджетами) задаётся модификатором
+    /// `Modifier.padding(...)`. По умолчанию — комфортный запас по обеим осям.
+    internal_padding: f32,
 }
 
 impl<M: 'static> TextEdit<M> {
@@ -155,6 +160,7 @@ impl<M: 'static> TextEdit<M> {
             on_submit: None,
             keyboard_type: KeyboardType::Text,
             ime_action: ImeAction::Done,
+            internal_padding: 6.0,
         }
     }
 
@@ -230,6 +236,21 @@ impl<M: 'static> TextEdit<M> {
         self
     }
 
+    /// Задать внутренний отступ поля (margin) в точках.
+    ///
+    /// Это пространство между текстом и рамкой/фоном поля. По умолчанию — 6.0.
+    /// Внешний отступ между виджетами задаётся через `Modifier.padding(...)`
+    /// (см. [`crate::modifier::Modifier::padding`]).
+    pub fn internal_padding(mut self, pad: f32) -> Self {
+        self.internal_padding = pad;
+        self
+    }
+
+    /// Текущий внутренний отступ (для тестов).
+    pub fn get_internal_padding(&self) -> f32 {
+        self.internal_padding
+    }
+
     /// Текущее значение (для тестов и отладки).
     pub fn get_value(&self) -> &str {
         &self.value
@@ -293,6 +314,20 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         }
         // read_only → интерактивность off (клавиатура не открывается).
         te = te.interactive(!self.read_only);
+
+        // Внутренний отступ поля: пространство между текстом и рамкой/фоном.
+        // Внешний отступ между виджетами задаётся модификатором `Modifier.padding(...)`.
+        let ip = self.internal_padding.clamp(0.0, 100.0) as i8;
+        te = te.margin(egui::Margin::symmetric(ip, ip));
+
+        // Растягивание на ширину родителя: `egui::TextEdit` alloc'ит ширину по
+        // контенту (тексту) и игнорирует `min_width` constraints. Чтобы `fill_max_width`
+        // заставил поле занять всю ширину, явно передаём желаемую ширину,
+        // когда родитель требует min_width > 0.
+        let min_w = ui.constraints().min_width;
+        if min_w > 0.0 {
+            te = te.desired_width(min_w);
+        }
 
         let response = ui.add(te);
 

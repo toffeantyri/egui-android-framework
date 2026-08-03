@@ -2251,3 +2251,81 @@ fn test_text_edit_in_row() {
         });
     });
 }
+
+#[test]
+fn test_text_edit_internal_padding_increases_height() {
+    // Внутренний отступ (margin) поля увеличивает его высоту: текст не должен
+    // быть впритык к рамке/фону поля. Чем больше internal_padding — тем выше поле.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let before = ui.available_rect_before_wrap().min.y;
+        TextEdit::new("Hi")
+            .single_line()
+            .internal_padding(0.0)
+            .render(ui, &dispatch);
+        let h_zero = ui.available_rect_before_wrap().min.y - before;
+
+        let before2 = ui.available_rect_before_wrap().min.y;
+        TextEdit::new("Hi")
+            .single_line()
+            .internal_padding(12.0)
+            .render(ui, &dispatch);
+        let h_padded = ui.available_rect_before_wrap().min.y - before2;
+
+        assert!(
+            h_padded > h_zero,
+            "internal_padding должен увеличивать высоту поля: zero={h_zero:.1}, padded={h_padded:.1}"
+        );
+    });
+}
+
+#[test]
+fn test_text_edit_internal_padding_getter() {
+    // Getter внутреннего отступа и значение по умолчанию.
+    let te = TextEdit::<()>::new("x");
+    assert_eq!(
+        te.get_internal_padding(),
+        6.0,
+        "по умолчанию внутренний отступ 6.0"
+    );
+    let te2 = TextEdit::<()>::new("x").internal_padding(10.0);
+    assert_eq!(te2.get_internal_padding(), 10.0);
+}
+
+#[test]
+fn test_text_edit_fill_max_width_stretches() {
+    // `egui::TextEdit` alloc'ит ширину по контенту и игнорирует `min_width` constraints.
+    // Виджет должен явно растягиваться на ширину родителя при `fill_max_width`.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let avail = ui.available_width();
+
+        let w_no_fill = ui
+            .scope(|ui| {
+                TextEdit::new("короткий текст")
+                    .single_line()
+                    .render(&mut UiWrapper::new_unconstrained(ui), &dispatch);
+                ui.min_rect().width()
+            })
+            .inner;
+
+        let w_fill = ui
+            .scope(|ui| {
+                TextEdit::new("короткий текст")
+                    .single_line()
+                    .modifier(Modifier::new().fill_max_width())
+                    .render(&mut UiWrapper::new_unconstrained(ui), &dispatch);
+                ui.min_rect().width()
+            })
+            .inner;
+
+        assert!(
+            w_no_fill < w_fill,
+            "без fill_max_width поле уже (no_fill={w_no_fill:.1}), с fill — шире (fill={w_fill:.1})"
+        );
+        assert!(
+            (w_fill - avail).abs() < 1.0,
+            "поле с fill_max_width должно занять всю доступную ширину: fill={w_fill:.1}, avail={avail:.1}"
+        );
+    });
+}

@@ -70,7 +70,7 @@ impl Component for TextEditScreen {
                         let email = email.clone();
                         move |v| email.set(v.to_owned())
                     })
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 2. Password ─────────────────────────────────────────
@@ -86,7 +86,7 @@ impl Component for TextEditScreen {
                         let password = password.clone();
                         move |v| password.set(v.to_owned())
                     })
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 3. Multiline комментарий ───────────────────────────
@@ -100,7 +100,7 @@ impl Component for TextEditScreen {
                         let comment = comment.clone();
                         move |v| comment.set(v.to_owned())
                     })
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 4. Read-only ────────────────────────────────────────
@@ -108,7 +108,7 @@ impl Component for TextEditScreen {
                 TextEdit::new("Это поле нельзя редактировать")
                     .single_line()
                     .read_only()
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 5. Hint (пустое поле с подсказкой) ─────────────────
@@ -130,7 +130,7 @@ impl Component for TextEditScreen {
                         let last = last_submit.clone();
                         move |v| last.set(v.to_owned())
                     })
-                    .modifier(Modifier::new().fill_max_width().padding(8.0))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 Spacer::new(16.0).render(ui, dispatch);
