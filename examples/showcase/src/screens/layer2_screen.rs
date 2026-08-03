@@ -211,41 +211,14 @@ impl ::egui_android_framework::core::ComponentNode for Layer2Screen {
                 };
             }
             // Чужое сообщение — делегируем активному подэкрану.
-            Err(msg) => {
-                if let Some(active) = self.stack.active_mut() {
-                    return match active.handle_dyn(msg, ctx) {
-                        // Подэкран попросил закрыть себя (кнопка «← Назад»)
-                        // или не обработал (Propagate) — закрываем активный подэкран.
-                        Some(BackAction::Pop) | Some(BackAction::Propagate) => {
-                            self.stack.pop();
-                            Some(BackAction::Handled)
-                        }
-                        Some(BackAction::Handled) => Some(BackAction::Handled),
-                        Some(BackAction::Finish) => Some(BackAction::Finish),
-                        None => Some(BackAction::Handled),
-                    };
-                }
-                Some(BackAction::Propagate)
-            }
+            Err(msg) => self.stack.delegate_dyn(msg, ctx),
         }
     }
 
     fn handle_back(&mut self, ctx: &mut ComponentContext) -> BackAction {
         // Рекурсивно вглубь: активный подэкран обрабатывает Back первым,
-        // чтобы системная Back закрывала самый глубокий экран (X).
-        if let Some(active) = self.stack.active_mut() {
-            return match active.handle_back(ctx) {
-                // Подэкран просит закрыть себя или не обработал — закрываем его.
-                BackAction::Pop | BackAction::Propagate => {
-                    self.stack.pop();
-                    BackAction::Handled
-                }
-                BackAction::Handled => BackAction::Handled,
-                BackAction::Finish => BackAction::Finish,
-            };
-        }
-        // Стек пуст — передаём родительскому стеку.
-        BackAction::Propagate
+        // чтобы системная Back закрывала самый глубокий экран.
+        self.stack.delegate_back(ctx)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

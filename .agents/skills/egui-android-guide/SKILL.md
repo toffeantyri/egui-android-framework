@@ -326,6 +326,45 @@ Message = и событие, и семантика
   Сохранённое состояние (`counter=42`) определяет какие данные в него загрузить.
   Это разделение гарантирует консистентность при изменении версий компонентов.
 
+### Делегирование Back и сообщений: `delegate_back` / `delegate_dyn`
+
+Для экранов-контейнеров с вложенным стеком (NestedScreen, Layer2Screen)
+рекурсивная логика вынесена в `ChildStack` — это исключает дублирование между
+экранами:
+
+- `delegate_back(ctx) -> BackAction` — делегирует Back активному компоненту:
+  при `Pop`/`Propagate` делает `pop` и возвращает `Handled`; `Handled`/`Finish`
+  пробрасываются как есть; при пустом стеке возвращает `Propagate` (родитель
+  обработает). Рекурсия идёт вглубь, т.к. активный компонент сам может быть
+  контейнером со своим `ChildStack`.
+- `delegate_dyn(msg, ctx) -> Option<BackAction>` — пробрасывает чужое сообщение
+  активному компоненту: при `Some(Pop)`/`Some(Propagate)` делает `pop` и
+  возвращает `Some(Handled)`; `Some(Handled)`/`Some(Finish)` пробрасываются;
+  `None` (подэкран обработал без навигации) → `Some(Handled)`; при пустом
+  стеке возвращает `Some(Propagate)`.
+
+Пример использования:
+
+```rust,ignore
+impl ComponentNode for NestedScreen {
+    fn handle_dyn(&mut self, msg, ctx) -> Option<BackAction> {
+        match msg.downcast::<NestedMsg>() {
+            Ok(m) => { /* своё сообщение меню */ }
+            // Чужое сообщение — делегируем активному подэкрану
+            Err(msg) => self.stack.delegate_dyn(msg, ctx),
+        }
+    }
+    fn handle_back(&mut self, ctx) -> BackAction {
+        // Рекурсивно вглубь: активный подэкран обрабатывает Back первым
+        self.stack.delegate_back(ctx)
+    }
+}
+```
+
+`delegate_back`/`delegate_dyn` не нарушают изоляцию: они работают с
+`ComponentNode` (core), а `ChildStack` (navigation → core) и так зависят от
+`ComponentNode`.
+
 ### `ComponentState` — `egui-android-navigation`
 - Типобезопасное сохранение и восстановление состояния компонента.
 - `type State: Clone + Debug + Send + 'static` — ассоциированный тип.

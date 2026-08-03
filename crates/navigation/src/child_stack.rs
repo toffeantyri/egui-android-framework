@@ -192,6 +192,56 @@ where
         // Шаг 3: Home — завершение приложения
         BackAction::Finish
     }
+
+    /// Рекурсивная обработка Back: делегирует активному компоненту.
+    ///
+    /// Используется в экранах-контейнерах с вложенным стеком (NestedScreen,
+    /// Layer2Screen). В отличие от [`Self::on_back`], не учитывает
+    /// «Home → Finish» — при пустом стеке возвращает [`BackAction::Propagate`],
+    /// чтобы родительский стек мог обработать Back.
+    ///
+    /// - `Pop`/`Propagate` от компонента → поп и возврат `Handled`
+    /// - `Handled`/`Finish` — пробрасываются как есть
+    /// - Пустой стек → `Propagate`
+    pub fn delegate_back(&mut self, ctx: &mut ComponentContext) -> BackAction {
+        if let Some(active) = self.items.last_mut() {
+            match active.component.handle_back(ctx) {
+                BackAction::Pop | BackAction::Propagate => {
+                    self.pop();
+                    BackAction::Handled
+                }
+                other => other,
+            }
+        } else {
+            BackAction::Propagate
+        }
+    }
+
+    /// Делегирует type-erased сообщение активному компоненту и интерпретирует результат.
+    ///
+    /// Используется в экранах-контейнерах с вложенным стеком для проброса
+    /// чужих сообщений вниз. При `Pop`/`Propagate` от подэкрана — поп и `Handled`.
+    /// При пустом стеке — `Some(Propagate)`.
+    pub fn delegate_dyn(
+        &mut self,
+        msg: Box<dyn std::any::Any + Send>,
+        ctx: &mut ComponentContext,
+    ) -> Option<BackAction> {
+        if let Some(active) = self.items.last_mut() {
+            match active.component.handle_dyn(msg, ctx) {
+                Some(BackAction::Pop) | Some(BackAction::Propagate) => {
+                    self.pop();
+                    Some(BackAction::Handled)
+                }
+                Some(BackAction::Handled) => Some(BackAction::Handled),
+                Some(BackAction::Finish) => Some(BackAction::Finish),
+                // Подэкран обработал сообщение без навигации — не поднимаем наверх.
+                None => Some(BackAction::Handled),
+            }
+        } else {
+            Some(BackAction::Propagate)
+        }
+    }
 }
 
 // ─── Методы сохранения/восстановления (требуют Serialize + Deserialize) ───
@@ -524,6 +574,148 @@ mod tests {
         assert_eq!(s.on_back(&mut ctx), BackAction::Handled);
         assert_eq!(s.len(), 1, "pop должен сработать");
         assert_eq!(s.active_config(), Some(&"home"));
+    }
+
+    /// delegate_back при пустом стеке возвращает Propagate.
+    #[test]
+    fn delegate_back_empty_stack_propagates() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        let mut ctx = ComponentContext::new();
+        assert_eq!(s.delegate_back(&mut ctx), BackAction::Propagate);
+    }
+
+    /// delegate_back: компонент возвращает Pop → pop + Handled.
+    #[test]
+    fn delegate_back_pops_on_pop() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("sub", Box::new(BackComp::new_pop()));
+        assert_eq!(s.len(), 2);
+        let mut ctx = ComponentContext::new();
+
+        assert_eq!(s.delegate_back(&mut ctx), BackAction::Handled);
+        assert_eq!(s.len(), 1, "pop должен сработать");
+    }
+
+    /// delegate_back: компонент перехватывает (Handled) → возврат Handled, pop нет.
+    #[test]
+    fn delegate_back_intercepts_handled() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("sub", Box::new(BackComp::new_intercepting()));
+        assert_eq!(s.len(), 2);
+        let mut ctx = ComponentContext::new();
+
+        assert_eq!(s.delegate_back(&mut ctx), BackAction::Handled);
+        assert_eq!(s.len(), 2, "перехват — pop не делаем");
+    }
+
+    /// delegate_back: компонент возвращает Propagate → pop + Handled.
+    #[test]
+    fn delegate_back_pops_on_propagate() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("sub", Box::new(BackComp::new_passthrough()));
+        assert_eq!(s.len(), 2);
+        let mut ctx = ComponentContext::new();
+
+        assert_eq!(s.delegate_back(&mut ctx), BackAction::Handled);
+        assert_eq!(s.len(), 1, "Propagate → pop подэкрана");
+    }
+
+    /// delegate_dyn: подэкран возвращает Some(Pop) → pop + Some(Handled).
+    #[test]
+    fn delegate_dyn_pops_on_pop() {
+        // BackComp::handle_dyn всегда возвращает None; используем отдельный
+        // тестовый компонент, чей handle_dyn возвращает Some(Pop).
+        struct PopDyn;
+        impl LifecycleObserver for PopDyn {}
+        impl egui_android_core::ComponentNode for PopDyn {
+            fn render(
+                &self,
+                _ui: &mut UiWrapper,
+                _d: &egui_android_runtime::DynDispatcher,
+                _ctx: &ComponentContext,
+            ) {
+            }
+            fn handle_dyn(
+                &mut self,
+                _msg: Box<dyn std::any::Any + Send>,
+                _ctx: &mut ComponentContext,
+            ) -> Option<BackAction> {
+                Some(BackAction::Pop)
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
+            }
+        }
+
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("sub", Box::new(PopDyn));
+        assert_eq!(s.len(), 2);
+        let mut ctx = ComponentContext::new();
+
+        assert_eq!(
+            s.delegate_dyn(Box::new(()), &mut ctx),
+            Some(BackAction::Handled)
+        );
+        assert_eq!(s.len(), 1, "Some(Pop) → pop подэкрана");
+    }
+
+    /// delegate_dyn: подэкран возвращает None → Some(Handled), pop нет.
+    #[test]
+    fn delegate_dyn_none_returns_handled() {
+        struct NoneDyn;
+        impl LifecycleObserver for NoneDyn {}
+        impl egui_android_core::ComponentNode for NoneDyn {
+            fn render(
+                &self,
+                _ui: &mut UiWrapper,
+                _d: &egui_android_runtime::DynDispatcher,
+                _ctx: &ComponentContext,
+            ) {
+            }
+            fn handle_dyn(
+                &mut self,
+                _msg: Box<dyn std::any::Any + Send>,
+                _ctx: &mut ComponentContext,
+            ) -> Option<BackAction> {
+                None
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
+            }
+        }
+
+        let mut s: ChildStack<&str> = ChildStack::new();
+        s.push("home", Box::new(BackComp::new_passthrough()));
+        s.push("sub", Box::new(NoneDyn));
+        assert_eq!(s.len(), 2);
+        let mut ctx = ComponentContext::new();
+
+        assert_eq!(
+            s.delegate_dyn(Box::new(()), &mut ctx),
+            Some(BackAction::Handled)
+        );
+        assert_eq!(s.len(), 2, "None → pop не делаем");
+    }
+
+    /// delegate_dyn при пустом стеке возвращает Some(Propagate).
+    #[test]
+    fn delegate_dyn_empty_stack_propagates() {
+        let mut s: ChildStack<&str> = ChildStack::new();
+        let mut ctx = ComponentContext::new();
+        assert_eq!(
+            s.delegate_dyn(Box::new(()), &mut ctx),
+            Some(BackAction::Propagate)
+        );
     }
 }
 
