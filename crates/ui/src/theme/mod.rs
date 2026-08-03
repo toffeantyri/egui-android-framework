@@ -46,6 +46,11 @@ impl Theme {
             style.visuals.window_fill = self.colors.surface;
             style.visuals.panel_fill = self.colors.background;
             style.visuals.window_stroke = egui::Stroke::new(0.0, self.colors.outline_variant);
+            // Фон поля ввода (TextEdit) — слой `surface_container_highest` (аналог
+            // M3), чтобы поле выделялось на фоне, а не сливалось. `egui::TextEdit`
+            // использует `visuals.extreme_bg_color` (или text_edit_bg_color).
+            style.visuals.extreme_bg_color = self.colors.surface_container_highest;
+            style.visuals.text_edit_bg_color = Some(self.colors.surface_container_highest);
             style.visuals.widgets.noninteractive.bg_fill = self.colors.surface;
             style.visuals.widgets.noninteractive.fg_stroke =
                 egui::Stroke::new(1.0, self.colors.on_surface);
@@ -77,5 +82,53 @@ impl Theme {
 
     pub fn current_from_ui(ui: &egui::Ui) -> Self {
         Self::current(ui.ctx())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Фон поля ввода (TextEdit) должен быть слоем `surface_container_highest`
+    /// (аналог M3), чтобы выделяться на фоне, а не сливаться с ним.
+    #[test]
+    fn text_edit_background_matches_theme_surface() {
+        let light = MaterialTheme::light();
+        let dark = MaterialTheme::dark();
+
+        // `Theme::apply` задаёт стиль обеим темам egui (Light и Dark)
+        // с одним фоном поля. Проверяем обе.
+
+        for &egui_theme in &[egui::Theme::Light, egui::Theme::Dark] {
+            // Светлая тема
+            let ctx = egui::Context::default();
+            light.apply(&ctx);
+            let bg = ctx.style_of(egui_theme).visuals.text_edit_bg_color();
+            assert_eq!(
+                bg, light.colors.surface_container_highest,
+                "светлая: фон поля = surface_container_highest (egui-тема {egui_theme:?})"
+            );
+            assert_ne!(
+                bg, light.colors.background,
+                "светлая: фон поля должен отличаться от фона экрана (не сливаться)"
+            );
+
+            // Тёмная тема
+            let ctx = egui::Context::default();
+            dark.apply(&ctx);
+            let bg = ctx.style_of(egui_theme).visuals.text_edit_bg_color();
+            assert_eq!(
+                bg, dark.colors.surface_container_highest,
+                "тёмная: фон поля = surface_container_highest (egui-тема {egui_theme:?})"
+            );
+            assert_ne!(
+                bg, dark.colors.background,
+                "тёмная: фон поля должен отличаться от фона экрана (не сливаться)"
+            );
+            assert!(
+                (bg.r() as u32 + bg.g() as u32 + bg.b() as u32) > 60,
+                "тёмная: фон поля не должен быть почти чёрным (получилось {bg:?})"
+            );
+        }
     }
 }

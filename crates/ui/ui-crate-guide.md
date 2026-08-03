@@ -631,6 +631,9 @@ pub struct ColorPalette {
     pub on_surface: egui::Color32,
     pub error: egui::Color32,
     pub on_error: egui::Color32,
+    pub outline: egui::Color32,
+    pub outline_variant: egui::Color32,
+    pub surface_container_highest: egui::Color32, // фон поля ввода (аналог M3 surfaceContainerHighest)
 }
 ```
 

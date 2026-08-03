@@ -15,6 +15,9 @@ pub struct ColorPalette {
     pub on_error: egui::Color32,
     pub outline: egui::Color32,
     pub outline_variant: egui::Color32,
+    /// Фон поля ввода (TextEdit) — аналог `surfaceContainerHighest` в Material 3.
+    /// Отличается от `background`/`surface`, чтобы поле выделялось на фоне.
+    pub surface_container_highest: egui::Color32,
 }
 
 impl ColorPalette {
