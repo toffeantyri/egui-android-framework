@@ -61,11 +61,11 @@ description: Архитектура, правила и идиомы проект
 **Граф зависимостей (DAG, без циклов):**
 ```
 platform-android → platform, runtime
-runtime          → platform (Waker), egui, tokio
+runtime          → platform (Waker), egui, tokio, thiserror, log
 core             → runtime
-ui               → core
-navigation       → core, ui
-framework        → core, ui, navigation, runtime, platform, platform-android
+ui               → core, runtime          # содержит трейт Widget<M: Send> + Dispatcher
+navigation       → core, runtime, ui
+framework        → core, ui, navigation, runtime, platform, platform-android, macros
 ```
 
 ## Поток данных (реактивный с Dispatcher)
@@ -365,15 +365,6 @@ impl ComponentNode for NestedScreen {
 `ComponentNode` (core), а `ChildStack` (navigation → core) и так зависят от
 `ComponentNode`.
 
-### `ComponentState` — `egui-android-navigation`
-- Типобезопасное сохранение и восстановление состояния компонента.
-- `type State: Clone + Debug + Send + 'static` — ассоциированный тип.
-- `save(&self) -> Self::State` — сохранить состояние.
-- `restore(&mut self, state: Self::State)` — восстановить состояние.
-- Компонент реализует `ComponentState` (вместе с `Component`) для типобезопасного save/restore.
-`save_state()`/`restore_state()` имеют дефолтную реализацию (`None`/пусто).
-Blanket-impl НЕ переопределяет их — компонент может переопределить напрямую.
-
 ### `PersistentState` — `egui-android-core`
 - Трейт для бизнес-данных (аналог `StateKeeper` в Decompose).
 - `type State: Serialize + DeserializeOwned + Send + 'static`.
@@ -464,14 +455,10 @@ impl CounterScreen {
 - Вариант `Owned` — для child_ui, решает проблему borrow checker.
 - Constraints хранятся гибридно: в поле (type-safe) + `Context::data()` (переживают `Frame::show`).
 
-### `ComponentContext<NavEvent, DataCmd, State>` — `egui-android-core`
-- Контекст компонента, передаётся при создании.
-- `back_dispatcher` — обработка системной кнопки Back.
-- `back_fallback` — fallback при pop из ChildStack.
-- `finish_requested` — флаг завершения приложения.
-- `saved_state: Option<Box<dyn Any + Send>>` — сохранённое состояние для восстановления
-  после пересоздания Activity. Устанавливается из `ComponentNode::save_state()`,
-  передаётся в `restore_state()`.
+### `ComponentContext` — `egui-android-core`
+- Контекст компонента, передаётся при создании. **Не generic.**
+- `back_dispatcher` — обработка системной кнопки Back (диалоги, BottomSheet; будущее).
+- `finish_requested` — флаг завершения приложения (устанавливается, когда стек пуст).
 
 ### `LifecycleObserver` — `egui-android-core`
 - Трейт с методами `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`.
@@ -538,15 +525,17 @@ fn counter_view(state: &u32, ui: &mut UiWrapper, dispatch: &Dispatcher<Msg>) {
 
 | Канал | Тип | Откуда → Куда |
 |---|---|---|
-| `ui_msg_tx` / `ui_msg_rx` | `mpsc::channel::<Msg>()` | View → Component (через Dispatcher) |
-| `data_cmd_tx` / `data_cmd_rx` | `mpsc::channel::<Msg>()` | Component::handle → Data Layer |
-| `data_statechanged_tx` / `data_statechanged_rx` | `mpsc::channel::<()>()` | Data Layer → RuntimeContext (→ UiNotifier) |
-| `nav_event_tx` / `nav_event_rx` | `mpsc::channel::<NavEvent>()` | Component → ChildStack (навигация) |
 | `ui_dynmsg_tx` / `ui_dynmsg_rx` | `mpsc::channel::<Box<dyn Any + Send>>()` | View → ComponentNode (type-erased) |
+| `data_statechanged_tx` / `data_statechanged_rx` | `mpsc::channel::<()>()` | Data Layer → RuntimeContext (→ UiNotifier) |
 | `store` | `StateStore<T>` (watch) | Data Layer → Component (sync_from_store) |
 
-Dispatcher создаётся каждый кадр в `frame()` и живёт один кадр.
-Receiver drain'ится после render — все сообщения обрабатываются через `handle()`.
+`Dispatcher`/`DynDispatcher` создаётся каждый кадр в `frame()` и живёт один кадр.
+Receiver drain'ится после render — сообщения обрабатываются через `handle()`/`handle_dyn()`.
+
+> **Примечание (устарело):** каналы `data_cmd_tx`/`data_cmd_rx` (Component → Data Layer)
+> и `nav_event_tx`/`nav_event_rx` (Component → ChildStack) удалены. Навигация идёт через
+> `RootMsg::Navigate`/`handle_dyn()` + `ChildStack`; data layer через `StateStore`.
+> Канал `ui_msg_tx`/`ui_msg_rx` (типизированный Dispatcher) используется внутри `Dispatcher::new()`.
 
 ## Типовой frame() в Application (с DynDispatcher)
 
@@ -693,7 +682,7 @@ impl ComponentNode for BackCustomScreen {
           │
           Слой 3: ComponentNode::save_state/restore_state
           │
-          ├── StateScreen (#[derive(Component, ComponentNode)] с persistent_fields)
+          ├── StateScreen (#[derive(PersistentState, ComponentNode)] с persistent_fields)
           └── NestedScreen (ручной impl ComponentNode с PersistentState)
 ```
 
@@ -711,10 +700,10 @@ InitWindow → app.on_restore_state(None)
 
 ### Как добавить сохранение состояния на новый экран
 
-1. Определить persistent-поля через `#[derive(Component)]`:
+1. Определить persistent-поля через `#[derive(PersistentState)]`:
 
 ```rust
-#[derive(Component)]
+#[derive(PersistentState)]
 #[persistent_fields(counter, label)]
 struct MyScreen {
     counter: i32,
@@ -777,7 +766,7 @@ Application по-прежнему владеет логикой save/restore.
 
 ### Что не сохраняется
 - `remember()` — UI-состояние, сбрасывается при пересоздании
-- Поля без `#[persistent_fields(...)]` в `#[derive(Component)]`
+- Поля без `#[persistent_fields(...)]` в `#[derive(PersistentState)]`
 - Обычные компоненты без `#[derive(ComponentNode)]` с `#[persistent_fields(...)]` (HomeScreen, WidgetsScreen etc.)
 
 ### Платформа не хранит состояние
@@ -877,18 +866,23 @@ loop {
 │   │
 │   ├── runtime/            — egui-android-runtime
 │   │   └── src/
-│   │       ├── application.rs   — trait Application + AppConfig + DataLayerHandle
+│   │       ├── application.rs   — trait Application + RuntimeConfig + DataLayerHandle
 │   │       ├── dispatcher.rs    — Dispatcher<M> (Direct/Wrapped)
 │   │       ├── dyn_dispatcher.rs — DynDispatcher (type-erased dispatcher)
 │   │       ├── store.rs         — StateStore<T>
-│   │       ├── ui_notifier.rs   — UiNotifier + AndroidWakeHandle
+│   │       ├── ui_notifier.rs   — UiNotifier
+│   │       ├── runtime_context.rs — RuntimeContext (единая точка check() для платформы)
+│   │       ├── message_envelope.rs — MessageEnvelope<M>
+│   │       ├── saved_state.rs   — SavedStack<C> + SavedState
 │   │       └── error.rs         — AppError
 │   │
 │   ├── core/               — egui-android-core
 │   │   └── src/
 │   │       ├── component.rs        — trait Component
 │   │       ├── component_node.rs   — trait ComponentNode (object-safe, Box<dyn>)
-│   │       ├── component_context.rs — ComponentContext (+ BackDispatcher)
+│   │       ├── component_context.rs — ComponentContext (back_dispatcher + finish_requested)
+│   │       ├── back_action.rs      — enum BackAction (Handled/Pop/Finish/Propagate)
+│   │       ├── back_dispatcher.rs  — BackDispatcher
 │   │       ├── lifecycle.rs        — LifecycleState + LifecycleObserver
 │   │       ├── widget.rs           — trait Widget<M: Send>
 │   │       ├── ui_wrapper.rs       — UiWrapper (обёртка над egui::Ui с Constraints)
@@ -897,30 +891,30 @@ loop {
 │   │       └── back_dispatcher.rs  — BackDispatcher
 │   │
 │   ├── macros/             — egui-android-macros
-│   │       └── src/lib.rs  — #[derive(Component)]
+│   │       └── src/lib.rs  — #[derive(PersistentState)], #[derive(ComponentNode)], back_message/back_handler
 │   │
 │   ├── navigation/         — egui-android-navigation
 │   │   └── src/
-│   │       └── child_stack.rs — ChildStack<C> (только C, хранит Box<dyn ComponentNode>)
-│   │       ├── lib.rs
+│   │       ├── child_stack.rs — ChildStack<C> (хранит Box<dyn ComponentNode>, on_back/delegate)
+│   │       ├── component_factory.rs — ComponentFactory<C> + create_component()
+│   │       ├── child_stack_save_tests.rs — save/restore тесты
+│   │       └── lib.rs
+│   │
+│   ├── ui/                 — egui-android-ui
+│   │   └── src/
 │   │       ├── remember.rs  — RememberState + remember()
-│   │       ├── modifier.rs  — Modifier value type, ModifierNode, ModifierDsl
+│   │       ├── modifier/    — Modifier value type, ModifierNode, ModifierDsl
 │   │       ├── widgets/     — Button, Text, Spacer, Icon (все через UiWrapper)
 │   │       ├── containers/  — Column, Row, Stack, LazyColumn (передают constraints)
 │   │       ├── animation/   — AnimatedVisibility, Fade, Slide, AnimationExt, animate_*
-│   │       └── theme/       — Theme, ColorPalette, MaterialTheme, Typography, Shapes
-│   │
-│   ├── navigation/         — egui-android-navigation
-│   │   └── src/
-│   │       └── child_stack.rs — ChildStack<C, Comp>
+│   │       ├── theme/       — Theme, ColorPalette, MaterialTheme, Typography, Shapes
+│   │       ├── debug_log.rs
+│   │       └── lib.rs
 │   │
 │   └── framework/          — egui-android-framework (umbrella)
 │       └── src/
 │           └── lib.rs — pub use всех крейтов
 │
-└── examples/
-    ├── counter/            — реактивный счётчик (Compose-like view)
-    └── showcase/           — витрина с навигацией (8 экранов)
 ```
 
 ## Зависимости (ключевые)

@@ -130,7 +130,7 @@ UI (тот же кадр)
 | Reducer | `egui-android-runtime` | store.dispatch(msg, reducer) |
 | Navigation | `egui-android-navigation` | ChildStack, save/restore состояния |
 | Infrastructure | `egui-android-runtime` + `egui-android-core` | Dispatcher, UiNotifier, RuntimeContext, каналы |
-| Macros | `egui-android-macros` | #[derive(Component)] — генерация PersistentState |
+| Macros | `egui-android-macros` | #[derive(PersistentState)] — генерация PersistentState |
 | Umbrella | `egui-android-framework` | Re-export всех крейтов |
 
 ---
@@ -280,7 +280,7 @@ EguiActivity (Kotlin)
 
 ### Правила использования
 
-1. Компонент реализует `Component + PersistentState` (через `#[derive(Component)]` или вручную)
+1. Компонент реализует `Component + PersistentState` (через `#[derive(PersistentState)]` или вручную)
 2. В фабрике компонент не требует обёртки — `#[derive(ComponentNode)]` генерирует `save_state`/`restore_state`
 3. `ChildStack::save()` → вызывает `save_state()` на компонент → `PersistentState::save_to_boxed()` → `Vec<u8>`
 4. `ChildStack::restore_from_saved()` → создаёт компонент через фабрику → вызывает `restore_state()`
@@ -451,8 +451,10 @@ Object-safe трейт для хранения компонента в `ChildSta
 Точка входа B: Кнопка "← Назад" в UI
   dispatch(Msg::Back)
     → DynDispatcher
-      → handle_dyn() → handle()
-        → self.handle_back(ctx)
+      → active.handle_dyn(msg, ctx) → Some(Propagate)
+        → app.rs: Some(Propagate) → on_back()
+          → ChildStack::on_back()
+            → active.handle_back(ctx)   # ЕДИНСТВЕННЫЙ вызов handle_back
 ```
 
 `ComponentNode::handle_back(ctx) -> BackAction`:
@@ -658,9 +660,9 @@ UI
 platform-android → platform, runtime
 runtime          → platform (Waker), egui, tokio, thiserror, log
 core             → runtime
-ui               → core
-navigation       → core, ui
-framework        → core, ui, navigation, runtime, platform, platform-android
+ui               → core, runtime          # содержит трейт Widget<M: Send> + Dispatcher
+navigation       → core, runtime, ui      # SavedStack, DynDispatcher
+framework        → core, ui, navigation, runtime, platform, platform-android, macros
 ```
 
 Циклические зависимости запрещены. Проверка: `cargo tree -e normal`.
@@ -949,11 +951,15 @@ Architecture Validation
 
 | Категория | tx | rx | Где используется |
 |---|---|---|---|
-| UI → Component | `ui_msg_tx` | `ui_msg_rx` | Dispatcher |
-| Component → Data Layer | `data_cmd_tx` | `data_cmd_rx` | ComponentContext, data layer |
-| Data Layer → Runtime | `data_statechanged_tx` | `data_statechanged_rx` | UiNotifier |
-| Навигация | `nav_event_tx` | `nav_event_rx` | ComponentContext, ChildStack |
 | UI → ComponentNode (type-erased) | `ui_dynmsg_tx` | `ui_dynmsg_rx` | DynDispatcher |
+| Data Layer → Runtime | `data_statechanged_tx` | `data_statechanged_rx` | UiNotifier |
+| UI → Component (типизированный) | `ui_msg_tx` | `ui_msg_rx` | Dispatcher |
+
+> **Устарело:** каналы `data_cmd_tx`/`data_cmd_rx` (Component → Data Layer)
+> и `nav_event_tx`/`nav_event_rx` (Component → ChildStack) удалены из активного потока.
+> Навигация идёт через `RootMsg::Navigate`/`handle_dyn()` + `ChildStack`;
+> data layer — через `StateStore`. Таблицы переименования ниже приведены
+> для исторической справки о старой схеме именования.
 
 Таблица переименования (было → стало):
 

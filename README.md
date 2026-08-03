@@ -49,8 +49,8 @@ egui — отличный immediate-mode GUI, но для создания по�
 - ✅ **Touch-ввод** — MotionEvent → egui::Event, поддержка скролла с инерцией (fling), батчинг событий для исключения скачков
 - ✅ **MVI-архитектура** — Component + Widget + Dispatcher + StateStore. Однонаправленный поток данных, реактивное состояние через `tokio::sync::watch`
 - ✅ **Compose-like UI** — Column, Row, Stack (с двухфазным measure→layout), LazyColumn. Модификаторы: padding, background, border, clip, shadow, alpha, width, height, width_in, height_in, fill_max_width, clickable, wrap_content, size. Анимации: Fade, Slide, AnimatedVisibility. Тема: Material Design 3 (light/dark)
-- ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy). `ComponentNode::handle_dyn()` — делегирование сообщений активному компоненту. Каждый вложенный стек имеет свой тип сообщений, независимый от других. `ComponentState` — типобезопасное save/restore состояния.
-- ✅ **Кнопка Back** — единая точка `handle_back(ctx) -> BackAction`: рисованная кнопка делегирует в неё из `Component::handle()`, платформенная — через `ChildStack::on_back()`. Один метод, ноль дублирования. `BackAction` = `Handled`/`Pop`/`Finish`/`Propagate`.
+- ✅ **Навигация** — ChildStack с управлением жизненным циклом экранов (push/pop/replace, on_create/on_destroy). `ComponentNode::handle_dyn()` — делегирование сообщений активному компоненту. Каждый вложенный стек имеет свой тип сообщений, независимый от других. `PersistentState` — типобезопасное save/restore состояния.
+- ✅ **Кнопка Back** — единая точка `handle_back(ctx) -> BackAction`: рисованная кнопка идёт через `handle_dyn() → Some(Propagate) → on_back()`, платформенная — через `ChildStack::on_back()`. Оба сходятся в `handle_back()`. Один метод, ноль дублирования. `BackAction` = `Handled`/`Pop`/`Finish`/`Propagate`. Автоматизация через `#[back_message]` + `#[back_handler]`.
 - ✅ **Темы** — Material Design 3 light/dark с полной палитрой, типографикой, скруглениями. Автоматическое определение системной темы
 - ✅ **Системные панели** — автоматическая обработка insets (status bar, navigation bar), смена цвета панелей под тему
 - ✅ **Локальное UI-состояние** — `remember<T>()` (аналог Compose `remember`). Хранится между кадрами, не требует мутабельного доступа
@@ -146,7 +146,7 @@ Column::new().show(ui, dispatch, |ui, dispatch| {
 | egui-android-navigation | [![crates.io](https://img.shields.io/crates/v/egui-android-navigation)](https://crates.io/crates/egui-android-navigation) | ChildStack с управлением жизненным циклом |
 | egui-android-platform | [![crates.io](https://img.shields.io/crates/v/egui-android-platform)](https://crates.io/crates/egui-android-platform) | Waker и SystemTheme — платформенная абстракция |
 | egui-android-platform-android | [![crates.io](https://img.shields.io/crates/v/egui-android-platform-android)](https://crates.io/crates/egui-android-platform-android) | Android: EGL, input, главный цикл (RunState::tick), lifecycle, system bars, GraphicsPipeline |
-| egui-android-macros | [![crates.io](https://img.shields.io/crates/v/egui-android-macros)](https://crates.io/crates/egui-android-macros) | derive-макросы: `#[derive(ComponentNode)]`, `#[derive(Component)]` |
+| egui-android-macros | [![crates.io](https://img.shields.io/crates/v/egui-android-macros)](https://crates.io/crates/egui-android-macros) | derive-макросы: `#[derive(ComponentNode)]`, `#[derive(PersistentState)]`, `#[back_message]`/`#[back_handler]` |
 | egui-android-framework | [![crates.io](https://img.shields.io/crates/v/egui-android-framework)](https://crates.io/crates/egui-android-framework) | Umbrella, re-export всего |
 
 ## Технологии

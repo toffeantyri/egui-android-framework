@@ -32,15 +32,15 @@ struct MyScreen;
 
 Генерирует: `render()`, `handle_dyn()`, `handle_back()` (со `ctx`), `save_state()`, `restore_state()`, `as_any()`, `as_any_mut()`. Все методы принимают `ComponentContext` (`ctx`), через который экран запрашивает навигацию назад
 
-### `#[derive(Component)]`
+### `#[derive(PersistentState)]`
 
 Генерирует реализацию `PersistentState` для структуры-компонента.
 Сохраняемые поля указываются через `#[persistent_fields(field1, field2)]`:
 
 ```rust
-use egui_android_macros::{Component, ComponentNode};
+use egui_android_macros::{PersistentState, ComponentNode};
 
-#[derive(Component, ComponentNode)]
+#[derive(PersistentState, ComponentNode)]
 #[persistent_fields(counter, user_name)]
 #[component_message(MyMsg)]
 struct MyScreen {
@@ -53,6 +53,33 @@ struct MyScreen {
 Генерирует тип `__{Name}PersistentState` с `Serialize`/`Deserialize`, и методы
 `save()` / `restore()` для полей из `persistent_fields`.
 
+### Автоматизация кастомного Back: `#[back_message]` + `#[back_handler]`
+
+Для экранов с кастомной логикой Back (без вложенных стеков) задаются два
+helper-атрибута в `#[derive(ComponentNode)]`:
+
+```rust
+use egui_android_macros::ComponentNode;
+use egui_android_framework::core::{BackAction, ComponentContext};
+
+#[derive(ComponentNode)]
+#[component_message(MyMsg)]
+#[back_message(MyMsg::Back)]
+#[back_handler(on_back)]
+struct MyScreen;
+
+impl MyScreen {
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        BackAction::Pop
+    }
+}
+```
+
+- `#[back_message(Enum::Variant)]` — какой вариант сообщения является «назад»;
+  макрос генерирует `handle_dyn`, который для него возвращает `Some(Propagate)`.
+- `#[back_handler(method)]` — метод, реализующий логику Back;
+  макрос генерирует `handle_back`, делегирующий в `self.method(ctx)`.
+
 ### `#[component]` (attribute)
 
 Оставляет код без изменений. Существует для обратной совместимости.
@@ -60,14 +87,14 @@ struct MyScreen {
 ## Пример полный
 
 ```rust
-use egui_android_macros::{Component, ComponentNode};
+use egui_android_macros::{PersistentState, ComponentNode};
 use egui_android_core::{Component, ComponentContext, LifecycleObserver, UiWrapper};
 use egui_android_runtime::Dispatcher;
 
 #[derive(Clone, Debug)]
 enum MyMsg { Click }
 
-#[derive(Component, ComponentNode)]
+#[derive(PersistentState, ComponentNode)]
 #[persistent_fields(counter)]
 #[component_message(MyMsg)]
 struct CounterScreen {

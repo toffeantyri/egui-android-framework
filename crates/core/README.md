@@ -34,8 +34,10 @@ egui — immediate-mode GUI, где состояние хранится в за�
 - Реализуется через `#[derive(ComponentNode)]` (из `egui-android-macros`)
 
 Единый механизм навигации назад — `handle_back(ctx) -> BackAction`. Рисованная кнопка
-делегирует в неё из `Component::handle()`, платформенная — через `ChildStack::on_back()`.
-Один метод, ноль дублирования. `BackAction` = `Handled`/`Pop`/`Finish`/`Propagate`.
+идёт через `handle_dyn() → Some(Propagate) → on_back()`, платформенная — через
+`ChildStack::on_back()`. Оба сходятся в `handle_back()`. Один метод, ноль дублирования.
+`BackAction` = `Handled`/`Pop`/`Finish`/`Propagate`. Автоматизация через
+`#[back_message]` + `#[back_handler]` в `#[derive(ComponentNode)]`.
 
 ### `LifecycleObserver`
 - `on_create / on_start / on_resume / on_pause / on_stop / on_destroy`
@@ -45,7 +47,7 @@ egui — immediate-mode GUI, где состояние хранится в за�
 - Типобезопасное save/restore состояния компонента
 - Сериализация через `bincode` + `serde`
 - Хелперы `save_to_boxed()` / `restore_from_boxed()` для `ComponentNode`
-- Реализуется через `#[derive(Component)]` с `#[persistent_fields(...)]`
+- Реализуется через `#[derive(PersistentState)]` с `#[persistent_fields(...)]`
 
 ### `ComponentContext`
 - Контекст компонента (не generic)
@@ -74,7 +76,7 @@ use egui_android_core::{
 };
 use egui_android_runtime::Dispatcher;
 
-#[derive(Component, ComponentNode)]
+#[derive(PersistentState, ComponentNode)]
 #[persistent_fields(counter)]
 #[component_message(Msg)]
 struct CounterScreen { counter: i32 }
