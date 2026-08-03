@@ -42,12 +42,12 @@
 //! # Использование с макросом
 //!
 //! Вместо ручной реализации `PersistentState` используйте
-//! `#[derive(Component, ComponentNode)]` с `#[persistent_fields(...)]`:
+//! `#[derive(PersistentState, ComponentNode)]` с `#[persistent_fields(...)]`:
 //!
 //! ```ignore
-//! use egui_android_macros::{Component, ComponentNode};
+//! use egui_android_macros::{PersistentState, ComponentNode};
 //!
-//! #[derive(Component, ComponentNode)]
+//! #[derive(PersistentState, ComponentNode)]
 //! #[persistent_fields(counter)]
 //! struct MyScreen {
 //!     counter: i32,

@@ -2,7 +2,7 @@
 //!
 //! # Макросы
 //!
-//! - `#[derive(Component)]` — derive-макрос, генерирует `PersistentState`
+//! - `#[derive(PersistentState)]` — derive-макрос, генерирует `PersistentState`
 //!   для структуры-компонента. Сохраняемые поля указываются через
 //!   helper-атрибут `#[persistent_fields(...)]`.
 //!
@@ -10,7 +10,7 @@
 //!   для структуры, реализующей `Component`. Тип сообщения указывается
 //!   через атрибут `#[component_message(MsgType)]`.
 //!
-//!   Если структура также использует `#[derive(Component)]` с
+//!   Если структура также использует `#[derive(PersistentState)]` с
 //!   `#[persistent_fields(...)]`, макрос генерирует `save_state`/`restore_state`
 //!   через PersistentState. Иначе — `save_state = None`.
 //!
@@ -19,7 +19,7 @@
 //! # Примеры
 //!
 //! ```ignore
-//! use egui_android_macros::{Component, ComponentNode};
+//! use egui_android_macros::{PersistentState, ComponentNode};
 //!
 //! // Компонент без сохранения состояния:
 //! #[derive(ComponentNode)]
@@ -27,7 +27,7 @@
 //! struct HomeScreen;
 //!
 //! // Компонент с сохранением состояния:
-//! #[derive(Component, ComponentNode)]
+//! #[derive(PersistentState, ComponentNode)]
 //! #[persistent_fields(counter)]
 //! #[component_message(StateScreenMsg)]
 //! struct StateScreen { counter: i32 }
@@ -76,12 +76,12 @@ fn has_persistent_fields(attrs: &[syn::Attribute]) -> bool {
     !parse_persistent_fields(attrs).is_empty()
 }
 
-/// Derive-макрос `Component` — генерирует `PersistentState` для структуры.
+/// Derive-макрос `PersistentState` — генерирует `impl PersistentState` для структуры.
 ///
 /// Сохраняемые поля указываются через `#[persistent_fields(...)]`
 /// на той же структуре.
-#[proc_macro_derive(Component, attributes(persistent_fields))]
-pub fn derive_component(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(PersistentState, attributes(persistent_fields))]
+pub fn derive_persistent_state(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
     let saved_state_name = format_ident!("__{}PersistentState", name);
@@ -92,14 +92,14 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
             _ => {
                 return syn::Error::new_spanned(
                     &input,
-                    "Component поддерживает только struct с именованными полями",
+                    "PersistentState поддерживает только struct с именованными полями",
                 )
                 .to_compile_error()
                 .into();
             }
         },
         _ => {
-            return syn::Error::new_spanned(&input, "Component поддерживает только struct")
+            return syn::Error::new_spanned(&input, "PersistentState поддерживает только struct")
                 .to_compile_error()
                 .into();
         }
@@ -191,7 +191,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 /// Заменяет blanket-impl из `component_node.rs`. Требует указания типа сообщения
 /// через `#[component_message(MsgType)]`.
 ///
-/// Если структура также использует `#[derive(Component)]` с
+/// Если структура также использует `#[derive(PersistentState)]` с
 /// `#[persistent_fields(...)]`, макрос генерирует `save_state`/`restore_state`
 /// через PersistentState. Иначе — `save_state = None`.
 ///
@@ -202,7 +202,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 /// #[component_message(MyMsg)]
 /// struct MyScreen;
 ///
-/// #[derive(Component, ComponentNode)]
+/// #[derive(PersistentState, ComponentNode)]
 /// #[persistent_fields(counter)]
 /// #[component_message(MyMsg)]
 /// struct StatefulScreen { counter: i32 }

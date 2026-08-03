@@ -34,8 +34,9 @@
 //! #[derive(ComponentNode)]
 //! struct MyScreen;
 //!
+//! ```ignore
 //! // Компонент с сохранением состояния
-//! #[derive(Component, ComponentNode)]
+//! #[derive(PersistentState, ComponentNode)]
 //! #[persistent_fields(counter)]
 //! struct StatefulScreen { counter: i32 }
 //! ```

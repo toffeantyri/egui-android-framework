@@ -5,7 +5,7 @@
 //! ```ignore
 //! use egui_android_framework::runtime::Application;
 //! use egui_android_framework::core::Component;
-//! use egui_android_framework::Component;  // derive-макрос
+//! use egui_android_framework::PersistentState;  // derive-макрос
 //! ```
 
 pub extern crate egui_android_core;
@@ -18,8 +18,8 @@ pub use egui_android_runtime as runtime;
 pub use egui_android_ui as ui;
 
 // Реэкспорт макросов
-pub use egui_android_macros::Component;
 pub use egui_android_macros::ComponentNode;
+pub use egui_android_macros::PersistentState;
 
 // Удобный prelude
 pub mod prelude {

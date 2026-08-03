@@ -239,7 +239,7 @@ fn multiple_persistent_components_in_stack() {
 // ─── МИГРИРОВАННЫЙ ТЕСТ: Сценарий StateScreen ──────────────────────
 
 /// Интеграционный тест: полный цикл save/restore для компонента,
-/// идентичного StateScreen (через #[derive(Component, ComponentNode)]).
+/// идентичного StateScreen (через #[derive(PersistentState, ComponentNode)]).
 ///
 /// Это точная копия сценария из ShowcaseApplication, но без PersistentComponent.
 /// Вместо обёртки используется ручное сохранение через PersistentState,

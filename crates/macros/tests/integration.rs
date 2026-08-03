@@ -1,11 +1,11 @@
-//! Интеграционные тесты для derive-макроса Component.
+//! Интеграционные тесты для derive-макроса PersistentState.
 //!
-//! Проверяют генерацию PersistentState через #[derive(Component)] + #[persistent_fields(...)].
+//! Проверяют генерацию PersistentState через #[derive(PersistentState)] + #[persistent_fields(...)].
 
 use egui_android_core::{
     Component as EguiComponent, ComponentContext, LifecycleObserver, PersistentState, UiWrapper,
 };
-use egui_android_macros::Component;
+use egui_android_macros::PersistentState;
 use egui_android_runtime::Dispatcher;
 
 // ─── Компонент с persistent полями ─────────────────────────────────
@@ -15,7 +15,7 @@ enum TestMsg {
     Increment,
 }
 
-#[derive(Component)]
+#[derive(PersistentState)]
 #[persistent_fields(counter, label)]
 struct TestScreen {
     counter: i32,
