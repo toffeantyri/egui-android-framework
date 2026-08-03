@@ -22,7 +22,9 @@ pub use containers::{Column, LazyColumn, Row, Stack};
 pub use modifier::{Modified, Modifier, ModifierDsl};
 pub use remember::*;
 pub use theme::{ColorPalette, FontWeight, MaterialTheme, Shapes, TextStyle, Theme, Typography};
-pub use widgets::{Button, ButtonColors, Icon, Spacer, Text, Widget};
+pub use widgets::{
+    Button, ButtonColors, Icon, ImeAction, KeyboardType, Spacer, Text, TextEdit, Widget,
+};
 
 // Re-export из core
 pub use egui_android_core::{Constraints, UiWrapper};

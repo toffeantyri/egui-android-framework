@@ -1,6 +1,7 @@
 //! Интеграционные тесты виджетов, контейнеров, модификаторов, анимаций и темы.
 
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 use egui_android_core::{widget::Widget as WidgetTrait, UiWrapper};
 use egui_android_runtime::Dispatcher;
@@ -10,7 +11,7 @@ use egui_android_ui::animation::{
 use egui_android_ui::containers::{Align, Column, LazyColumn, Row, Stack};
 use egui_android_ui::modifier::{Modifier, ModifierDsl};
 use egui_android_ui::theme::{Colors, MaterialTheme, Shapes, Theme};
-use egui_android_ui::widgets::{Button, Icon, Spacer, Text};
+use egui_android_ui::widgets::{Button, Icon, ImeAction, KeyboardType, Spacer, Text, TextEdit};
 
 // ─── Helper: with_ui ────────────────────────────────────────────────────────────
 
@@ -2068,5 +2069,185 @@ fn test_icon_with_modifiers() {
         Icon::new(uri)
             .modifier(Modifier::new().padding(8.0))
             .render(ui, &dispatch);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// TEXTEDIT TESTS (15 тестов из контракта TextEdit)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_text_edit_renders_singleline() {
+    // Не паникует в однострочном режиме.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("Привет").single_line().render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_renders_multiline() {
+    // Не паникует в многострочном режиме.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("Строка 1\nСтрока 2")
+            .multiline()
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_password() {
+    // Маска пароля не паникует; признак password доступен.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let te = TextEdit::new("secret").password();
+        assert!(te.is_password(), "должен быть включён password-режим");
+        te.render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_read_only() {
+    // read_only не паникует; признак read_only доступен.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let te = TextEdit::new("данные").read_only();
+        assert!(te.is_read_only(), "должен быть включён read_only");
+        te.render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_hint() {
+    // Подсказка не паникует при рендере.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("")
+            .hint("Введите текст...")
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_char_limit() {
+    // Лимит символов не паникует при рендере.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("1234567890")
+            .char_limit(5)
+            .render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_max_lines() {
+    // Ограничение высоты multiline доступно и не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        let te = TextEdit::new("многострочный").multiline().max_lines(5);
+        assert_eq!(te.get_max_lines(), Some(5), "max_lines должен быть 5");
+        te.render(ui, &dispatch);
+    });
+}
+
+#[test]
+fn test_text_edit_on_changed_callback() {
+    // Никаких побочных эффектов вне события текста — callback не вызывается.
+    let changed = Arc::new(Mutex::new(0usize));
+    let changed_clone = Arc::clone(&changed);
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("привет")
+            .on_changed({
+                let changed_clone = changed_clone.clone();
+                move |_v| *changed_clone.lock().unwrap() += 1
+            })
+            .render(ui, &dispatch);
+    });
+    // В тестовой среде текст не редактируется — callback не должен вызываться.
+    assert_eq!(
+        *changed.lock().unwrap(),
+        0,
+        "on_changed не должен вызываться без ввода"
+    );
+}
+
+#[test]
+fn test_text_edit_on_change_msg_callback() {
+    // on_change_msg формирует Message; в тестах без ввода сообщение не диспатчится.
+    let (dispatch, rx) = Dispatcher::<String>::new();
+    with_ui(|ui| {
+        TextEdit::new("привет")
+            .on_change_msg(|v| format!("changed:{}", v))
+            .render(ui, &dispatch);
+    });
+    let msgs: Vec<String> = rx.try_iter().collect();
+    assert!(msgs.is_empty(), "без ввода сообщений быть не должно");
+}
+
+#[test]
+fn test_text_edit_on_submit_callback() {
+    // on_submit без события submit (потеря фокуса) не вызывается.
+    let submitted = Arc::new(Mutex::new(0usize));
+    let submitted_clone = Arc::clone(&submitted);
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        TextEdit::new("текст")
+            .on_submit({
+                let submitted_clone = submitted_clone.clone();
+                move |_v| *submitted_clone.lock().unwrap() += 1
+            })
+            .render(ui, &dispatch);
+    });
+    assert_eq!(
+        *submitted.lock().unwrap(),
+        0,
+        "on_submit не должен вызываться без события"
+    );
+}
+
+#[test]
+fn test_text_edit_keyboard_type() {
+    // Тип клавиатуры хранится и доступен.
+    let te = TextEdit::<()>::new("x").keyboard_type(KeyboardType::Email);
+    assert_eq!(te.get_keyboard_type(), KeyboardType::Email);
+}
+
+#[test]
+fn test_text_edit_ime_action() {
+    // ImeAction хранится и доступен.
+    let te = TextEdit::<()>::new("x").ime_action(ImeAction::Search);
+    assert_eq!(te.get_ime_action(), ImeAction::Search);
+}
+
+#[test]
+fn test_text_edit_is_widget() {
+    // Принимается как dyn Widget<M>.
+    fn takes_widget<M: 'static + Send>(_w: impl WidgetTrait<M>) {}
+    takes_widget::<()>(TextEdit::new("текст"));
+}
+
+#[test]
+fn test_text_edit_in_column() {
+    // Рендер внутри Column не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Column::new().show(ui, &dispatch, |ui, dispatch| {
+            TextEdit::new("в колонке").render(ui, dispatch);
+            Text::new("после поля").render(ui, dispatch);
+        });
+    });
+}
+
+#[test]
+fn test_text_edit_in_row() {
+    // Рендер внутри Row не паникует.
+    let (dispatch, _rx) = Dispatcher::<()>::new();
+    with_ui(|ui| {
+        Row::new(ui, &dispatch, |ui, dispatch| {
+            TextEdit::new("левый").render(ui, dispatch);
+            TextEdit::new("правый").render(ui, dispatch);
+        });
     });
 }

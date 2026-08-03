@@ -23,6 +23,8 @@ pub enum Route {
     Nested,
     /// Кастомная обработка Back: меняет цвет фона вместо pop.
     BackCustom,
+    /// Текстовый ввод (TextEdit) в разных режимах.
+    TextEdit,
 }
 
 impl Route {
@@ -38,6 +40,7 @@ impl Route {
             Route::ModifierValue => "Модификаторы",
             Route::Nested => "Вложенная навигация",
             Route::BackCustom => "Кастомный Back",
+            Route::TextEdit => "TextEdit",
         }
     }
 
@@ -53,6 +56,7 @@ impl Route {
             Route::ModifierValue => "padding, size, background, border, clip, shadow и т.д.",
             Route::Nested => "Демо вложенной навигации с BackPressed",
             Route::BackCustom => "Back переключает цвет фона",
+            Route::TextEdit => "Однострочный, пароль, многострочный, read-only, hint",
         }
     }
 }

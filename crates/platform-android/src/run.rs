@@ -35,6 +35,7 @@
 
 #![cfg(target_os = "android")]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use android_activity::AndroidApp;
@@ -42,7 +43,7 @@ use android_activity::AndroidApp;
 use crate::backend::{AndroidBackend, AndroidBackendKind};
 use crate::r#loop::RunState;
 
-use egui_android_runtime::Application;
+use egui_android_runtime::{keyboard_controller_id, Application, KeyboardController};
 
 /// Запустить egui-приложение на Android.
 ///
@@ -58,6 +59,9 @@ pub fn run<A: Application>(app: AndroidApp) {
 /// - `Native` — NativeActivity (fallback, без IME)
 /// - `Game` — зарезервировано (пока использует Gl)
 pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKind) {
+    // Клон AndroidApp для KeyboardController: компилятор не позволяет заимствовать
+    // его из backend после регистрации в egui Context (нужно 'static для closures).
+    let app_for_keyboard = app.clone();
     let mut app_instance = A::create();
 
     android_logger::init_once(
@@ -93,6 +97,28 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     let egui_ctx = egui::Context::default();
     egui_ctx.set_pixels_per_point(backend.dpi());
     egui_ctx.set_fonts(egui::FontDefinitions::default());
+
+    // Регистрируем контроллер клавиатуры (IME) в egui Context data.
+    // Виджет TextEdit читает его по событию фокуса и вызывает show()/hide().
+    // Если backend не поддерживает IME (NativeBackend) — пропускаем.
+    if backend.supports_ime() {
+        let app_show = app_for_keyboard.clone();
+        let app_hide = app_for_keyboard.clone();
+        let kb = KeyboardController::new(
+            Arc::new(move || {
+                log::info!("KeyboardController: показать клавиатуру");
+                app_show.show_soft_input(false);
+            }),
+            Arc::new(move || {
+                log::info!("KeyboardController: скрыть клавиатуру");
+                app_hide.hide_soft_input(false);
+            }),
+        );
+        egui_ctx.data_mut(|d| {
+            d.insert_temp(keyboard_controller_id(), kb);
+        });
+        log::info!("KeyboardController: зарегистрирован в egui Context");
+    }
 
     let waker = backend.create_waker();
 

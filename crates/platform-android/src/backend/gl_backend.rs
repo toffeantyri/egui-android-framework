@@ -267,6 +267,10 @@ impl AndroidBackend for GlBackend {
         self.app.hide_soft_input(false);
     }
 
+    fn supports_ime(&self) -> bool {
+        true
+    }
+
     fn should_close(&self) -> bool {
         self.should_close.load(Ordering::Relaxed)
     }

@@ -15,7 +15,8 @@ use crate::navigation::Route;
 use crate::screens::{
     animations::AnimationsScreen, back_custom::BackCustomScreen, containers::ContainersScreen,
     home::HomeScreen, modifier_value::ModifierValueScreen, nested::NestedScreen,
-    state_screen::StateScreen, themes::ThemesScreen, widgets::WidgetsScreen,
+    state_screen::StateScreen, text_edit_screen::TextEditScreen, themes::ThemesScreen,
+    widgets::WidgetsScreen,
 };
 
 /// Фабрика экранов showcase-приложения.
@@ -33,6 +34,7 @@ impl ComponentFactory<Route> for ShowcaseFactory {
             Route::ModifierValue => Box::new(ModifierValueScreen::new()),
             Route::Nested => Box::new(NestedScreen::new()),
             Route::BackCustom => Box::new(BackCustomScreen::new()),
+            Route::TextEdit => Box::new(TextEditScreen::new()),
         }
     }
 }

@@ -105,6 +105,16 @@ pub trait AndroidBackend {
     /// Скрыть клавиатуру (IME).
     fn hide_keyboard(&mut self);
 
+    /// Поддерживает ли backend текстовый ввод (IME).
+    ///
+    /// `GlBackend` (GameActivity) — да. `NativeBackend` (NativeActivity) — нет.
+    /// Используется для регистрации `KeyboardController` в `egui::Context::data()`:
+    /// если IME не поддерживается, контроллер не регистрируется и виджет
+    /// просто пропускает управление клавиатурой.
+    fn supports_ime(&self) -> bool {
+        false
+    }
+
     /// Запрошено ли завершение приложения.
     fn should_close(&self) -> bool;
 
@@ -206,6 +216,10 @@ impl AndroidBackend for Box<dyn AndroidBackend> {
 
     fn hide_keyboard(&mut self) {
         (**self).hide_keyboard()
+    }
+
+    fn supports_ime(&self) -> bool {
+        (**self).supports_ime()
     }
 
     fn should_close(&self) -> bool {

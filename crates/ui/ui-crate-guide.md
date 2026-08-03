@@ -291,6 +291,47 @@ Icon::new(egui::Image::new("...")).render(ui, dispatch);
 
 Использует `ui.add(self.icon.clone())`. `fill_max_width` не поддерживается.
 
+### 6.5 TextEdit
+
+**Расположение:** `egui_android_ui::widgets::TextEdit`
+
+Обёртка над `egui::TextEdit`, интегрированная в MVI. Значение приходит как `&str` (из State или `remember`), изменение передаётся наружу через callback. При смене фокуса управляет клавиатурой (IME)
+через `KeyboardController` из `egui::Context::data()`.
+
+```rust
+TextEdit::new(&state.email)
+    .hint("Email")
+    .single_line()
+    .keyboard_type(KeyboardType::Email)
+    .ime_action(ImeAction::Next)
+    .on_change_msg(|v| Msg::EmailChanged(v))
+    .on_submit(|v| dispatch.dispatch(Msg::Submit(v.to_owned())))
+    .render(ui, dispatch);
+```
+
+**MVI-паттерны:**
+- **Паттерн 1 (полный MVI):** `.on_change_msg(|v| Msg::X(v))` → каждый символ диспатчится в Store.
+- **Паттерн 2 (локальный remember + submit):** `.on_changed({...})` мутирует `remember`, `.on_submit(...)` диспатчит по готовности.
+- **Паттерн 3 (кастомная логика):** `.on_changed(|v| ...)` — валидация/форматирование перед dispatch.
+
+**Приоритет callback при изменении текста:** сначала вызывается `on_changed`, затем `on_changed_msg` (оба — если заданы).
+
+**Структура (`TextEdit<M>`):** `value`, `hint_text`, `single_line` (по умолч. `true`), `password`, `max_lines`, `char_limit`, `read_only`, `keyboard_type`, `ime_action`, `on_changed`, `on_changed_msg`, `on_submit`.
+
+**Builder-методы:** `single_line()`, `multiline()`, `password()`, `max_lines(n)`, `char_limit(n)`, `read_only()`, `hint(text)`, `keyboard_type(kt)`, `ime_action(a)`, `on_changed(f)`, `on_change_msg(f)`, `on_submit(f)`.
+
+#### Контракт для TextEdit
+
+- **Виджет — чистая декларация.** Значение приходит как `&str`, не хранит mutable state между кадрами, не generic по `&mut String`.
+- **Не вызывает Store напрямую** — только через callback/`Dispatcher`.
+- **Клавиатура по событию фокуса** (push): `gained_focus()` → `show()`, `lost_focus()` → `hide()` + `on_submit`. Без polling.
+- **read_only** не открывает клавиатуру (`interactive(false)`).
+- **Singleline:** Enter/Done → `on_submit` + скрыть клавиатуру; горизонтальный скролл из `egui::TextEdit`.
+- **Multiline:** Enter → новая строка; submit только при потере фокуса; `max_lines` через `desired_rows`.
+- **Password** — `egui::TextEdit::password(true)`; **char_limit** — `egui::TextEdit::char_limit(n)`.
+- **Не использовать `ScrollArea`** вокруг multiline — egui TextEdit скроллит сам.
+- **`KeyboardController` определён в `egui-android-runtime`**, регистрируется platform-android; если не зарегистрирован (десктоп/тесты) — пропуск без паники.
+
 ---
 
 ## 7. Модификаторы
