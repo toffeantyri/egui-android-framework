@@ -258,6 +258,7 @@ dependencies = [
  "egui-android-core",
  "egui-android-framework",
  "egui-android-runtime",
+ "log",
  "proc-macro2",
  "quote",
  "serde",

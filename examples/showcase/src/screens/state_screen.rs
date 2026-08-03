@@ -8,7 +8,7 @@
 
 pub use egui_android_framework::core;
 use egui_android_framework::core::{
-    BackAction, Component, ComponentContext, ComponentNode, LifecycleObserver, UiWrapper,
+    BackAction, Component, ComponentContext, LifecycleObserver, UiWrapper,
 };
 use egui_android_framework::runtime::Dispatcher;
 use egui_android_framework::ui::{
@@ -18,6 +18,7 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 use egui_android_framework::PersistentState;
 
 /// Сообщения экрана состояния.
@@ -29,74 +30,32 @@ pub enum StateScreenMsg {
     Back,
 }
 
-#[derive(PersistentState)]
+#[derive(PersistentState, ComponentNode)]
 #[persistent_fields(counter)]
+#[component_message(StateScreenMsg)]
+#[back_message(StateScreenMsg::Back)]
+#[back_handler(on_back)]
 pub struct StateScreen {
     counter: i32,
-    // Флаг Back теперь не нужен — единая точка логики в handle_back() -> BackAction.
 }
 
 impl StateScreen {
     pub fn new() -> Self {
         Self { counter: 0 }
     }
-}
 
-impl LifecycleObserver for StateScreen {}
-
-impl ComponentNode for StateScreen {
-    fn render(
-        &self,
-        ui: &mut UiWrapper,
-        dispatch: &::egui_android_framework::runtime::DynDispatcher,
-        ctx: &ComponentContext,
-    ) {
-        let typed = dispatch.wrap::<StateScreenMsg>();
-        Component::render(self, ui, &typed, ctx);
-    }
-
-    fn handle_dyn(
-        &mut self,
-        msg: Box<dyn std::any::Any + Send>,
-        ctx: &mut ComponentContext,
-    ) -> Option<BackAction> {
-        if let Ok(typed) = msg.downcast::<StateScreenMsg>() {
-            if matches!(&*typed, StateScreenMsg::Back) {
-                // Не вызываем handle_back здесь — app.rs вызовет on_back(),
-                // который дойдёт до handle_back через ChildStack::on_back().
-                // Возвращаем Propagate, чтобы app.rs знал, что нужен pop.
-                return Some(BackAction::Propagate);
-            }
-            // Обычное (не-навигационное) сообщение — обработано, навигация не требуется.
-            Component::handle(self, *typed, ctx);
-            return None;
-        }
-        log::error!("StateScreen::handle_dyn: ожидался StateScreenMsg, получен неизвестный");
-        Some(BackAction::Propagate)
-    }
-
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
-        // Единая точка кастомной логики — и для рисованной, и для платформенной кнопки.
+    /// Кастомная логика Back: сбрасывает счётчик и просит pop.
+    ///
+    /// Реализует единую точку для рисованной и платформенной кнопки.
+    /// Вызывается макросом `#[derive(ComponentNode)]` из сгенерированного
+    /// `handle_back()` через `#[back_handler(on_back)]`.
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
         self.counter = 0;
         BackAction::Pop
     }
-
-    fn save_state(&self) -> Option<Box<dyn std::any::Any + Send>> {
-        ::egui_android_framework::core::PersistentState::save_to_boxed(self)
-    }
-
-    fn restore_state(&mut self, state: Box<dyn std::any::Any + Send>) {
-        ::egui_android_framework::core::PersistentState::restore_from_boxed(self, state);
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
 }
+
+impl LifecycleObserver for StateScreen {}
 
 impl Component for StateScreen {
     type State = ();
@@ -215,6 +174,7 @@ impl Component for StateScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_android_framework::core::ComponentNode;
 
     /// handle_back — единая точка кастомной логики.
     /// Проверяет базовый контракт: сброс + Pop.

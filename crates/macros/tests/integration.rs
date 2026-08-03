@@ -1,11 +1,13 @@
-//! Интеграционные тесты для derive-макроса PersistentState.
+//! Интеграционные тесты для derive-макросов.
 //!
-//! Проверяют генерацию PersistentState через #[derive(PersistentState)] + #[persistent_fields(...)].
+//! Проверяют генерацию PersistentState через #[derive(PersistentState)]
+//! и ComponentNode через #[derive(ComponentNode)] (включая back_message/back_handler).
 
 use egui_android_core::{
-    Component as EguiComponent, ComponentContext, LifecycleObserver, PersistentState, UiWrapper,
+    BackAction, Component as EguiComponent, ComponentContext, LifecycleObserver, PersistentState,
+    UiWrapper,
 };
-use egui_android_macros::PersistentState;
+use egui_android_macros::{ComponentNode, PersistentState};
 use egui_android_runtime::Dispatcher;
 
 // ─── Компонент с persistent полями ─────────────────────────────────
@@ -104,4 +106,114 @@ fn generate_serialize_deserialize_roundtrip() {
 
     assert_eq!(deser.counter, 55);
     assert_eq!(deser.label, "bincode");
+}
+
+// ─── Компонент с кастомным Back (#[back_message] + #[back_handler]) ──
+
+/// Сообщения экрана с кастомным Back.
+#[derive(Clone, Debug, PartialEq)]
+enum CounterMsg {
+    Increment,
+    Reset,
+    Back,
+}
+
+/// Компонент, где handle_back генерируется макросом и делегирует в метод on_back.
+#[derive(ComponentNode)]
+#[component_message(CounterMsg)]
+#[back_message(CounterMsg::Back)]
+#[back_handler(on_back)]
+struct BackComponent {
+    counter: i32,
+}
+
+impl BackComponent {
+    fn new() -> Self {
+        Self { counter: 0 }
+    }
+
+    /// Логика Back: сбрасывает счётчик и просит pop.
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        self.counter = 0;
+        BackAction::Pop
+    }
+}
+
+impl LifecycleObserver for BackComponent {}
+
+impl EguiComponent for BackComponent {
+    type State = ();
+    type Message = CounterMsg;
+
+    fn render(&self, _ui: &mut UiWrapper, _d: &Dispatcher<CounterMsg>, _ctx: &ComponentContext) {}
+    fn handle(&mut self, msg: CounterMsg, _ctx: &mut ComponentContext) {
+        match msg {
+            CounterMsg::Increment => self.counter += 1,
+            CounterMsg::Reset => self.counter = 0,
+            // Back обрабатывается через сгенерированный handle_back (не здесь).
+            CounterMsg::Back => {}
+        }
+    }
+    fn state(&self) -> &Self::State {
+        &()
+    }
+}
+
+/// handle_back, сгенерированный через #[back_handler], должен делегировать в on_back.
+#[test]
+fn back_handler_delegates_to_method() {
+    let mut comp = BackComponent::new();
+    comp.counter = 42;
+    let mut ctx = ComponentContext::new();
+
+    // Вызываем handle_back от арены (как делает ChildStack::on_back).
+    let action = egui_android_core::ComponentNode::handle_back(&mut comp, &mut ctx);
+
+    assert_eq!(
+        action,
+        BackAction::Pop,
+        "handle_back должен вернуть Pop из on_back"
+    );
+    assert_eq!(comp.counter, 0, "on_back должен сбросить счётчик");
+}
+
+/// handle_dyn для Back-варианта должен вернуть Some(Propagate), а не None.
+#[test]
+fn back_message_makes_handle_dyn_propagate() {
+    let mut comp = BackComponent::new();
+    comp.counter = 5;
+    let mut ctx = ComponentContext::new();
+
+    let action = egui_android_core::ComponentNode::handle_dyn(
+        &mut comp,
+        Box::new(CounterMsg::Back),
+        &mut ctx,
+    );
+
+    assert_eq!(
+        action,
+        Some(BackAction::Propagate),
+        "handle_dyn для Back должен вернуть Some(Propagate)"
+    );
+    assert_eq!(
+        comp.counter, 5,
+        "handle_dyn НЕ должен вызывать on_back (навигация передаётся в ChildStack)"
+    );
+}
+
+/// handle_dyn для обычного сообщения должен вернуть None.
+#[test]
+fn back_message_keeps_ordinary_messages_none() {
+    let mut comp = BackComponent::new();
+    comp.counter = 1;
+    let mut ctx = ComponentContext::new();
+
+    let action = egui_android_core::ComponentNode::handle_dyn(
+        &mut comp,
+        Box::new(CounterMsg::Increment),
+        &mut ctx,
+    );
+
+    assert_eq!(action, None, "обычное сообщение должно вернуть None");
+    assert_eq!(comp.counter, 2, "Increment должен применить handle()");
 }

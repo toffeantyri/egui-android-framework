@@ -210,7 +210,8 @@ Message = и событие, и семантика
 - Аналог `Component<*, *>` из Decompose (type erasure).
 - Реализуется через `#[derive(ComponentNode)]` с атрибутом `#[component_message(MsgType)]`.
 - `render(ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx)` — type-erased рендер.
-- `handle_dyn(msg: Box<dyn Any + Send>, ctx)` — type-erased handle (downcast внутри).
+- `handle_dyn(msg: Box<dyn Any + Send>, ctx) -> Option<BackAction>` — type-erased handle (downcast внутри).
+  `None` — обычное сообщение (не навигация); `Some(action)` — навигационное намерение.
   При ошибке downcast логирует ожидаемый тип.
 - `handle_back(ctx) -> BackAction` — единая точка обработки Back.
   `Handled`/`Pop`/`Finish`/`Propagate`. По умолчанию — `Propagate`.
@@ -220,7 +221,8 @@ Message = и событие, и семантика
 - `restore_state(Box<dyn Any + Send>)` — восстановить ранее сохранённое состояние.
 - `as_any() / as_any_mut()` — downcast для тестирования и доступа к конкретному типу.
 - `#[derive(ComponentNode)]` генерирует конкретный impl (не blanket).
-  Для кастомной логики `handle_back` — ручной impl (переопределяется).
+  Для кастомной логики `handle_back` используйте `#[back_message]` + `#[back_handler]`.
+  Ручной `impl ComponentNode` нужен только для вложенных стеков (`NestedScreen`).
 
 ### `StateStore<T>` — `egui-android-runtime`
 - Реактивное состояние на `tokio::sync::watch`.
@@ -338,13 +340,59 @@ Blanket-impl НЕ переопределяет их — компонент мо�
 - `type State: Serialize + DeserializeOwned + Send + 'static`.
 - `save_to_boxed()/restore_from_boxed()` — хелперы с bincode.
 
-### `#[derive(Component, ComponentNode)]` — `egui-android-macros`
-- `#[derive(Component)]` генерирует `PersistentState` по `#[persistent_fields(f1, f2)]`.
+### `#[derive(PersistentState, ComponentNode)]` — `egui-android-macros`
+- `#[derive(PersistentState)]` генерирует `PersistentState` по `#[persistent_fields(f1, f2)]`.
 - `#[derive(ComponentNode)]` генерирует `ComponentNode` с `save_state`/`restore_state`
   через PersistentState (если есть persistent_fields) или `None` (если нет).
 - Поля без persistent_fields = UI-состояние, не сохраняются.
 - **Важно:** компонент должен использовать `#[derive(ComponentNode)]` (не blanket).
-  Для кастомной логики `handle_back` — переопределяется вручную.
+
+### Автоматизация кастомного Back: `#[back_message]` + `#[back_handler]`
+
+Для экранов с кастомной логикой Back макрос `#[derive(ComponentNode)]`
+умеет сгенерировать и `handle_dyn`, и `handle_back` — без ручного `impl ComponentNode`.
+Два helper-атрибута задают навигацию:
+
+- `#[back_message(Enum::Variant)]` — какой вариант сообщения является «назад».
+  Макрос сгенерирует `handle_dyn`, который для этого варианта вернёт
+  `Some(BackAction::Propagate)` (навигация поднимается в `ChildStack::on_back`),
+  а для остальных сообщений — `None`.
+- `#[back_handler(method_name)]` — имя метода на структуре, реализующего логику Back.
+  Макрос сгенерирует `handle_back`, делегирующий в `self.<method_name>(ctx)`.
+  Сигнатура метода: `fn <method_name>(&mut self, ctx: &mut ComponentContext) -> BackAction`.
+
+```rust,ignore
+use egui_android_macros::{PersistentState, ComponentNode};
+use egui_android_framework::core::{BackAction, ComponentContext};
+
+#[derive(PersistentState, ComponentNode)]
+#[persistent_fields(counter)]
+#[component_message(StateScreenMsg)]
+#[back_message(StateScreenMsg::Back)]
+#[back_handler(on_back)]
+struct CounterScreen { counter: i32 }
+
+impl CounterScreen {
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        self.counter = 0;
+        BackAction::Pop
+    }
+}
+```
+
+**Правила:**
+- `#[back_handler]` заменяет **полностью** сгенерированный `handle_back` на делегирование в метод.
+- `#[back_message]` и `#[back_handler]` используются вместе: первый отделяет Back-вариант,
+  второй описывает, как его обработать.
+- Если `#[back_message]`/`#[back_handler]` не указаны — `handle_dyn` для всех сообщений
+  возвращает `None`, а `handle_back` возвращает `Propagate` (стандартный pop).
+
+**Когда макрос НЕ подходит** (нужен ручной `impl ComponentNode`):
+1. Экран владеет внутренним `ChildStack` и рекурсивно обрабатывает Back
+   (например, вложенная навигация `NestedScreen`/`Layer2Screen`) — `handle_dyn`
+   и `handle_back` требуют доступа к внутреннему стеку.
+2. Логика Back зависит от типа нажатия (рисованная vs платформенная кнопка).
+3. Back требует диспатча/команд в data layer, а не только мутацию `self`.
 
 ### `SavedStack<C>` — `egui-android-runtime`
 - `ChildStack::save() -> SavedStack<C>`, `restore_from_saved()`.
@@ -522,8 +570,9 @@ BackPressed обрабатывается по архитектуре Decompose: 
           → active.handle_back(ctx) → BackAction
 
 Точка входа B: Кнопка "← Назад" (StateScreenMsg::Back / NestedMsg::Back)
-  dispatch(...) → DynDispatcher → handle_dyn() → handle()
-    → self.handle_back(ctx) → BackAction
+  dispatch(...) → DynDispatcher → handle_dyn() → Some(Propagate)
+    → app.rs: Some(Propagate) → on_back()
+      → ChildStack::on_back(ctx) → handle_back(ctx) → BackAction
 
 ChildStack::on_back(ctx) интерпретирует BackAction:
   - Handled → ничего
@@ -536,6 +585,32 @@ NavigationHost::on_back():
 ```
 
 ### Как добавить кастомную обработку Back
+
+**Рекомендуемый способ (для экранов без вложенных стеков) — макрос**
+
+Кастомную логику Back передают в `#[derive(ComponentNode)]` через два helper-атрибута:
+
+```rust,ignore
+#[derive(PersistentState, ComponentNode)]
+#[persistent_fields(counter)]
+#[component_message(StateScreenMsg)]
+#[back_message(StateScreenMsg::Back)] // какой вариант msg — «назад»
+#[back_handler(on_back)]              // метод, реализующий логику Back
+struct StateScreen { counter: i32 }
+
+impl StateScreen {
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        self.counter = 0;   // кастомное действие
+        BackAction::Pop
+    }
+}
+```
+
+Макрос сгенерирует:
+- `handle_dyn` — для `StateScreenMsg::Back` вернёт `Some(Propagate)`, для остальных — `None`
+- `handle_back` — делегирует в `self.on_back(ctx)`
+
+**Ручной способ (для вложенных стеков — NestedScreen/Layer2Screen)**
 
 **Перехват Back без pop — `BackAction::Handled`**
 
@@ -550,35 +625,17 @@ impl ComponentNode for BackCustomScreen {
 }
 ```
 
-**Кастомная логика + pop — `BackAction::Pop`**
-
-```rust,ignore
-impl ComponentNode for StateScreen {
-    fn handle_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
-        self.counter = 0;          // кастомное действие
-        BackAction::Pop
-    }
-}
-
-impl Component for StateScreen {
-    type Message = StateScreenMsg;
-
-    fn handle(&mut self, msg: Self::Message, ctx: &mut ComponentContext) {
-        match msg {
-            StateScreenMsg::Back => { self.handle_back(ctx); } // делегируем
-            // ...
-        }
-    }
-}
-```
-
 ### Правила
 
 - **Единая точка** — и системный Back, и рисованная кнопка идут в `handle_back()`
-- **Рисованная кнопка** — `handle(Msg::Back)` делегирует в `self.handle_back(ctx)`
+- **Рисованная кнопка** — `handle_dyn` для Back-варианта возвращает `Some(Propagate)`,
+  `app.rs` вызывает `on_back()`, который доходит до `handle_back()` (ровно один раз)
 - **Pop** — `BackAction::Pop` — единственный способ «логика + pop»
 - **Home** — Back на Home = `Finish` → `finish_requested = true`
 - **No downcast** — `ChildStack::on_back()` не делает downcast на конкретный тип экрана
+- **Макрос vs вручную** — для простых экранов используйте `#[back_message]` + `#[back_handler]`;
+  ручной `impl ComponentNode` нужен только для экранов с внутренним `ChildStack`
+  или зависимостью Back от типа нажатия.
 
 ## Сохранение состояния навигации (Decompose-style)
 

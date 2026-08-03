@@ -21,6 +21,7 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation::{NestedMsg, NestedRoute};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ use serde::{Deserialize, Serialize};
 
 /// Подэкран слоя 1: A, B или C.
 /// Содержит только заголовок и кнопку «← Назад».
+#[derive(ComponentNode)]
+#[component_message(NestedMsg)]
+#[back_message(NestedMsg::Back)]
+#[back_handler(on_back)]
 pub struct Layer1Sub {
     label: String,
 }
@@ -48,6 +53,11 @@ impl Layer1Sub {
             // Слой 2 создаётся отдельным экраном Layer2Screen, а не Layer1Sub.
             NestedRoute::Layer2 => unreachable!("Layer2 разворачивается в Layer2Screen"),
         }
+    }
+
+    /// Кастомный Back: подэкран просит закрыть себя (поп родителем).
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        BackAction::Pop
     }
 }
 
@@ -81,35 +91,6 @@ impl UiComponent for Layer1Sub {
     fn handle(&mut self, _msg: Self::Message, _ctx: &mut ComponentContext) {}
     fn state(&self) -> &Self::State {
         &()
-    }
-}
-
-impl ComponentNode for Layer1Sub {
-    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx: &ComponentContext) {
-        let typed = dispatch.wrap::<NestedMsg>();
-        UiComponent::render(self, ui, &typed, ctx);
-    }
-
-    fn handle_dyn(
-        &mut self,
-        msg: Box<dyn std::any::Any + Send>,
-        ctx: &mut ComponentContext,
-    ) -> Option<BackAction> {
-        if let Ok(typed) = msg.downcast::<NestedMsg>() {
-            // Кнопка «← Назад» — подэкран просит закрыть себя (поп родителем).
-            if matches!(&*typed, NestedMsg::Back) {
-                return Some(BackAction::Pop);
-            }
-            UiComponent::handle(self, *typed, ctx);
-        }
-        None
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
     }
 }
 

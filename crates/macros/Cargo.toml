@@ -19,5 +19,6 @@ proc-macro2 = "1"
 egui-android-framework = { path = "../framework" }
 egui-android-core = { version = "0.4.1-alpha.1", path = "../core" }
 egui-android-runtime = { version = "0.4.1-alpha.1", path = "../runtime" }
+log = { workspace = true }
 serde = { workspace = true }
 bincode = { workspace = true }

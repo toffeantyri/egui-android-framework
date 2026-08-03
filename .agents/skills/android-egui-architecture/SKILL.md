@@ -164,14 +164,14 @@ pub trait PersistentState {
 Удалён в пользу `#[derive(ComponentNode)]`, который генерирует
 конкретный impl `ComponentNode` без обёртки.
 
-### Макрос #[derive(Component, ComponentNode)]
+### Макрос #[derive(PersistentState, ComponentNode)]
 
 **Крейт**: `egui-android-macros`
 
-`#[derive(Component)]` генерирует `PersistentState` по `#[persistent_fields(...)]`:
+`#[derive(PersistentState)]` генерирует `PersistentState` по `#[persistent_fields(...)]`:
 
 ```rust
-#[derive(Component, ComponentNode)]
+#[derive(PersistentState, ComponentNode)]
 #[persistent_fields(counter, label)]
 struct MyScreen {
     counter: i32,   // ← сохраняется
@@ -185,6 +185,9 @@ struct MyScreen {
 - Если есть `#[persistent_fields(...)]` — `save_state`/`restore_state`
   через `PersistentState::save_to_boxed()`
 - Если нет — `save_state = None`
+- Если заданы `#[back_message(...)]` и `#[back_handler(method)]` —
+  `handle_dyn` отделяет Back-вариант, а `handle_back` делегирует в указанный метод
+  (см. раздел «Обработка Back»).
 
 **Важно:** В фабрике обёртка не нужна:
 ```rust
@@ -464,11 +467,23 @@ Object-safe трейт для хранения компонента в `ChildSta
   3. Стек = 1 (Home) → `Finish`
 
 **Правила:**
-- Рисованная кнопка делегирует в `handle_back()` из `Component::handle()`
+- Рисованная кнопка делегирует в `handle_back()` через `handle_dyn()`:
+  `handle_dyn` возвращает `Some(BackAction::Propagate)` для Back-варианта,
+  затем `app.rs` вызывает `on_back()`, который доходит до `handle_back()`.
 - Платформенная кнопка идёт через `ChildStack::on_back()` → `handle_back()`
 - Кастомная логика живёт ТОЛЬКО в `handle_back()`
 - `BackAction::Pop` — единственный способ «логика + pop»
 - `NavigationHost` при `Finish` выставляет `finish_requested = true`
+
+**Автоматизация через макрос `#[derive(ComponentNode)]`:**
+
+Для экранов без вложенных стеков кастомный `handle_back` можно передать в макрос —
+`#[back_message(Enum::Variant)]` (какой вариант сообщения — «назад») +
+`#[back_handler(method_name)]` (метод, реализующий логику Back).
+Макрос сгенерирует `handle_dyn` (отделяет Back-вариант) и `handle_back`
+(делегирует в указанный метод). Это устраняет ручной `impl ComponentNode`
+для простых экранов. Для экранов с внутренним `ChildStack` (NestedScreen,
+Layer2Screen) — по-прежнему ручной `impl ComponentNode`.
 
 ---
 

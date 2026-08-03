@@ -19,11 +19,16 @@ use egui_android_framework::ui::{
     theme::Theme,
     widgets::{Button, Spacer, Text, Widget},
 };
+use egui_android_framework::ComponentNode;
 
 use crate::navigation::{NestedLayer2Msg, NestedLayer2Route};
 use serde::{Deserialize, Serialize};
 
 /// Подэкран слоя 2: X или Y. Содержит только заголовок и кнопку «← Назад».
+#[derive(ComponentNode)]
+#[component_message(NestedLayer2Msg)]
+#[back_message(NestedLayer2Msg::Back)]
+#[back_handler(on_back)]
 pub struct Layer2Sub {
     label: String,
 }
@@ -40,6 +45,12 @@ impl Layer2Sub {
             NestedLayer2Route::X => Self::new("Экран X"),
             NestedLayer2Route::Y => Self::new("Экран Y"),
         }
+    }
+
+    /// Кастомный Back: подэкран просит закрыть себя (поп родителем).
+    /// Оба варианта сообщения Back обрабатываются одинаково.
+    fn on_back(&mut self, _ctx: &mut ComponentContext) -> BackAction {
+        BackAction::Pop
     }
 }
 
@@ -74,35 +85,6 @@ impl UiComponent for Layer2Sub {
 
     fn state(&self) -> &Self::State {
         &()
-    }
-}
-
-impl ComponentNode for Layer2Sub {
-    fn render(&self, ui: &mut UiWrapper, dispatch: &DynDispatcher, ctx: &ComponentContext) {
-        let typed = dispatch.wrap::<NestedLayer2Msg>();
-        UiComponent::render(self, ui, &typed, ctx);
-    }
-
-    fn handle_dyn(
-        &mut self,
-        msg: Box<dyn std::any::Any + Send>,
-        ctx: &mut ComponentContext,
-    ) -> Option<BackAction> {
-        if let Ok(typed) = msg.downcast::<NestedLayer2Msg>() {
-            // Кнопка «← Назад» — подэкран просит закрыть себя (поп родителем).
-            if matches!(&*typed, NestedLayer2Msg::Back) {
-                return Some(BackAction::Pop);
-            }
-            UiComponent::handle(self, *typed, ctx);
-        }
-        None
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
     }
 }
 
