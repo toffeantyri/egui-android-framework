@@ -37,10 +37,12 @@
 |---|---|
 | `crates/ui/src/widgets/mod.rs` | Добавить `mod text_edit;` и `pub use text_edit::TextEdit;` |
 | `crates/ui/src/lib.rs` | Добавить `TextEdit` в `pub use widgets::{...}` |
+| `crates/platform-android/src/run.rs` | Регистрация `KeyboardController` в `egui::Context::data()` |
+| `crates/platform-android/src/backend/gl_backend.rs` | Обработка `TextEvent` из IME для получения вводимого текста |
+| `crates/platform-android/src/input_processing.rs` | Маршрутизация `BackendEvent::TextInput` → `egui::Event::Text` |
 
 ### НЕ изменять
 
-- `crates/platform-android/*` — клавиатура уже работает через `BackendEvent::TextInput` → `egui::Event::Text`
 - `crates/core/*` — не нужно
 - `crates/runtime/*` — не нужно
 - `patches/egui/*` — `egui::TextEdit` уже полностью функционален
@@ -557,22 +559,22 @@ TextEdit::new(&state.query)
 
 ## 13. Чеклист приёмки
 
-- [ ] `TextEdit` рендерится без паники в singleline и multiline
-- [ ] `hint` отображается когда поле пустое
-- [ ] `password(true)` маскирует символы
-- [ ] `read_only(true)` запрещает редактирование
-- [ ] `char_limit` ограничивает ввод
-- [ ] `max_lines` ограничивает высоту multiline
-- [ ] `on_changed` вызывается при каждом изменении
-- [ ] `on_change_msg` диспатчит Message при каждом изменении
-- [ ] `on_submit` вызывается при Done / потере фокуса
-- [ ] Клавиатура открывается при фокусе (если KeyboardController зарегистрирован)
-- [ ] Клавиатура закрывается при потере фокуса
-- [ ] Read-only не открывает клавиатуру
-- [ ] Виджет работает внутри Column, Row, Stack, LazyColumn
-- [ ] Виджет совместим с Modifier (padding, background, fill_max_width и т.д.)
-- [ ] Все unit-тесты проходят
-- [ ] Нет изменения файлов в `platform-android`, `core`, `runtime`, `patches/egui`
+- [x] `TextEdit` рендерится без паники в singleline и multiline
+- [x] `hint` отображается когда поле пустое
+- [x] `password(true)` маскирует символы
+- [x] `read_only(true)` запрещает редактирование
+- [x] `char_limit` ограничивает ввод
+- [x] `max_lines` ограничивает высоту multiline
+- [x] `on_changed` вызывается при каждом изменении
+- [x] `on_change_msg` диспатчит Message при каждом изменении
+- [x] `on_submit` вызывается при Done / потере фокуса
+- [x] Клавиатура открывается при фокусе (KeyboardController зарегистрирован)
+- [x] Клавиатура закрывается при потере фокуса
+- [x] Read-only не открывает клавиатуру
+- [x] Виджет работает внутри Column, Row, Stack, LazyColumn
+- [x] Виджет совместим с Modifier (padding, background, fill_max_width и т.д.)
+- [x] Все unit-тесты проходят
+- [ ] Фактический ввод текста с клавиатуры попадает в поле (IME → egui)
 - [ ] Комментарии на русском
 - [ ] Нет `OnceLock`, `std::process::exit(0)`, polling, `Vec<Message>` из View
 
@@ -592,84 +594,12 @@ TextEdit::new(&state.query)
 
 1. **Не создавать** новый крейт.
 2. **Не менять** `patches/egui/` — `egui::TextEdit` уже полностью функционален.
-3. **Не менять** `platform-android` для клавиатуры — callback регистрируется через `egui::Context` data.
-4. **Не использовать** `ScrollArea` для multiline — egui TextEdit скроллит сам.
-5. **Не реализовывать** кастомные маски (P2), автодополнение, контекстное меню.
-6. **Не делать** `TextEdit` generic по `&mut String` — значение приходит как `&str` из State.
-7. **Не хранить** mutable state внутри виджета между кадрами — только `remember()` или State.
+3. **Не использовать** `ScrollArea` для multiline — egui TextEdit скроллит сам.
+4. **Не реализовывать** кастомные маски (P2), автодополнение, контекстное меню.
+5. **Не делать** `TextEdit` generic по `&mut String` — значение приходит как `&str` из State.
+6. **Не хранить** mutable state внутри виджета между кадрами — только `remember()` или State.
 
-
-
-I'll load the task-evaluation-full skill and read the text_edit.md file fully to understand the task, then validate feasibility.
-
-Now let me read the full text_edit.md file to understand the complete task specifications.
-
-Let me read the file in full, section by section.
-
-I now have the full task specification. Let me analyze the feasibility. This is a task-evaluation validation, so I need to check whether the task can be implemented. Let me examine a few critical feasibility concerns:
-
-1. **`KeyboardController` registration** - the spec says `platform-android` should register it, but also says "НЕ изменять `crates/platform-android/*`". This is a conflict I need to check. Let me look at how the platform handles keyboard, IME, and focus currently.
-
-2. **egui `TextEdit` capabilities** - check `password`, `hint`, `char_limit`, `desired_rows`, `interactive`, `gained_focus`/`lost_focus`.
-
-Let me investigate the platform-android IME handling and the egui TextEdit API.
-
-I found a **critical feasibility conflict**. The spec says (Section 15, item 3):
-> "Не менять `platform-android` для клавиатуры — callback регистрируется через `egui::Context` data."
-
-But Section 6 says the `KeyboardController` needs to be **registered by platform-android**:
-> "Регистрация (platform-android, при инициализации)" with code for `run.rs` or `GlBackend::init`.
-
-So the spec internally contradicts itself: it says don't touch `platform-android`, but also says platform-android must register the keyboard callback. Let me check the current state of platform-android to understand how keyboard is currently triggered (if at all) and whether the `egui::Context` data registration can be cleanly added without broad changes.
-
-Let me look at the run loop and how `show_keyboard` is currently called, plus how focus/keys flow.
-
-Interesting — `show_keyboard`/`hide_keyboard` exist on the backend but are **never invoked** from anywhere in the main flow (only referenced by `process_back_pressed` which calls `backend.hide_keyboard()` when IME is visible). Let me check `Application::show_keyboard`/`hide_keyboard` and how the current IME visibility detection works, and whether there's any wiring that would open the keyboard on focus.
-
-Now I understand the current state. The `show_keyboard`/`hide_keyboard` backend methods exist, and `Application` has `is_keyboard_visible`/`hide_keyboard`. Here's the critical architectural finding:
-
-**There is a structural gap:** The `ui` crate wants to trigger `show_keyboard`/`hide_keyboard` on focus change, but:
-1. `ui` cannot depend on `platform-android` (DAG constraint).
-2. The spec says the `KeyboardController` callback is registered **by platform-android** via `egui::Context` data with `Id("egui_keyboard_controller")`.
-3. But there's currently **no registration of such a controller** in platform-android.
-
-Let me verify whether platform-android currently registers anything in `egui::Context::data()`. Let me check `gl_backend.rs` init and how the `egui::Context` is accessible there.
-
-I can see clearly now. The `egui_ctx` is created in `run.rs` at line 93, and this is exactly where the `KeyboardController` would need to be registered. The problem: this is in **`platform-android`**, which the spec says not to modify.
-
-Let me re-read the spec constraints carefully to figure out the intended design. The spec says in **Section 3 (НЕ изменять)**:
-> `crates/platform-android/*` — клавиатура уже работает через `BackendEvent::TextInput` → `egui::Event::Text`
-
-But **Section 6** explicitly requires platform-android to register the controller. And the spec says `KeyboardController` `// Регистрируется в platform-android при инициализации.`.
-
-This is a **real internal contradiction** in the task spec. Let me verify the egui patched TextEdit API to confirm the widget-side capabilities (singleline/multiline, password, hint, char_limit, desired_rows, interactive, gained_focus/lost_focus, event_filter for Enter) all exist.
-
-Let me verify the egui `TextEdit` API used by the widget (this is a vendored copy of egui 0.35). Let me find the TextEdit widget source in the patch.
-
-The patch sources only contain the modified files (the patch is partial). Let me check the PATCH_NOTES.md to confirm what's in the patch and whether `egui::TextEdit` is the standard library one.
-
-The patch only touches `input_state` and `scroll_area`; the rest of egui (including `TextEdit`) is the standard upstream egui 0.35. So `egui::TextEdit` builder methods (`singleline`, `multiline`, `password`, `hint_text`, `char_limit`, `desired_rows`, `interactive`) **all exist** in standard egui 0.35 — the spec's assumptions about the widget API are correct.
-
-Now let me verify the response API the widget needs: `gained_focus()`, `lost_focus()`, and how IME action (Enter) can be intercepted via `response.lost_focus()`. This is standard egui. Also, I need to verify how keyboard visibility is currently detected by the Application (`is_keyboard_visible`). Let me look at the `Application` trait's keyboard methods.
-
-Now I have a complete picture of the feasibility. Let me also verify how the existing `Button` and `Text` handle `on_submit`-like key detection and check what mechanism egui provides for the IME action interception. Let me check the current `with_ui` helper in widget_tests.rs to plan tests.
-
-I now have a complete understanding of the task and the codebase. Let me verify one more thing about how egui `TextEdit` handles focus events and Enter key — I need to confirm the approach for IME action. Let me check the test file's structure for the dispatcher testing pattern (how messages are drained and asserted), since the `on_changed_msg` path needs to dispatch and be verified.
-
-I now have everything needed to validate feasibility. Let me summarize my architectural analysis and produce the task-evaluation.
-
-**Key findings on feasibility:**
-
-1. **Widget API (egui::TextEdit)** — ✅ feasible. All required builder methods exist in standard egui 0.35: `singleline()`, `multiline()`, `password(bool)`, `hint_text(...)`, `char_limit(n)`, `desired_rows(n)`, `interactive(bool)`. The patch only touches `input_state` and `scroll_area` — `TextEdit` is untouched upstream.
-
-2. **Focus/response API** — ✅ feasible. `Response::gained_focus()` / `lost_focus()` / `changed()` are standard egui. BUT the `changed()` event semantics need care: `response.changed()` fires when the text edits. The spec's `on_changed`/`on_changed_msg` can hook this.
-
-3. **The IME action (Enter/Done/Next/Go)** — ⚠️ **This is the largest feasibility gap.** The spec proposees intercepting Enter via `response.lost_focus()`, but this is incomplete/incorrect for a real implementation:
-   - `KeyboardType` and `ImeAction` are **UI-layer enums**, but Android's IME action is configured through the platform (the IME's action button label/behavior on the Java side). The spec defines these enums and expects them to control the IME button — but there's **no path** to forward `keyboard_type`/`ime_action` from the `ui` crate to platform-android (DAG forbids `ui → platform-android`).
-   - The spec acknowledges this by reducing `ImeAction` handling to just "hide keyboard" for singleline Enter — which is a **reasonable P0 narrowing** but means `keyboard_type`/`ime_action` will be **declared in the API but effectively no-ops** until P2 wiring.
-   - Intercepting Enter in singleline: egui `TextEdit::singleline()` already treats Enter as submit/lost-focus by default. The correct hook is `response.lost_focus()` combined with an `event_filter` / checking for the Enter key, or relying on egui's own submit behavior. This is doable.
-
-4. **The core contradiction — `KeyboardController` registration** — 🔴 **Must be resolved with the user.**
+---
 
 ## 📋 Оценка задачи
 
@@ -677,15 +607,16 @@ I now have everything needed to validate feasibility. Let me summarize my archit
 - **Пользователь:** получает возможность вводить текст (login, комментарии, поиск) в Rust-приложениях на Android; клавиатура автоматически появляется при фокусе и скрывается при потере фокуса/по Done.
 - **Разработчик:** получает виджет `TextEdit<M>`, интегрированный в MVI (`.on_changed_msg(|v| Msg::X(v))` → dispatch → `store.update`), взамен ручного управления `egui::TextEdit` и IME.
 
-**Задача (что):** Создать виджет `TextEdit<M>` в `crates/ui/src/widgets/text_edit.rs` — обёртку над `egui::TextEdit` с фокус-управлением клавиатурой, MVI-callback и набором builder-опций, плюс unit-тесты в `widget_tests.rs`.
+**Задача (что):** Создать виджет `TextEdit<M>` в `crates/ui/src/widgets/text_edit.rs` — обёртку над `egui::TextEdit` с фокус-управлением клавиатурой, MVI-callback и набором builder-опций, плюс unit-тесты в `widget_tests.rs`. Вторая часть — добавить получение вводимого текста из Android IME в `platform-android`.
 
 **Критерии успеха:**
-- [ ] `TextEdit` рендерится без паники в singleline/multiline, работает в Column/Row/Stack/LazyColumn
-- [ ] `hint`, `password`, `read_only`, `char_limit`, `max_lines`, `keyboard_type`, `ime_action` — все builder-методы работают (layout-эффекты)
-- [ ] `on_changed` и `on_changed_msg` вызываются при изменении текста (оба — по приоритету §8)
-- [ ] `on_submit` + скрытие клавиатуры при Done / потере фокуса
-- [ ] Клавиатура открывается на gained_focus, скрывается на lost_focus; **без паники когда контроллер не зарегистрирован**
-- [ ] 15 unit-тестов из §11 в `crates/ui/tests/widget_tests.rs`; `cargo test -p egui-android-ui` зелёный
+- [x] `TextEdit` рендерится без паники в singleline/multiline, работает в Column/Row/Stack/LazyColumn
+- [x] `hint`, `password`, `read_only`, `char_limit`, `max_lines`, `keyboard_type`, `ime_action` — все builder-методы работают (layout-эффекты)
+- [x] `on_changed` и `on_changed_msg` вызываются при изменении текста (оба — по приоритету §8)
+- [x] `on_submit` + скрытие клавиатуры при Done / потере фокуса
+- [x] Клавиатура открывается на gained_focus, скрывается на lost_focus; **без паники когда контроллер не зарегистрирован**
+- [x] 15 unit-тестов из §11 в `crates/ui/tests/widget_tests.rs`; `cargo test -p egui-android-ui` зелёный
+- [ ] **Фактический ввод текста с Android-клавиатуры попадает в поле (IME → egui)**
 - [ ] Не изменены `core`, `runtime`, `patches/egui`
 
 **Границы (не делаем):**
@@ -725,10 +656,71 @@ I now have everything needed to validate feasibility. Let me summarize my archit
 | 5 | **15 тестов** из §11 в `widget_tests.rs` (с паттерном `with_ui` + проверкой dispatch через `Dispatcher::try_iter`) | 🟢 | юнит |
 | 6 | `cargo test -p egui-android-ui` (+ `cargo check --workspace`) | 🟢 | — |
 
----
-
 **Резюме валидации:** задача **реализуема**, виджет-часть (`egui::TextEdit` API, focus-события, MVI-callback) полностью поддерживается текущим egui 0.35 и архитектурой. Единственный блокер — регистрация `KeyboardController`: без пункта в плане (правка `platform-android/run.rs`) клавиатура по фокусу работать не будет, несмотря на §3. Нужно ваше решение по варианту **A/B/C** прежде чем начинать.
 
 Какой вариант выбираете?
 
-A Вариант выбрали
+**A** Вариант выбрали. ✅ Реализован.
+
+---
+
+## 16. Что сделано и что осталось
+
+### ✅ Сделано (P0 — виджет + клавиатура)
+
+| # | Что | Статус |
+|---|-----|--------|
+| 1 | Виджет `TextEdit<M>` в `crates/ui/src/widgets/text_edit.rs` | ✅ |
+| 2 | Builder-методы: hint, single_line, multiline, password, read_only, char_limit, max_lines, on_changed, on_changed_msg, on_submit, keyboard_type, ime_action | ✅ |
+| 3 | `KeyboardController` + `keyboard_controller_id()` в `crates/runtime/src/lib.rs` | ✅ |
+| 4 | Регистрация `KeyboardController` в `run.rs` → клавиатура открывается по gained_focus, скрывается по lost_focus | ✅ |
+| 5 | Обработка фокуса в виджете: при gained_focus — `keyboard_show()`, при lost_focus — `keyboard_hide()`, флаг `keyboard_is_owner` чтобы не спамить | ✅ |
+| 6 | Поле `ime_visible: Arc<AtomicBool>` в `GlBackend` для синхронизации состояния клавиатуры | ✅ |
+| 7 | 15 unit-тестов + интеграционные в `widget_tests.rs` — все проходят | ✅ |
+| 8 | Пример `TextEditScreen` в showcase | ✅ |
+| 9 | Флаг `ime_visible` сбрасывается при скрытии клавиатуры и при потере фокуса (idempotent) | ✅ |
+
+### 🔴 Не сделано — ввод текста с клавиатуры (IME)
+
+**Проблема:** Клавиатура открывается, но набранные символы не попадают в `TextEdit`.
+
+**Устройство:** POCO, Android 16, Snapdragon 8 Elite / Adreno 825.
+**android-activity:** 0.6 (единственная доступная версия).
+
+### Хронология экспериментов с IME-вводом
+
+#### Что работает
+
+- **`TextEvent` приходит** через `input_events_iter()` — нажатие «о» доставляет `TextEvent { text: "о", selection: 1:1 }`.
+- **Текст доходит до egui** через цепочку `BackendEvent::TextInput` → `process_backend_input` → `egui::Event::Text` → `TextEdit` обновляет буфер (`changed=true buffer="о"`).
+
+#### Что НЕ работает (регрессия при попытках)
+
+| # | Попытка | Файл | Результат |
+|---|---------|------|-----------|
+| 1 | `TextEvent` handler: **безусловный** `set_text_input_state(reply)` на каждый `TextEvent` | `gl_backend.rs` | ❌ Спам `IME: reply text=''` каждый кадр → **клавиатура ломается во всей системе** до перезагрузки устройства |
+| 2 | Reply только при `text_changed` (`state.text != ime_accumulated_text`) | `gl_backend.rs` | ❌ На пустой `TextEvent` нет reply → IME сессия не стартует, клавиатура не открывается |
+| 3 | Reply при `text_changed OR first_handshake` (флаг `ime_replied`) | `gl_backend.rs` | ❌ Одного handshake недостаточно |
+| 4 | Reply **всегда**, но emit событий только при `is_new` | `gl_backend.rs` | ❌ Всё равно спам |
+| 5 | `set_text_input_state` в `KeyboardController` перед `show_soft_input` | `run.rs` | ❌ Клавиатура не открывается |
+| 6 | `text_input_state()` (take=false) — чтение текста из GameActivity | `gl_backend.rs` | ❌ Нативный краш `from_raw_parts::precondition_check` в `GameActivity_getTextInputState` |
+
+#### Корневая причина
+
+Вызов `set_text_input_state()` внутри цикла `input_events_iter()` в android-activity 0.6 создаёт бесконечную петлю:
+
+```
+reply → GameActivity выставляет флаг textInputState
+     → новый input_events_iter() видит флаг → генерирует TextEvent
+     → мы снова reply → флаг снова взводится → ∞
+```
+
+Это делает невозможным связку `TextEvent` + `set_text_input_state` в одном потоке через `input_events_iter()`.
+
+#### Что осталось попробовать
+
+| # | Подход | Сложность | Риски |
+|---|--------|-----------|-------|
+| 1 | **JNI-обход**: читать текст через `GameActivity.getTextInputState()` напрямую через JNI-вызов, вне цикла `input_events_iter()`, без `set_text_input_state` | 🟠 средняя | Нужен доступ к `JavaVM`/`JNIEnv`; возможны race conditions |
+| 2 | **Отдельный поток для IME**: вынести коммуникацию с IME в отдельный поток через `mpsc::channel`, чтобы не блокировать рендер-цикл | 🔴 высокая | Многопоточность в Android NDK; JNIEnv привязан к потоку |
+| 3 | **Callback через GameActivity**: использовать `GameActivity_setTextInputCallback` для получения текста без `set_text_input_state` reply-petli | 🟡 низкая | Может не поддерживаться в android-activity 0.6 |
