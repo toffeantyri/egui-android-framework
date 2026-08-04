@@ -42,7 +42,13 @@ PROJECT_CARGO="Cargo.toml"
 # Автоопределение ANDROID_HOME (SDK) для Linux/macOS/Windows (Git Bash / WSL)
 if [ -z "${ANDROID_HOME:-}" ]; then
     case "$(uname -s)" in
-        Linux*)   ANDROID_HOME="${HOME}/Android/Sdk" ;;
+        Linux*)
+            if [ -d /usr/lib/android-sdk ]; then
+                ANDROID_HOME=/usr/lib/android-sdk
+            else
+                ANDROID_HOME="${HOME}/Android/Sdk"
+            fi
+            ;;
         Darwin*)  ANDROID_HOME="${HOME}/Library/Android/sdk" ;;
         MINGW*|MSYS*|CYGWIN*)
             WIN_USER="${USERNAME:-$(whoami 2>/dev/null)}"
@@ -52,6 +58,17 @@ if [ -z "${ANDROID_HOME:-}" ]; then
     esac
 fi
 export ANDROID_HOME
+
+# ANDROID_NDK_ROOT для cargo-ndk
+if [ -z "${ANDROID_NDK_ROOT:-}" ]; then
+    NDK_SEARCH="${ANDROID_HOME}/ndk"
+    if [ -d "$NDK_SEARCH" ]; then
+        NDK_VERSION="$(ls -1 "$NDK_SEARCH" 2>/dev/null | sort -V | tail -1)"
+        if [ -n "$NDK_VERSION" ]; then
+            export ANDROID_NDK_ROOT="${NDK_SEARCH}/${NDK_VERSION}"
+        fi
+    fi
+fi
 
 # Путь к NDK (можно через ANDROID_NDK_HOME)
 if [ -n "${ANDROID_NDK_HOME:-}" ]; then
