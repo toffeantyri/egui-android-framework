@@ -2329,3 +2329,37 @@ fn test_text_edit_fill_max_width_stretches() {
         );
     });
 }
+
+#[test]
+fn egui_textedit_controlled_input() {
+    // Регрессия: `egui::TextEdit` вставляет введённый символ прямо в переданный
+    // `&mut String` (при удержанном фокусе). Это базис контролируемого поля.
+    let ctx = egui::Context::default();
+    let id = egui::Id::new("probe_te");
+    let mut text = String::new();
+
+    // Кадр 1: рендер пустого поля
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).id(id));
+        });
+    });
+
+    // Фокусируем поле
+    ctx.memory_mut(|m| m.request_focus(id));
+
+    // Кадр 2: подаём Event::Text("a")
+    let raw = egui::RawInput {
+        focused: true,
+        events: vec![egui::Event::Text("a".into())],
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(raw, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.ctx().memory_mut(|m| m.request_focus(id));
+            ui.add(egui::TextEdit::singleline(&mut text).id(id));
+        });
+    });
+
+    assert_eq!(text, "a", "egui должен вставить введённый символ");
+}

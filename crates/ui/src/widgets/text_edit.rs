@@ -142,6 +142,12 @@ pub struct TextEdit<M> {
     /// поля. Внешний отступ (spacing между виджетами) задаётся модификатором
     /// `Modifier.padding(...)`. По умолчанию — комфортный запас по обеим осям.
     internal_padding: f32,
+
+    /// Явный id поля (стабильный между кадрами). Если `None` — id берётся
+    /// автоматически (`ui.next_auto_id()`). Явный id полезен для устойчивости
+    /// буфера ввода при изменении структуры UI. Буфер и само поле используют
+    /// один и тот же id.
+    field_id: Option<egui::Id>,
 }
 
 impl<M: 'static> TextEdit<M> {
@@ -161,6 +167,7 @@ impl<M: 'static> TextEdit<M> {
             keyboard_type: KeyboardType::Text,
             ime_action: ImeAction::Done,
             internal_padding: 6.0,
+            field_id: None,
         }
     }
 
@@ -246,6 +253,17 @@ impl<M: 'static> TextEdit<M> {
         self
     }
 
+    /// Задать явный стабильный id поля.
+    ///
+    /// Полезно, когда порядок/структура виджетов может меняться (в `LazyColumn`,
+    /// обёртках), а нужно, чтобы буфер введённого текста не сбрасывался.
+    /// Буфер и само поле используют один и тот же id. По умолчанию id
+    /// выбирается автоматически (`ui.next_auto_id()`).
+    pub fn id(mut self, id: egui::Id) -> Self {
+        self.field_id = Some(id);
+        self
+    }
+
     /// Текущий внутренний отступ (для тестов).
     pub fn get_internal_padding(&self) -> f32 {
         self.internal_padding
@@ -289,15 +307,38 @@ impl<M: 'static> TextEdit<M> {
 
 impl<M: Send + 'static> Widget<M> for TextEdit<M> {
     fn render(&self, ui: &mut UiWrapper, dispatch: &Dispatcher<M>) {
-        // Клонируем значение — виджет не может мутировать State напрямую.
-        // egui::TextEdit требует `&mut dyn TextBuffer`, а значение immutable.
-        let mut buffer: String = self.value.clone();
+        // Контролируемый буфер.
+        //
+        // `egui::TextEdit` вставляет введённое прямо в переданный `&mut String`,
+        // и это значение нужно хранить стабильно между кадрами (иначе текст
+        // «пропадает»). Буфер живёт в `Context::data()` и должен ключеваться по
+        // ТОМУ ЖЕ id, что использует само поле. egui выбирает id поля как
+        // `ui.next_auto_id()` (не `ui.id()`), поэтому мы заранее берём `field_id`
+        // и передаём его и в буфер, и в `egui::TextEdit` через `.id(field_id)`,
+        // чтобы ключи совпадали и не коллизировали между полями на одном экране.
+        let field_id = self.field_id.unwrap_or_else(|| ui.next_auto_id());
+        let ctx = ui.ctx().clone();
+        let storage_key = field_buffer_key(field_id);
+
+        let buffer_arc: Arc<RwLock<String>> = ctx
+            .data(|d| d.get_temp::<Arc<RwLock<String>>>(storage_key))
+            .unwrap_or_else(|| {
+                let buf = Arc::new(RwLock::new(self.value.clone()));
+                ctx.data_mut(|d| {
+                    d.insert_temp(storage_key, Arc::clone(&buf));
+                });
+                buf
+            });
+
+        let mut text_guard = buffer_arc.write().expect("TextEdit: буфер poisoned");
 
         let mut te = if self.single_line {
-            egui::TextEdit::singleline(&mut buffer)
+            egui::TextEdit::singleline(&mut *text_guard)
         } else {
-            egui::TextEdit::multiline(&mut buffer)
+            egui::TextEdit::multiline(&mut *text_guard)
         };
+        // Фиксируем id поля — тот же, что используется для буфера (см. выше).
+        te = te.id(field_id);
 
         // Применяем настройки.
         if !self.hint_text.is_empty() {
@@ -331,6 +372,19 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
         let response = ui.add(te);
 
+        // Логирование для локализации проблемы ввода/фокуса (временная диагностика).
+        if response.gained_focus() || response.lost_focus() || response.changed() {
+            log::info!(
+                "[TextEdit] id={:?} has_focus={} gained={} lost={} changed={} buffer={:?}",
+                field_id,
+                response.has_focus(),
+                response.gained_focus(),
+                response.lost_focus(),
+                response.changed(),
+                &*text_guard
+            );
+        }
+
         // ─── Управление клавиатурой (по событию фокуса) ───
         //
         // Проблема: `lost_focus` в egui задерживается на 1-2 кадра с момента
@@ -344,21 +398,20 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         // `Context::data()`. Клавиатуру прячем ТОЛЬКО когда фокус теряет сам владелец,
         // а не когда кто-то ещё стреляет `lost_focus`.
         if !self.read_only {
-            let my_id = ui.id();
             let is_focused = response.has_focus();
 
             if is_focused {
                 // Я — фокусный редактируемый editor. Если ещё не я владею клавиатурой
                 // (вызов idempotent по кадрам, `show_soft_input` не спамится).
-                if !keyboard_is_owner(ui, my_id) {
+                if !keyboard_is_owner(ui, field_id) {
                     keyboard_show(ui);
-                    keyboard_set_owner(ui, my_id);
+                    keyboard_set_owner(ui, field_id);
                 }
             } else if response.lost_focus() {
                 // Я потерял фокус. Прячем клавиатуру ТОЛЬКО если я был её владельцем.
                 // Если фокус ушёл на другой TextEdit — он уже стал владельцем (или станет
                 // в этот же кадр), и это условие не сработает.
-                if keyboard_is_owner(ui, my_id) {
+                if keyboard_is_owner(ui, field_id) {
                     keyboard_hide(ui);
                     keyboard_clear_owner(ui);
                 }
@@ -367,7 +420,8 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
         // ─── Изменение текста → callback ───
         if response.changed() {
-            let new_value: String = buffer.clone();
+            // Читаем фактическое значение из буфера (egui писал прямо в него).
+            let new_value: String = text_guard.clone();
             // Приоритет: сначала локальный on_changed, затем on_change_msg.
             if let Some(cb) = &self.on_changed {
                 cb(&new_value);
@@ -380,7 +434,7 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         // ─── Submit (Done / потеря фокуса) ───
         if response.lost_focus() {
             if let Some(cb) = &self.on_submit {
-                cb(&buffer);
+                cb(&text_guard);
             }
         }
     }
@@ -405,6 +459,11 @@ fn keyboard_hide(ui: &UiWrapper) {
             kb.hide();
         }
     });
+}
+
+/// Ключ хранения буфера текста поля в `Context::data()` (по `ui.id()` поля).
+fn field_buffer_key(id: egui::Id) -> egui::Id {
+    egui::Id::new(("egui_textedit_buffer", id))
 }
 
 /// Ключ общего состояния "владелец клавиатуры" (Id фокусного TextEdit).
@@ -536,5 +595,129 @@ mod tests {
             );
             assert!(keyboard_is_owner(ui, id_b), "B остаётся владельцем");
         });
+    }
+
+    #[test]
+    fn buffer_persists_across_frames() {
+        // Введённый текст не должен сбрасываться между кадрами и между полями:
+        // буфер живёт в `Context::data()` по stable id поля. Явный `id` задаёт
+        // детерминированный ключ — буфер и поле используют один и тот же id.
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let fixed_id = egui::Id::new("te_buffer_test");
+
+        let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+            // Кадр 1: буфер инициализируется от value="abc".
+            TextEdit::<()>::new("abc")
+                .id(fixed_id)
+                .render(ui, &dispatch);
+            let b = ui
+                .ctx()
+                .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+                .expect("буфер должен быть создан");
+            assert_eq!(&*b.read().unwrap(), "abc", "буфер инициализирован от value");
+
+            // egui вставил бы новый символ — имитируем: буфер меняется прямо.
+            *b.write().unwrap() = "abcdef".to_owned();
+
+            // Кадр 2: value="zzz" НЕ должно перезаписать буфер (он уже есть).
+            TextEdit::<()>::new("zzz")
+                .id(fixed_id)
+                .render(ui, &dispatch);
+            let b = ui
+                .ctx()
+                .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+                .expect("буфер должен существовать");
+            assert_eq!(
+                &*b.read().unwrap(),
+                "abcdef",
+                "буфер не перезаписывается новым value между кадрами"
+            );
+        }));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let f = f.borrow_mut().take().unwrap();
+                f(&mut UiWrapper::new_unconstrained(ui));
+            });
+        });
+    }
+
+    #[test]
+    fn input_text_is_written_to_buffer_and_emits_callback() {
+        // Интеграция: введённый символ попадает в буфер поля и вызывает `on_changed`.
+        // Моделирует реальный ввод с клавиатуры через `Event::Text`.
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let fixed_id = egui::Id::new("te_input_test");
+
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+        // Кадр 1: рендерим пустое поле.
+        {
+            let seen_cb = Arc::clone(&seen);
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                TextEdit::<()>::new("")
+                    .id(fixed_id)
+                    .on_changed(move |v| seen_cb.lock().unwrap().push(v.to_owned()))
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Фокусируем поле.
+        ctx.memory_mut(|m| m.request_focus(fixed_id));
+
+        // Кадр 2: подаём Event::Text("a") — поле вставляет в буфер, on_changed срабатывает.
+        let raw = egui::RawInput {
+            focused: true,
+            events: vec![egui::Event::Text("a".into())],
+            ..Default::default()
+        };
+        {
+            let seen_cb = Arc::clone(&seen);
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                // Удерживаем фокус на поле в кадре ввода.
+                ui.ctx().memory_mut(|m| m.request_focus(fixed_id));
+                TextEdit::<()>::new("")
+                    .id(fixed_id)
+                    .on_changed(move |v| seen_cb.lock().unwrap().push(v.to_owned()))
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(raw, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Буфер поля должен содержать "a" (введённое значение).
+        let buf = ctx
+            .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+            .expect("буфер должен существовать");
+        assert_eq!(
+            &*buf.read().unwrap(),
+            "a",
+            "введённый символ должен быть в буфере поля (сейчас {:?})",
+            &*buf.read().unwrap()
+        );
+
+        // on_changed должен был вызваться хотя бы раз.
+        assert!(
+            !seen.lock().unwrap().is_empty(),
+            "on_changed должен сработать при вводе"
+        );
+
+        // Поле должно удерживать фокус (иначе egui не рисует курсор).
+        let focused = ctx.memory(|m| m.has_focus(fixed_id));
+        assert!(
+            focused,
+            "поле должно быть сфокусировано — egui рисует курсор"
+        );
     }
 }

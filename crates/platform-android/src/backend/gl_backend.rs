@@ -16,6 +16,7 @@
 #![cfg(target_os = "android")]
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use android_activity::{
@@ -41,7 +42,9 @@ pub struct GlBackend {
     insets: Insets,
     dpi: f32,
     should_close: AtomicBool,
-    ime_visible: bool,
+    /// Открыта ли клавиатура (IME). Разделяется с KeyboardController через Arc.
+    /// По этому флагу `poll_events` решает, вызывать ли `drain_text_input()`.
+    ime_visible: Arc<AtomicBool>,
     /// Состояние платформы (insets, theme, clear_color, JNI).
     platform_state: PlatformState,
 }
@@ -56,7 +59,7 @@ impl GlBackend {
             insets: Insets::default(),
             dpi: 1.0,
             should_close: AtomicBool::new(false),
-            ime_visible: false,
+            ime_visible: Arc::new(AtomicBool::new(false)),
             platform_state: PlatformState::new(),
         }
     }
@@ -64,6 +67,13 @@ impl GlBackend {
     /// Получить ссылку на AndroidApp.
     pub fn app(&self) -> &AndroidApp {
         &self.app
+    }
+
+    /// Клон флага `ime_visible` — для передачи в KeyboardController.
+    /// При показе/скрытии клавиатуры контроллер должен обновлять этот флаг,
+    /// чтобы `poll_events` знал, когда можно читать IME-текст.
+    pub fn ime_visible_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.ime_visible)
     }
 
     /// Слить lifecycle события.
@@ -235,6 +245,11 @@ impl AndroidBackend for GlBackend {
         self.events.clear();
         self.drain_lifecycle_events(timeout);
         self.drain_input_events();
+        // IME-текст из GameActivity НЕ читается — android-activity 0.6
+        // `text_input_state()` (take=false) вызывает нативный краш
+        // `from_raw_parts::precondition_check` на Android 16. Нужен
+        // upgrade до android-activity >= 0.7 с take-API или JNI-обход.
+        // TODO: интеграция IME через безопасный take-механизм.
         std::mem::take(&mut self.events)
     }
 
@@ -256,14 +271,14 @@ impl AndroidBackend for GlBackend {
     }
 
     fn show_keyboard(&mut self) {
-        log::info!("GlBackend: показать клавиатуру (IME)");
-        self.ime_visible = true;
+        self.ime_visible.store(true, Ordering::Relaxed);
+        log::info!("GlBackend: показать клавиатуру (IME) — ime_visible=true");
         self.app.show_soft_input(false);
     }
 
     fn hide_keyboard(&mut self) {
-        log::info!("GlBackend: скрыть клавиатуру (IME)");
-        self.ime_visible = false;
+        self.ime_visible.store(false, Ordering::Relaxed);
+        log::info!("GlBackend: скрыть клавиатуру (IME) — ime_visible=false");
         self.app.hide_soft_input(false);
     }
 

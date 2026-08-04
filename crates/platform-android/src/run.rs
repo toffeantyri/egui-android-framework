@@ -35,6 +35,7 @@
 
 #![cfg(target_os = "android")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -94,6 +95,19 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
         }
     };
 
+    // Флаг ime_visible — разделяется с KeyboardController (Arc<AtomicBool>).
+    // GlBackend хранит его, KeyboardController обновляет при show/hide.
+    let ime_flag = if backend.supports_ime() {
+        // Безопасно: supports_ime() → это GlBackend, который хранит Arc<AtomicBool>.
+        // Через unsafe downcast до конкретного типа (единственный вариант без трейт-метода).
+        let gl = unsafe {
+            &*(&*backend as *const dyn AndroidBackend as *const crate::backend::GlBackend)
+        };
+        gl.ime_visible_flag()
+    } else {
+        Arc::new(AtomicBool::new(false))
+    };
+
     let egui_ctx = egui::Context::default();
     egui_ctx.set_pixels_per_point(backend.dpi());
     egui_ctx.set_fonts(egui::FontDefinitions::default());
@@ -104,13 +118,17 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     if backend.supports_ime() {
         let app_show = app_for_keyboard.clone();
         let app_hide = app_for_keyboard.clone();
+        let show_flag = Arc::clone(&ime_flag);
+        let hide_flag = Arc::clone(&ime_flag);
         let kb = KeyboardController::new(
             Arc::new(move || {
                 log::info!("KeyboardController: показать клавиатуру");
+                show_flag.store(true, Ordering::Relaxed);
                 app_show.show_soft_input(false);
             }),
             Arc::new(move || {
                 log::info!("KeyboardController: скрыть клавиатуру");
+                hide_flag.store(false, Ordering::Relaxed);
                 app_hide.hide_soft_input(false);
             }),
         );

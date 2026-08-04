@@ -68,6 +68,10 @@ impl Theme {
             style.visuals.faint_bg_color = self.colors.surface;
             // Явно задаём цвет текста — иначе egui использует дефолтный серый
             style.visuals.override_text_color = Some(self.colors.on_background);
+            // Курсор поля ввода: цвет должен контрастировать с фоном поля
+            // (surface_container_highest). По умолчанию egui берёт `active.fg_stroke`
+            // = on_primary, который сливается с фоном поля. Явно задаём on_surface.
+            style.visuals.text_cursor.stroke.color = self.colors.on_surface;
 
             ctx.set_style_of(egui_theme, style);
         }
@@ -128,6 +132,12 @@ mod tests {
             assert!(
                 (bg.r() as u32 + bg.g() as u32 + bg.b() as u32) > 60,
                 "тёмная: фон поля не должен быть почти чёрным (получилось {bg:?})"
+            );
+            // Цвет курсора должен контрастировать с фоном поля (не сливаться).
+            let cursor_color = ctx.style_of(egui_theme).visuals.text_cursor.stroke.color;
+            assert_eq!(
+                cursor_color, dark.colors.on_surface,
+                "тёмная: цвет курсора = on_surface (egui-тема {egui_theme:?})"
             );
         }
     }

@@ -89,12 +89,12 @@ impl RunState {
         let backend_events = backend.poll_events(timeout);
         let poll_elapsed = poll_start.elapsed();
 
-        log::info!(
-            "LOOP: poll_events(timeout={:?}) -> {} событий, спали {:?}",
-            timeout,
-            backend_events.len(),
-            poll_elapsed,
-        );
+        // log::info!(
+        //     "LOOP: poll_events(timeout={:?}) -> {} событий, спали {:?}",
+        //     timeout,
+        //     backend_events.len(),
+        //     poll_elapsed,
+        // );
 
         let had_events = !backend_events.is_empty() || self.input_state.back_pressed;
 
