@@ -215,6 +215,7 @@ impl RunState {
             };
 
             let full_output = app_instance.frame(egui_ctx, raw_input);
+            log::info!("LOOP: frame() вернулся");
 
             if app_instance.request_destroy() {
                 self.destroy_requested = true;
@@ -228,14 +229,13 @@ impl RunState {
                 .map(|v| v.repaint_delay)
                 .unwrap_or(Duration::ZERO);
 
-            // Если были события от платформы (touch, lifecycle, back)
-            // или сигнал от data layer — следующий кадр немедленно.
-            // Это гарантирует, что после клика/навигации новый экран рисуется сразу.
-            if had_events || had_notify {
-                self.repaint_delay = Duration::ZERO;
-            } else {
-                self.repaint_delay = new_delay;
-            }
+            // Запоминаем, когда egui хочет следующий кадр.
+            //
+            // НЕ форсируем repaint_delay=0 по had_events: при постоянном потоке
+            // событий от активной клавиатуры это превращает цикл в busy loop.
+            // Полагаемся на egui: если экран не изменился — repaint_delay будет
+            // большим, и цикл заблокируется в poll до следующего реального события.
+            self.repaint_delay = new_delay;
 
             log::info!(
                 "LOOP: repaint_delay = {:?} (had_events={}, had_notify={}, событий в кадре={})",
@@ -268,6 +268,7 @@ impl RunState {
             }
 
             // Рендеринг через GraphicsPipeline
+            log::info!("LOOP: render_frame begin (w={} h={})", w, h);
             if let Some(ref mut g) = self.graphics {
                 let clear_color = backend.platform_state().current_clear_color();
                 let success = g.render_frame(
@@ -279,6 +280,7 @@ impl RunState {
                     pp,
                     backend,
                 );
+                log::info!("LOOP: render_frame end success={}", success);
                 if !success {
                     // swap_buffers не удался — пересоздадим pipeline
                     let mut p = None;

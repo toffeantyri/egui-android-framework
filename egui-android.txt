@@ -1,0 +1,2234 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+The content has been processed where comments have been removed.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: **/*.rs, **/*.toml, **/*.kt, **.*.md
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Code comments have been removed from supported file types
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+crates/
+  egui-android-demo/
+    src/
+      lib.rs
+    Cargo.toml
+  egui-mobile-patterns/
+    src/
+      layout/
+        mod.rs
+        navigation.rs
+      lib.rs
+    Cargo.toml
+src/
+  internal/
+    bindings/
+      application_info.rs
+      mod.rs
+    plugins/
+      mod.rs
+      text.rs
+    widgets/
+      mod.rs
+      text_context_menu.rs
+    graphics.rs
+    ime.rs
+    input.rs
+    keycodes.rs
+    logging.rs
+    mod.rs
+    runner.rs
+    state.rs
+  activity.rs
+  entrypoint.rs
+  lib.rs
+Cargo.toml
+mise.toml
+pitchfork.toml
+rust-toolchain.toml
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="crates/egui-android-demo/src/lib.rs">
+use egui_android::{
+    egui::{self, ViewportCommand},
+    Activity,
+};
+use egui_mobile_patterns::layout::navigation::{NavigationTabBuilder, NavigationWrapper};
+
+struct MyApp {
+    name: String,
+    age: u32,
+}
+
+impl Default for MyApp {
+    fn default() -> Self {
+        Self {
+            name: "Arthur".to_owned(),
+            age: 42,
+        }
+    }
+}
+
+impl Activity for MyApp {
+    fn create() -> Self {
+        Self::default()
+    }
+
+    fn update(&mut self, ctx: &egui::Context) {
+        let time = ctx.input(|input| input.time);
+
+        NavigationWrapper::new()
+            .tab(NavigationTabBuilder::new("Home").contents(|ui| {
+                ui.add_space(32.0);
+
+                ui.heading("My egui Application");
+
+                ui.horizontal(|ui| {
+                    let name_label = ui.label("Your name: ");
+                    ui.text_edit_singleline(&mut self.name)
+                        .labelled_by(name_label.id);
+                });
+
+                ui.add(egui::Slider::new(&mut self.age, 0..=120).text("age"));
+
+                if ui.button("Increment").clicked() {
+                    log::info!("incrementing age");
+                    self.age += 1;
+                }
+
+                ui.hyperlink("https://www.google.com");
+
+                ui.label(format!("Hello '{}', age {}", self.name, self.age));
+
+                ui.label(format!("Last update timestamp: {}", time));
+                ui.label(format!("Focused: {:?}", ui.input(|i| i.viewport().focused)));
+
+                ui.heading("Viewport Support");
+
+                if ui.button("Quit").clicked() {
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+
+                if ui.button("Enter Fullscreen").clicked() {
+                    ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+                }
+
+                if ui.button("Exit Fullscreen").clicked() {
+                    ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
+                }
+            }))
+            .tab(NavigationTabBuilder::new("Inspector").contents(|ui| {
+                ui.add_space(16.0);
+
+                ui.heading("Inspector");
+                ctx.inspection_ui(ui);
+            }))
+            .show(ctx);
+    }
+}
+
+egui_android::export!(MyApp);
+</file>
+
+<file path="crates/egui-android-demo/Cargo.toml">
+[package]
+name = "egui-android-demo"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+log = "0.4"
+egui-android.path = "../../"
+egui-mobile-patterns.path = "../../crates/egui-mobile-patterns"
+
+[package.metadata.android]
+package = "com.stephencoakley.egui_android_demo"
+build_targets = ["armv7-linux-androideabi", "i686-linux-android", "x86_64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[package.metadata.android.application.activity]
+name = "android.app.NativeActivity"
+</file>
+
+<file path="crates/egui-mobile-patterns/src/layout/mod.rs">
+pub mod navigation;
+</file>
+
+<file path="crates/egui-mobile-patterns/src/layout/navigation.rs">
+use std::fmt::Display;
+
+use egui::{
+    vec2, Color32, Context, Frame, Id, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Widget,
+};
+
+pub struct NavigationBar {}
+
+pub struct NavigationWrapper<'a> {
+    id: Id,
+    tabs: Vec<NavigationTab<'a>>,
+}
+
+impl<'a> NavigationWrapper<'a> {
+    pub fn new() -> Self {
+        Self {
+            id: Id::new("navigation"),
+            tabs: Vec::new(),
+        }
+    }
+
+    pub fn tab(mut self, tab: NavigationTab<'a>) -> Self {
+        self.tabs.push(tab);
+        self
+    }
+
+    pub fn show(mut self, ctx: &Context) {
+        let state = ctx
+            .memory_mut(|memory| memory.data.get_persisted::<NavigationWrapperState>(self.id))
+            .unwrap_or_default();
+
+        egui::TopBottomPanel::bottom("toolbar")
+            .frame(Frame::none().fill(Color32::from_white_alpha(2)))
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                ui.add_space(6.0);
+
+                ui.columns(self.tabs.len(), |columns| {
+                    for (i, tab) in self.tabs.iter().enumerate() {
+                        let ui = &mut columns[i];
+                        let active = i == state.active_tab;
+                        if ui.add(toolbar_button('A', &tab.title, active)).clicked() {
+                            ctx.memory_mut(|memory| {
+                                memory.data.insert_persisted(
+                                    self.id,
+                                    NavigationWrapperState { active_tab: i },
+                                );
+                            });
+                        }
+                    }
+                });
+
+                ui.add_space(36.0);
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            (self.tabs[state.active_tab].show)(ui);
+        });
+    }
+}
+
+pub struct NavigationTabBuilder {
+    title: String,
+}
+
+impl NavigationTabBuilder {
+    pub fn new(title: impl Display) -> Self {
+        Self {
+            title: title.to_string(),
+        }
+    }
+
+    pub fn contents<'a>(self, show: impl FnMut(&mut Ui) + 'a) -> NavigationTab<'a> {
+        NavigationTab {
+            title: self.title,
+            show: Box::new(show),
+        }
+    }
+}
+
+pub struct NavigationTab<'a> {
+    title: String,
+    show: Box<dyn FnMut(&mut Ui) + 'a>,
+}
+
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
+struct NavigationWrapperState {
+    active_tab: usize,
+}
+
+fn toolbar_button(icon: char, label: &str, selected: bool) -> impl Widget + '_ {
+    let text_color = if selected {
+        Color32::LIGHT_BLUE
+    } else {
+        Color32::GRAY
+    };
+
+    move |ui: &mut Ui| {
+        ui.push_id(label, |ui| {
+            if selected {
+                let center_top = ui.available_rect_before_wrap().center_top();
+                let shadow_area =
+                    Rect::from_two_pos(center_top - vec2(24.0, 2.0), center_top + vec2(24.0, 36.0));
+
+                ui.painter().rect(
+                    shadow_area,
+                    8.0,
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 2),
+                    Stroke::NONE,
+                    StrokeKind::Middle,
+                );
+            }
+
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(icon.to_string()).size(18.0).color(text_color));
+                ui.label(RichText::new(label).small().color(text_color));
+            });
+        })
+        .response
+        .interact(Sense::click())
+    }
+}
+</file>
+
+<file path="crates/egui-mobile-patterns/src/lib.rs">
+pub mod layout;
+</file>
+
+<file path="crates/egui-mobile-patterns/Cargo.toml">
+[package]
+name = "egui-mobile-patterns"
+version = "0.1.0"
+edition = "2021"
+authors = ["Stephen M. Coakley <me@stephencoakley.com>"]
+license = "MIT"
+
+[dependencies]
+egui.workspace = true
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+</file>
+
+<file path="src/internal/bindings/application_info.rs">
+use android_activity::AndroidApp;
+use jni::{
+    objects::{GlobalRef, JObject, JString},
+    JavaVM,
+};
+
+type Error = Box<dyn std::error::Error>;
+
+pub(crate) struct ApplicationInfo {
+    application_info: GlobalRef,
+    vm: JavaVM,
+}
+
+impl ApplicationInfo {
+
+
+
+    pub(crate) fn for_android_app(android_app: &AndroidApp) -> Result<Self, Error> {
+        let vm = unsafe { JavaVM::from_raw(android_app.vm_as_ptr() as _)? };
+        let activity = unsafe { JObject::from_raw(android_app.activity_as_ptr() as _) };
+        let mut env = vm.attach_current_thread()?;
+
+        let application_context = env
+            .call_method(
+                &activity,
+                "getApplicationContext",
+                "()Landroid/content/Context;",
+                &[],
+            )?
+            .l()?;
+        let application_info = env
+            .call_method(
+                &application_context,
+                "getApplicationInfo",
+                "()Landroid/content/pm/ApplicationInfo;",
+                &[],
+            )?
+            .l()?;
+
+        let application_info = env.new_global_ref(application_info)?;
+
+        drop(env);
+
+        Ok(Self {
+            application_info,
+            vm,
+        })
+    }
+
+
+    pub(crate) fn name(&self) -> Result<String, Error> {
+        let mut env = self.vm.attach_current_thread()?;
+
+        let name = env
+            .get_field(&self.application_info, "name", "Ljava/lang/String;")?
+            .l()?;
+        let name = JString::from(name);
+        let name = env.get_string(&name)?;
+
+        Ok(name.into())
+    }
+
+
+    pub(crate) fn label_res(&self) -> Result<String, Error> {
+        let mut env = self.vm.attach_current_thread()?;
+
+        let label_res = env
+            .get_field(&self.application_info, "labelRes", "Ljava/lang/String;")?
+            .l()?;
+        let label_res = JString::from(label_res);
+        let label_res = env.get_string(&label_res)?;
+
+        Ok(label_res.into())
+    }
+
+
+    pub(crate) fn package_name(&self) -> Result<String, Error> {
+        let mut env = self.vm.attach_current_thread()?;
+
+        let package_name = env
+            .get_field(&self.application_info, "packageName", "Ljava/lang/String;")?
+            .l()?;
+        let package_name = JString::from(package_name);
+        let package_name = env.get_string(&package_name)?;
+
+        Ok(package_name.into())
+    }
+}
+</file>
+
+<file path="src/internal/bindings/mod.rs">
+pub(crate) mod application_info;
+</file>
+
+<file path="src/internal/plugins/mod.rs">
+use egui::Context;
+
+mod text;
+
+
+pub(crate) fn register_all_plugins(ctx: &Context) {
+    ctx.add_plugin(text::TextPlugin::default());
+}
+</file>
+
+<file path="src/internal/plugins/text.rs">
+use crate::internal::widgets::text_context_menu::TextContextMenu;
+use egui::{
+    pos2, vec2, Align2, Color32, Context, Event, FontId, FullOutput, Id, LayerId, Plugin, Popup,
+    PopupAnchor, PopupKind, RawInput, Rect, ViewportCommand,
+};
+
+pub(crate) struct TextPlugin {
+    id: Id,
+    menu: Option<MenuInfo>,
+    captured_events: Vec<Event>,
+}
+
+struct MenuInfo {
+    layer: LayerId,
+    area: Rect,
+}
+
+impl Default for TextPlugin {
+    fn default() -> Self {
+        Self {
+            id: Id::new("egui_android.text_popup"),
+            menu: None,
+            captured_events: Vec::new(),
+        }
+    }
+}
+
+impl Plugin for TextPlugin {
+    fn debug_name(&self) -> &'static str {
+        "Android Text Support"
+    }
+
+    fn input_hook(&mut self, input: &mut RawInput) {
+        // We don't want any user interaction with the input menu to steal focus
+
+
+
+        if let Some(menu) = self.menu.as_mut() {
+            input.events.retain(|event| {
+                if let Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers,
+                } = event
+                {
+                    if menu.area.contains(*pos) {
+                        self.captured_events.push(event.clone());
+                        return false;
+                    }
+                }
+
+                true
+            });
+        }
+    }
+
+    fn output_hook(&mut self, output: &mut FullOutput) {
+
+        if let Some(ime) = output.platform_output.ime.as_mut() {
+
+            let had_menu_before = self.menu.is_some();
+
+            self.menu = Some(MenuInfo {
+                layer: LayerId::debug(),
+                area: Rect::from_min_size(ime.rect.min - vec2(0.0, 40.0), vec2(100.0, 30.0)),
+            });
+
+            if !had_menu_before {
+
+            }
+        } else {
+            self.menu = None;
+        }
+    }
+
+    fn on_end_pass(&mut self, ctx: &Context) {
+        if let Some(menu) = self.menu.as_ref() {
+            let painter = ctx.layer_painter(menu.layer).with_clip_rect(menu.area);
+
+            painter.rect_filled(menu.area, 3.0, Color32::GRAY);
+            painter.text(
+                menu.area.left_center() + vec2(0.0, 0.0),
+                Align2::LEFT_CENTER,
+                "Cut",
+                FontId::proportional(12.0),
+                Color32::BLACK,
+            );
+            painter.text(
+                menu.area.left_center() + vec2(40.0, 0.0),
+                Align2::LEFT_CENTER,
+                "Copy",
+                FontId::proportional(12.0),
+                Color32::BLACK,
+            );
+            painter.text(
+                menu.area.left_center() + vec2(80.0, 0.0),
+                Align2::LEFT_CENTER,
+                "Paste",
+                FontId::proportional(12.0),
+                Color32::BLACK,
+            );
+        }
+    }
+}
+</file>
+
+<file path="src/internal/widgets/mod.rs">
+pub(crate) mod text_context_menu;
+</file>
+
+<file path="src/internal/widgets/text_context_menu.rs">
+use egui::{Response, Ui, ViewportCommand, Widget};
+
+pub(crate) struct TextContextMenu;
+
+impl Widget for TextContextMenu {
+    fn ui(self, ui: &mut Ui) -> Response {
+        if ui.button("Copy").clicked() {
+            log::info!("copy button clicked");
+            ui.ctx().send_viewport_cmd(ViewportCommand::RequestCopy);
+        }
+
+        if ui.button("Cut").clicked() {
+            log::info!("cut button clicked");
+            ui.ctx().send_viewport_cmd(ViewportCommand::RequestCut);
+        }
+
+        if ui.button("Paste").clicked() {
+            log::info!("paste button clicked");
+            ui.ctx().send_viewport_cmd(ViewportCommand::RequestPaste);
+        }
+
+        ui.response()
+    }
+}
+</file>
+
+<file path="src/internal/graphics.rs">
+use egui::FullOutput;
+use egui_glow::{glow, Painter};
+use glutin::{
+    api::egl::{
+        config::Config,
+        context::{NotCurrentContext, PossiblyCurrentContext},
+        display::Display,
+        surface::Surface,
+    },
+    config::{ConfigTemplate, ConfigTemplateBuilder},
+    context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext},
+    display::GlDisplay,
+    prelude::PossiblyCurrentGlContext,
+    surface::{GlSurface, SurfaceAttributesBuilder, WindowSurface},
+};
+use ndk::native_window::NativeWindow;
+use raw_window_handle::{
+    AndroidDisplayHandle, AndroidNdkWindowHandle, RawDisplayHandle, RawWindowHandle,
+};
+use std::{ffi::CString, mem::replace, num::NonZeroU32, sync::Arc};
+
+
+pub(crate) struct GraphicsContext {
+
+    display: Display,
+
+
+    egl_config: Config,
+
+
+
+    state: State,
+}
+
+#[derive(Default)]
+enum State {
+
+
+    #[default]
+    Uninitialized,
+
+
+
+    Active {
+        native_window: NativeWindow,
+        surface: Surface<WindowSurface>,
+        gl_context: PossiblyCurrentContext,
+        painter: Painter,
+    },
+
+
+
+    Suspended {
+        gl_context: NotCurrentContext,
+        painter: Painter,
+    },
+}
+
+impl GraphicsContext {
+
+    pub(crate) fn new() -> Self {
+        Self::with_config(
+            ConfigTemplateBuilder::new()
+                .with_depth_size(0)
+                .with_stencil_size(0)
+                .with_transparency(false)
+                .build(),
+        )
+    }
+
+
+    pub(crate) fn with_config(config_template: ConfigTemplate) -> Self {
+        let display = get_default_display();
+
+        let egl_config = unsafe { display.find_configs(config_template) }
+            .unwrap()
+            .next()
+            .unwrap();
+
+        GraphicsContext {
+            display,
+            egl_config,
+            state: State::default(),
+        }
+    }
+
+
+
+    pub(crate) fn renderer(&mut self) -> Option<Renderer<'_>> {
+        match &mut self.state {
+            State::Active {
+                native_window,
+                surface,
+                gl_context,
+                painter,
+                ..
+            } => Some(Renderer {
+                native_window,
+                surface,
+                gl_context,
+                painter,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Attach a window to the context. A graphics surface will be initialized
+    /// within the window, and a renderer will become available for drawing to
+    /// the surface.
+    pub(crate) fn attach_window(&mut self, native_window: NativeWindow) {
+        self.state = match self.state.take() {
+            // This is the first time a window has been created, initialize everything.
+            State::Uninitialized => {
+                let context_attributes = ContextAttributesBuilder::new()
+                    .with_context_api(ContextApi::Gles(None))
+                    .build(None);
+
+                let gl_context = unsafe {
+                    self.display
+                        .create_context(&self.egl_config, &context_attributes)
+                }
+                .unwrap();
+
+                let surface = self.create_window_surface(&native_window);
+
+                let gl_context = gl_context.make_current(&surface).unwrap();
+                let glow_context = Arc::new(self.create_glow_context(&gl_context));
+
+                State::Active {
+                    native_window,
+                    surface,
+                    gl_context,
+                    painter: Painter::new(glow_context, "", None, false).unwrap(),
+                }
+            }
+
+            State::Suspended {
+                gl_context,
+                painter,
+            } => {
+                let surface = self.create_window_surface(&native_window);
+                let gl_context = gl_context.make_current(&surface).unwrap();
+
+                State::Active {
+                    native_window,
+                    surface,
+                    gl_context,
+                    painter,
+                }
+            }
+
+            State::Active { .. } => todo!(),
+        };
+    }
+
+    pub(crate) fn detach_window(&mut self) {
+        self.state = match self.state.take() {
+            State::Active {
+                gl_context,
+                painter,
+                ..
+            } => State::Suspended {
+                painter,
+                gl_context: gl_context.make_not_current().unwrap(),
+            },
+
+            // We have no window to remove, do nothing.
+            state => state,
+        };
+    }
+
+    fn create_glow_context(&self, _gl_context: &PossiblyCurrentContext) -> glow::Context {
+        unsafe {
+            glow::Context::from_loader_function(|s| {
+                let s = CString::new(s).unwrap();
+                self.display.get_proc_address(&s).cast()
+            })
+        }
+    }
+
+    fn create_window_surface(&self, native_window: &NativeWindow) -> Surface<WindowSurface> {
+        let raw_window_handle =
+            RawWindowHandle::from(AndroidNdkWindowHandle::new(native_window.ptr().cast()));
+
+        let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+            raw_window_handle,
+            NonZeroU32::new(native_window.width().try_into().unwrap()).unwrap(),
+            NonZeroU32::new(native_window.height().try_into().unwrap()).unwrap(),
+        );
+
+        unsafe {
+            self.display
+                .create_window_surface(&self.egl_config, &surface_attributes)
+        }
+        .unwrap()
+    }
+}
+
+impl State {
+    fn take(&mut self) -> Self {
+        replace(self, Self::Uninitialized)
+    }
+}
+
+impl Drop for GraphicsContext {
+    fn drop(&mut self) {
+        match self.state.take() {
+            State::Active {
+                gl_context,
+                mut painter,
+                ..
+            } => {
+                gl_context.make_not_current().unwrap();
+                painter.destroy();
+            }
+
+            State::Suspended { mut painter, .. } => {
+                painter.destroy();
+            }
+
+            State::Uninitialized => {}
+        }
+    }
+}
+
+pub(crate) struct Renderer<'c> {
+    native_window: &'c NativeWindow,
+    surface: &'c Surface<WindowSurface>,
+    gl_context: &'c PossiblyCurrentContext,
+    painter: &'c mut Painter,
+}
+
+impl Renderer<'_> {
+    pub(crate) fn handle_resize(&self) {
+        self.surface.resize(
+            self.gl_context,
+            NonZeroU32::new(self.native_window.width() as _).unwrap(),
+            NonZeroU32::new(self.native_window.height() as _).unwrap(),
+        );
+    }
+
+    pub(crate) fn repaint(
+        &mut self,
+        full_output: &mut FullOutput,
+        clipped_primitives: &[egui::ClippedPrimitive],
+    ) {
+        let screen_size = [
+            self.surface.width().unwrap(),
+            self.surface.height().unwrap(),
+        ];
+
+        self.painter.clear(screen_size, [0.0, 0.0, 0.0, 0.0]);
+
+        self.painter.paint_and_update_textures(
+            screen_size,
+            full_output.pixels_per_point,
+            clipped_primitives,
+            &full_output.textures_delta,
+        );
+
+        self.surface.swap_buffers(self.gl_context).unwrap();
+    }
+
+    pub(crate) fn window_size(&self) -> [u32; 2] {
+        [
+            self.native_window.width() as _,
+            self.native_window.height() as _,
+        ]
+    }
+}
+
+
+fn get_default_display() -> Display {
+    let raw_display_handle = RawDisplayHandle::Android(AndroidDisplayHandle::new());
+    unsafe { Display::new(raw_display_handle) }.unwrap()
+}
+</file>
+
+<file path="src/internal/ime.rs">
+use android_activity::AndroidApp;
+use jni::{objects::JObject, JavaVM};
+
+pub(crate) fn show_hide_keyboard_alt(app: &AndroidApp, show: bool, implicit: bool) {
+
+    let na = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as _) };
+    let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as _) }.unwrap();
+    let mut env = jvm.attach_current_thread().unwrap();
+    let class_ctxt = env.find_class("android/content/Context").unwrap();
+    let ims = env
+        .get_static_field(class_ctxt, "INPUT_METHOD_SERVICEself", "Ljava/lang/String;")
+        .unwrap();
+
+    let im_manager = env
+        .call_method(
+            &na,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[ims.borrow()],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+
+    let jni_window = env
+        .call_method(na, "getWindow", "()Landroid/view/Window;", &[])
+        .unwrap()
+        .l()
+        .unwrap();
+    let view = env
+        .call_method(jni_window, "getDecorView", "()Landroid/view/View;", &[])
+        .unwrap()
+        .l()
+        .unwrap();
+
+    env.call_method(
+        im_manager,
+        "showSoftInput",
+        "(Landroid/view/View;I)Z",
+        &[
+            jni::objects::JValue::Object(&view),
+
+
+
+            0i32.into(),
+        ],
+    )
+    .unwrap();
+}
+
+fn show_hide_keyboard_fallible(app: &AndroidApp, show: bool) -> Result<(), jni::errors::Error> {
+    log::info!("show/hide keyboard attempt: {show}");
+
+
+
+
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as _)? };
+    let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as _) };
+    let mut env = vm.attach_current_thread()?;
+    let window = env
+        .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])?
+        .l()?;
+    let wic = env
+        .call_method(
+            window,
+            "getInsetsController",
+            "()Landroid/view/WindowInsetsController;",
+            &[],
+        )?
+        .l()?;
+    let window_insets_types = env.find_class("android/view/WindowInsets$Type")?;
+    let ime_type = env
+        .call_static_method(&window_insets_types, "ime", "()I", &[])?
+        .i()?;
+    env.call_method(
+        &wic,
+        if show { "show" } else { "hide" },
+        "(I)V",
+        &[ime_type.into()],
+    )?
+    .v()
+}
+
+pub(crate) fn show_hide_keyboard(app: &AndroidApp, show: bool) {
+    if let Err(e) = show_hide_keyboard_fallible(app, show) {
+        log::error!("Showing or hiding the soft keyboard failed: {e:?}");
+    };
+}
+</file>
+
+<file path="src/internal/input.rs">
+use android_activity::{
+    input::{
+        Axis, Button, InputEvent, KeyAction, KeyEvent, KeyMapChar, Keycode, MetaState,
+        MotionAction, MotionEvent, Pointer, ToolType,
+    },
+    AndroidApp, InputStatus,
+};
+use egui::{
+    pos2, vec2, Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, TouchDeviceId,
+    TouchId, TouchPhase, ViewportEvent,
+};
+
+
+
+pub(crate) struct InputHandler {
+    app: AndroidApp,
+    combining_accent: Option<char>,
+}
+
+impl InputHandler {
+    pub fn new(app: AndroidApp) -> Self {
+        Self {
+            app,
+            combining_accent: None,
+        }
+    }
+
+
+
+
+
+
+
+
+
+    pub fn process(
+        &mut self,
+        android_event: &InputEvent,
+        pixels_per_point: f32,
+        receiver: &mut RawInput,
+    ) -> InputStatus {
+        log::info!("processing input event: {:?}", android_event);
+
+        match android_event {
+            InputEvent::KeyEvent(key_event) => self.process_key_event(key_event, receiver),
+
+            InputEvent::MotionEvent(motion_event) => {
+                log::info!("processing motion event: {:?}", motion_event.action());
+                match motion_event.action() {
+                    MotionAction::Scroll => {
+                        for pointer in motion_event.pointers() {
+                            receiver.events.push(Event::MouseWheel {
+                                delta: vec2(
+                                    pointer.axis_value(Axis::Hscroll),
+                                    pointer.axis_value(Axis::Vscroll),
+                                ) / pixels_per_point,
+                                modifiers: modifiers_from_meta_state(motion_event.meta_state()),
+                                unit: MouseWheelUnit::Point,
+                            });
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    MotionAction::Down | MotionAction::PointerDown => {
+                        for pointer in motion_event.pointers() {
+                            receiver.events.push(create_touch_event(
+                                motion_event,
+                                &pointer,
+                                TouchPhase::Start,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        if motion_event.pointer_count() == 1 {
+                            receiver.events.push(create_click_event(
+                                motion_event,
+                                &motion_event.pointers().next().unwrap(),
+                                true,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    MotionAction::Up | MotionAction::PointerUp => {
+                        for pointer in motion_event.pointers() {
+                            receiver.events.push(create_touch_event(
+                                motion_event,
+                                &pointer,
+                                TouchPhase::End,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        if motion_event.pointer_count() == 1 {
+                            receiver.events.push(create_click_event(
+                                motion_event,
+                                &motion_event.pointers().next().unwrap(),
+                                false,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        if motion_event.pointer_count() <= 1 {
+                            receiver.events.push(Event::PointerGone);
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    MotionAction::Move => {
+                        for pointer in motion_event.pointers() {
+                            receiver.events.push(create_touch_event(
+                                motion_event,
+                                &pointer,
+                                TouchPhase::Move,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        if motion_event.pointer_count() == 1 {
+                            let pointer = motion_event.pointers().next().unwrap();
+                            receiver
+                                .events
+                                .push(Event::PointerMoved(pointer_pos(&pointer, pixels_per_point)));
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    MotionAction::Cancel => {
+                        for pointer in motion_event.pointers() {
+                            receiver.events.push(create_touch_event(
+                                motion_event,
+                                &pointer,
+                                TouchPhase::Cancel,
+                                pixels_per_point,
+                            ));
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    MotionAction::Outside => {
+                        receiver.events.push(Event::PointerGone);
+                        InputStatus::Handled
+                    }
+
+
+                    MotionAction::HoverMove => {
+                        for pointer in motion_event.pointers() {
+                            if pointer.tool_type() == ToolType::Mouse {
+                                receiver.events.push(Event::MouseMoved(
+                                    vec2(
+                                        pointer.axis_value(Axis::Hscroll),
+                                        pointer.axis_value(Axis::Vscroll),
+                                    ) / pixels_per_point,
+                                ));
+                            }
+                        }
+
+                        InputStatus::Handled
+                    }
+
+                    e => {
+                        log::warn!("unknown motion event: {e:?}");
+                        InputStatus::Unhandled
+                    }
+                }
+            }
+
+
+            InputEvent::TextEvent(text_event) => {
+                log::warn!("unhandled text event: {text_event:?}");
+                InputStatus::Unhandled
+            }
+
+            unknown => {
+                log::warn!("unhandled input event: {unknown:?}");
+                InputStatus::Unhandled
+            }
+        }
+    }
+
+    fn process_key_event(&mut self, key_event: &KeyEvent, receiver: &mut RawInput) -> InputStatus {
+
+        if key_event.key_code() == Keycode::Back {
+            if key_event.action() == KeyAction::Up {
+                log::info!("back button pressed");
+                receiver
+                    .viewports
+                    .get_mut(&receiver.viewport_id)
+                    .unwrap()
+                    .events
+                    .push(ViewportEvent::Close);
+            }
+            return InputStatus::Handled;
+        }
+
+        let device_id = key_event.device_id();
+
+        let key_map = match self.app.device_key_character_map(device_id) {
+            Ok(key_map) => key_map,
+            Err(err) => {
+                log::warn!("failed to look up `KeyCharacterMap` for device {device_id}: {err:?}");
+                return InputStatus::Unhandled;
+            }
+        };
+
+        let cma = match key_map.get(key_event.key_code(), key_event.meta_state()) {
+            Ok(c) => c,
+            Err(err) => {
+                log::warn!("KeyEvent: Failed to get key map character: {err:?}");
+                KeyMapChar::None
+            }
+        };
+
+        match cma {
+            KeyMapChar::Unicode(unicode) => {
+                if key_event.action() == KeyAction::Down {
+                    if let Some(combining_accent) = self.combining_accent.take() {
+                        if let Some(c) = key_map
+                            .get_dead_char(combining_accent, unicode)
+                            .inspect_err(|e| {
+                                log::warn!(
+                                    "KeyEvent: Failed to combine 'dead key' accent '{combining_accent}' with \
+                                    '{unicode}': {e:?}"
+                                )
+                            })
+                            .ok()
+                            .flatten()
+                        {
+                            receiver.events.push(Event::Text(c.into()));
+                            InputStatus::Handled
+                        } else {
+                            InputStatus::Unhandled
+                        }
+                    } else {
+                        receiver.events.push(Event::Text(unicode.into()));
+                        InputStatus::Handled
+                    }
+                } else {
+                    InputStatus::Handled
+                }
+            }
+            KeyMapChar::CombiningAccent(combining_accent) => {
+                self.combining_accent = Some(combining_accent);
+                InputStatus::Handled
+            }
+            KeyMapChar::None => match key_event.key_code() {
+                Keycode::Copy => {
+                    receiver.events.push(Event::Copy);
+                    InputStatus::Handled
+                }
+                Keycode::Cut => {
+                    receiver.events.push(Event::Cut);
+                    InputStatus::Handled
+                }
+                keycode => {
+                    if let Some(key) = super::keycodes::to_physical_key(keycode) {
+                        receiver.events.push(Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: key_event.action() == KeyAction::Down,
+                            repeat: key_event.repeat_count() > 0,
+                            modifiers: modifiers_from_meta_state(key_event.meta_state()),
+                        });
+                        InputStatus::Handled
+                    } else {
+                        log::warn!("Unknown key code: {:?}", key_event.key_code());
+                        InputStatus::Unhandled
+                    }
+                }
+            },
+        }
+    }
+}
+
+
+fn modifiers_from_meta_state(meta_state: MetaState) -> Modifiers {
+    Modifiers {
+        alt: meta_state.alt_on(),
+        ctrl: meta_state.ctrl_on(),
+        shift: meta_state.shift_on(),
+        mac_cmd: false,
+        command: meta_state.meta_on(),
+    }
+}
+
+fn create_touch_event(
+    motion_event: &MotionEvent,
+    pointer: &Pointer,
+    phase: TouchPhase,
+    pixels_per_point: f32,
+) -> Event {
+    Event::Touch {
+        device_id: TouchDeviceId(motion_event.device_id() as u64),
+        id: TouchId(pointer.pointer_id() as u64),
+        phase,
+        pos: pointer_pos(pointer, pixels_per_point),
+        force: Some(pointer.pressure()),
+    }
+}
+
+fn create_click_event(
+    motion_event: &MotionEvent,
+    pointer: &Pointer,
+    pressed: bool,
+    pixels_per_point: f32,
+) -> Event {
+    Event::PointerButton {
+        pos: pointer_pos(pointer, pixels_per_point),
+        button: match motion_event.action_button() {
+            Button::Secondary => PointerButton::Secondary,
+            _ => PointerButton::Primary,
+        },
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+fn pointer_pos(pointer: &Pointer, pixels_per_point: f32) -> Pos2 {
+    pos2(pointer.x(), pointer.y()) / pixels_per_point
+}
+</file>
+
+<file path="src/internal/keycodes.rs">
+use android_activity::input::Keycode;
+use egui::Key;
+use std::sync::OnceLock;
+
+macro_rules! populate_key_map {
+    ($vec:expr, {}) => {
+        $vec
+    };
+
+    ($vec:expr, {
+        $ident:ident,
+        $($rest:tt)*
+    }) => {
+        populate_key_map!($vec, {
+            $ident => $ident,
+            $($rest)*
+        })
+    };
+
+    ($vec:expr, {
+        $from:ident => $to:ident,
+        $($rest:tt)*
+    }) => {{
+        let mut vec = $vec;
+        let index = u32::from(Keycode::$from) as usize;
+        let value = Key::$to;
+
+        if let Some(slot) = vec.get_mut(index) {
+            *slot = Some(value);
+        } else {
+            vec.resize(index, None);
+            vec.push(Some(value));
+        }
+
+        populate_key_map!(vec, {
+            $($rest)*
+        })
+    }};
+}
+
+
+pub(crate) fn to_physical_key(keycode: Keycode) -> Option<Key> {
+    static PHYSICAL_KEY_MAP: OnceLock<Vec<Option<Key>>> = OnceLock::new();
+
+    let map = PHYSICAL_KEY_MAP.get_or_init(|| {
+        populate_key_map!(vec![], {
+            A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+            F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+            Tab,
+            Numpad0 => Num0,
+            Numpad1 => Num1,
+            Numpad2 => Num2,
+            Numpad3 => Num3,
+            Numpad4 => Num4,
+            Numpad5 => Num5,
+            Numpad6 => Num6,
+            Numpad7 => Num7,
+            Numpad8 => Num8,
+            Numpad9 => Num9,
+            NumpadSubtract => Minus,
+            NumpadEquals => Equals,
+            DpadUp => ArrowUp,
+            DpadDown => ArrowDown,
+            DpadLeft => ArrowLeft,
+            DpadRight => ArrowRight,
+            Del => Backspace,
+            ForwardDel => Delete,
+        })
+    });
+
+    map.get(u32::from(keycode) as usize).cloned().flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_key() {
+        assert_eq!(to_physical_key(Keycode::R), Some(Key::R));
+    }
+}
+</file>
+
+<file path="src/internal/logging.rs">
+pub(crate) fn init(package_name: String) {
+    #[cfg(feature = "logger")]
+    {
+        use std::sync::Once;
+
+        static ONCE: Once = Once::new();
+
+        ONCE.call_once(|| {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Debug)
+                    .with_tag(package_name),
+            );
+
+            log_panics::init();
+        });
+    }
+}
+</file>
+
+<file path="src/internal/mod.rs">
+pub(crate) mod bindings;
+pub(crate) mod logging;
+pub(crate) mod runner;
+
+mod graphics;
+mod ime;
+mod input;
+mod keycodes;
+mod plugins;
+mod state;
+mod widgets;
+</file>
+
+<file path="src/internal/runner.rs">
+use super::{
+    graphics::GraphicsContext, ime::show_hide_keyboard, input::InputHandler, state::AppState,
+};
+use crate::Activity;
+use android_activity::{
+    input::{TextInputState, TextSpan},
+    AndroidApp, MainEvent, PollEvent, WindowManagerFlags,
+};
+use egui::{
+    output::OutputEvent, pos2, vec2, Event, FullOutput, Margin, OpenUrl, OutputCommand,
+    PlatformOutput, Pos2, RawInput, Rect, Theme, ViewportCommand, ViewportId, ViewportOutput,
+    WidgetInfo, WidgetType,
+};
+use ndk::configuration::UiModeNight;
+use std::{
+    mem::take,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+
+
+const BASE_DPI: f32 = 160.0;
+
+pub(crate) struct Runner<T: Activity> {
+    app_state: AppState<T>,
+    android_app: AndroidApp,
+    graphics_context: GraphicsContext,
+    raw_input: RawInput,
+    input_handler: InputHandler,
+    repaint_info: Arc<Mutex<RepaintInfo>>,
+    keyboard_visible: bool,
+    close_requested: bool,
+    text_selection_widget: Option<WidgetInfo>,
+}
+
+struct RepaintInfo {
+    needs_repaint: bool,
+    deadline: Instant,
+}
+
+impl<T: Activity> Runner<T> {
+    pub fn new(android_app: AndroidApp) -> Self {
+        let app_state = AppState::new(T::create());
+
+        let repaint_info = Arc::new(Mutex::new(RepaintInfo {
+            needs_repaint: false,
+            deadline: Instant::now(),
+        }));
+
+
+
+        app_state.context().set_request_repaint_callback({
+            let waker = android_app.create_waker();
+            let repaint_info = repaint_info.clone();
+            move |info| {
+                let mut repaint_info = repaint_info.lock().unwrap();
+
+                repaint_info.needs_repaint = true;
+                repaint_info.deadline = Instant::now() + info.delay;
+
+                waker.wake();
+            }
+        });
+
+
+        super::plugins::register_all_plugins(app_state.context());
+
+        Self {
+            app_state,
+            android_app: android_app.clone(),
+            graphics_context: GraphicsContext::new(),
+            raw_input: RawInput::default(),
+            input_handler: InputHandler::new(android_app),
+            repaint_info,
+            keyboard_visible: false,
+            close_requested: false,
+            text_selection_widget: None,
+        }
+    }
+
+    pub(crate) fn run_until_closed(&mut self) {
+        while !self.close_requested {
+            self.run_once();
+        }
+    }
+
+    pub(crate) fn run_once(&mut self) {
+        let mut timeout = self.app_state.inner().min_update_frequency();
+
+        let repaint_info = self.repaint_info.lock().unwrap();
+        if repaint_info.needs_repaint {
+            let duration = repaint_info
+                .deadline
+                .saturating_duration_since(Instant::now());
+
+            timeout = timeout.map(|d| d.min(duration)).or(Some(duration));
+        }
+
+        drop(repaint_info);
+
+        self.android_app.clone().poll_events(timeout, |event| {
+            self.process_event(event);
+        });
+
+
+        self.repaint_if_needed();
+    }
+
+    fn request_repaint(&self) {
+        self.app_state.context().request_repaint();
+    }
+
+    fn attach_window_if_needed(&mut self) {
+        if let Some(native_window) = self.android_app.native_window() {
+            self.graphics_context.attach_window(native_window);
+        };
+    }
+
+    fn process_event(&mut self, event: PollEvent) {
+        match event {
+            PollEvent::Wake => {}
+            PollEvent::Timeout => {
+
+
+                self.request_repaint();
+            }
+            PollEvent::Main(main_event) => match main_event {
+                MainEvent::Destroy => {
+                    self.graphics_context.detach_window();
+                    self.close_requested = true;
+                }
+
+                MainEvent::InitWindow { .. } => {
+
+
+                    self.apply_current_config();
+                    self.attach_window_if_needed();
+                    self.request_repaint();
+                }
+
+                MainEvent::TerminateWindow { .. } | MainEvent::Stop => {
+                    self.graphics_context.detach_window();
+                }
+
+                MainEvent::WindowResized { .. } => {
+                    self.apply_current_config();
+                    if let Some(renderer) = self.graphics_context.renderer() {
+                        renderer.handle_resize();
+                    }
+                    self.request_repaint();
+                }
+
+                MainEvent::GainedFocus => {
+                    self.update_focus(true);
+                    self.request_repaint();
+                }
+
+                MainEvent::LostFocus => {
+                    self.update_focus(false);
+                    self.request_repaint();
+                }
+
+                MainEvent::RedrawNeeded { .. } => self.request_repaint(),
+
+                MainEvent::LowMemory => self.app_state.inner_mut().on_low_memory(),
+
+                MainEvent::ContentRectChanged { .. } => {
+                    let content_rect = self.android_app.content_rect();
+                    let egui_rect = Rect::from_two_pos(
+                        pos2(content_rect.left as _, content_rect.top as _),
+                        pos2(content_rect.right as _, content_rect.bottom as _),
+                    );
+                    self.app_state
+                        .inner_mut()
+                        .on_content_rect_changed(egui_rect);
+                    self.apply_current_config();
+                }
+
+                MainEvent::ConfigChanged { .. } => {
+                    self.apply_current_config();
+                    self.request_repaint();
+                }
+
+                MainEvent::InputAvailable => {
+                    self.process_pending_input();
+                    self.request_repaint();
+                }
+
+
+                MainEvent::SaveState { saver, .. } => {
+
+
+                    if let Some(memory) = self.app_state.save_memory() {
+                        saver.store(&memory);
+                    }
+                }
+
+                MainEvent::Resume { loader, .. } => {
+
+
+                    if let Some(bytes) = loader.load() {
+                        self.app_state.load_memory(&bytes);
+                    }
+                }
+
+                main_event => log::warn!("unknown main event: {main_event:?}"),
+            },
+            _ => {}
+        }
+    }
+
+    fn process_pending_input(&mut self) {
+        let pixels_per_point = self.pixels_per_point();
+
+        match self.android_app.input_events_iter() {
+            Ok(mut iter) => loop {
+                let read_input = iter.next(|event| {
+                    self.input_handler
+                        .process(event, pixels_per_point, &mut self.raw_input)
+                });
+
+                if !read_input {
+                    break;
+                }
+            },
+            Err(err) => {
+                log::error!("failed to get input events iterator: {err:?}");
+            }
+        }
+    }
+
+    fn repaint_if_needed(&mut self) {
+        self.app_state.update_clock();
+
+        let mut repaint_info = self.repaint_info.lock().unwrap();
+
+        if repaint_info.needs_repaint && self.app_state.now() >= repaint_info.deadline {
+            repaint_info.needs_repaint = false;
+            drop(repaint_info);
+            self.repaint();
+        }
+    }
+
+
+
+    fn repaint(&mut self) {
+        let mut full_output = self.app_state.update(self.raw_input.take());
+
+        if let Some(mut renderer) = self.graphics_context.renderer() {
+            if full_output.platform_output.requested_discard() {
+                self.request_repaint();
+            } else {
+                let clipped_primitives = self
+                    .app_state
+                    .context()
+                    .tessellate(take(&mut full_output.shapes), full_output.pixels_per_point);
+
+                renderer.repaint(&mut full_output, &clipped_primitives);
+            }
+
+            self.handle_platform_output(full_output.platform_output);
+        }
+
+        if let Some(viewport_output) = full_output.viewport_output.get(&ViewportId::ROOT) {
+            self.handle_viewport_output(viewport_output);
+        }
+    }
+
+    fn handle_platform_output(&mut self, platform_output: PlatformOutput) {
+
+
+
+        match (platform_output.ime.is_some(), self.keyboard_visible) {
+            (true, false) => {
+                log::info!("show keyboard requested");
+                show_hide_keyboard(&self.android_app, true);
+                self.keyboard_visible = true;
+
+                self.request_repaint();
+            }
+            (false, true) => {
+                log::info!("hide keyboard requested");
+
+                self.android_app.hide_soft_input(false);
+                self.keyboard_visible = false;
+
+                self.request_repaint();
+            }
+            _ => {}
+        }
+
+
+
+
+
+
+
+
+
+        for event in platform_output.events {
+            log::info!("output event: {event:?}");
+
+            match event {
+                OutputEvent::Clicked(info) => {
+                    if info.typ == WidgetType::TextEdit {
+                        self.android_app.set_text_input_state(TextInputState {
+                            text: info.current_text_value.unwrap_or_default(),
+                            selection: TextSpan { start: 0, end: 0 },
+                            compose_region: None,
+                        });
+                    } else {
+                        self.android_app.set_text_input_state(TextInputState {
+                            text: Default::default(),
+                            selection: TextSpan { start: 0, end: 0 },
+                            compose_region: None,
+                        });
+                    }
+                }
+
+
+                OutputEvent::DoubleClicked(info) => {
+                    if info.typ == WidgetType::TextEdit {
+                        if let Ok(text) = android_clipboard::get_text() {
+                            self.raw_input.events.push(Event::Paste(text));
+                            self.request_repaint();
+                        }
+                    }
+                }
+
+                OutputEvent::TextSelectionChanged(info) => {
+                    self.text_selection_widget = Some(info.clone());
+
+                    self.android_app.set_text_input_state(TextInputState {
+                        text: info.current_text_value.unwrap_or_default(),
+                        selection: info
+                            .text_selection
+                            .map(|s| TextSpan {
+                                start: *s.start(),
+                                end: *s.end(),
+                            })
+                            .unwrap_or(TextSpan { start: 0, end: 0 }),
+                        compose_region: None,
+                    });
+                }
+
+                OutputEvent::ValueChanged(info) => {
+                    if info.typ == WidgetType::TextEdit {
+                        self.android_app.set_text_input_state(TextInputState {
+                            text: info.current_text_value.unwrap_or_default(),
+                            selection: TextSpan { start: 0, end: 0 },
+                            compose_region: None,
+                        });
+                    }
+                }
+
+                event => log::warn!("unsupported output event: {event:?}"),
+            }
+        }
+
+        for command in platform_output.commands {
+            self.handle_output_command(command);
+        }
+    }
+
+    fn handle_output_command(&mut self, command: OutputCommand) {
+        match command {
+            OutputCommand::CopyText(text) => {
+                if let Err(err) = android_clipboard::set_text(text) {
+                    log::error!("failed to copy text to clipboard: {err:?}");
+                }
+            }
+
+            OutputCommand::OpenUrl(OpenUrl { url, .. }) => {
+                if let Err(e) = webbrowser::open(&url) {
+                    log::error!("failed to open URL: {e}");
+                }
+            }
+
+            command => log::warn!("unsupported output command: {command:?}"),
+        }
+    }
+
+    fn handle_viewport_output(&mut self, viewport_output: &ViewportOutput) {
+        for command in &viewport_output.commands {
+            log::info!("viewport command: {command:?}");
+            match command {
+                ViewportCommand::Close => {
+                    self.close_requested = true;
+                }
+
+                ViewportCommand::CancelClose => {
+                    self.close_requested = false;
+                }
+
+                &ViewportCommand::Fullscreen(fullscreen) => {
+                    if fullscreen {
+                        self.android_app.set_window_flags(
+                            WindowManagerFlags::FULLSCREEN,
+                            WindowManagerFlags::empty(),
+                        );
+                    } else {
+                        self.android_app.set_window_flags(
+                            WindowManagerFlags::empty(),
+                            WindowManagerFlags::FULLSCREEN,
+                        );
+                    }
+                }
+
+                &ViewportCommand::MousePassthrough(passthrough) => {
+                    if passthrough {
+                        self.android_app.set_window_flags(
+                            WindowManagerFlags::NOT_FOCUSABLE,
+                            WindowManagerFlags::empty(),
+                        );
+                    } else {
+                        self.android_app.set_window_flags(
+                            WindowManagerFlags::empty(),
+                            WindowManagerFlags::NOT_FOCUSABLE,
+                        );
+                    }
+                }
+
+
+
+
+                ViewportCommand::RequestCopy => {
+                    log::info!("copy requested");
+                    self.raw_input.events.push(Event::Copy);
+                    self.request_repaint();
+                }
+                ViewportCommand::RequestCut => {
+                    log::info!("cut requested");
+                    self.raw_input.events.push(Event::Cut);
+                    self.request_repaint();
+                }
+
+                ViewportCommand::RequestPaste => match android_clipboard::get_text() {
+                    Ok(text) => {
+                        self.raw_input.events.push(Event::Paste(text));
+                        self.request_repaint();
+                    }
+                    Err(e) => log::error!("failed to get clipboard text: {e:?}"),
+                },
+
+                _ => log::warn!("unsupported viewport command: {command:?}"),
+            }
+        }
+    }
+
+    fn pixels_per_point(&self) -> f32 {
+        self.raw_input
+            .viewport()
+            .native_pixels_per_point
+            .unwrap_or(1.0)
+    }
+
+    fn update_focus(&mut self, focused: bool) {
+        self.raw_input.focused = focused;
+        self.raw_input.events.push(Event::WindowFocused(focused));
+
+        let viewport_info = self
+            .raw_input
+            .viewports
+            .get_mut(&self.raw_input.viewport_id)
+            .unwrap();
+        viewport_info.focused = Some(focused);
+    }
+
+
+    fn apply_current_config(&mut self) {
+        let config = self.android_app.config();
+
+        self.raw_input.system_theme = match config.ui_mode_night() {
+            UiModeNight::No => Some(Theme::Light),
+            UiModeNight::Yes => Some(Theme::Dark),
+            _ => None,
+        };
+
+        let viewport_info = self
+            .raw_input
+            .viewports
+            .get_mut(&self.raw_input.viewport_id)
+            .unwrap();
+
+
+        viewport_info.native_pixels_per_point =
+            config.density().map(|density| density as f32 / BASE_DPI);
+
+
+        let pixels_per_point = viewport_info.native_pixels_per_point.unwrap_or(1.0);
+
+        if let Some(renderer) = self.graphics_context.renderer() {
+            let [width, height] = renderer.window_size();
+            let width = width as f32 / pixels_per_point;
+            let height = height as f32 / pixels_per_point;
+
+
+
+
+
+
+
+
+
+
+
+
+            self.raw_input.screen_rect = Some(Rect::from_min_size(
+                Pos2::new(0.0, 0.0),
+                vec2(width, height),
+            ));
+        }
+
+        self.app_state.context().style_mut(|style| {
+            style.spacing.window_margin = self.window_margin(pixels_per_point);
+        });
+    }
+
+    fn window_margin(&self, pixels_per_point: f32) -> Margin {
+        let content_rect = self.android_app.content_rect();
+
+        Margin {
+            left: (content_rect.left as f32 / pixels_per_point) as i8,
+            right: 0,
+            top: 127,
+            bottom: 0,
+        }
+    }
+}
+</file>
+
+<file path="src/internal/state.rs">
+use crate::Activity;
+use egui::{Context, FullOutput, RawInput};
+use std::time::Instant;
+
+
+
+
+
+pub(crate) struct AppState<T> {
+    app: T,
+    context: Context,
+    time_started: Instant,
+    now: Instant,
+}
+
+impl<T: Activity> AppState<T> {
+
+    pub(crate) fn new(app: T) -> Self {
+        let now = Instant::now();
+
+        Self {
+            app,
+            context: Context::default(),
+            time_started: now,
+            now,
+        }
+    }
+
+    pub(crate) fn inner(&self) -> &T {
+        &self.app
+    }
+
+    pub(crate) fn inner_mut(&mut self) -> &mut T {
+        &mut self.app
+    }
+
+    pub(crate) fn context(&self) -> &Context {
+        &self.context
+    }
+
+    pub(crate) fn now(&self) -> Instant {
+        self.now
+    }
+
+
+    pub(crate) fn update(&mut self, mut raw_input: RawInput) -> FullOutput {
+        raw_input.time = Some(self.now.duration_since(self.time_started).as_secs_f64());
+
+        self.context.run(raw_input, |context| {
+            self.app.update(context);
+        })
+    }
+
+
+    pub(crate) fn save_memory(&self) -> Option<Vec<u8>> {
+        self.context.memory(bincode::serialize).ok()
+    }
+
+
+    pub(crate) fn load_memory(&mut self, bytes: &[u8]) {
+        match bincode::deserialize(bytes) {
+            Ok(saved_memory) => {
+                self.context.memory_mut(|memory| {
+                    *memory = saved_memory;
+                });
+            }
+            Err(e) => {
+                log::warn!("failed to deserialize memory: {e}");
+            }
+        }
+    }
+
+    pub(crate) fn update_clock(&mut self) {
+        self.now = Instant::now();
+    }
+}
+</file>
+
+<file path="src/activity.rs">
+use egui::{Context, Rect};
+use std::time::Duration;
+
+
+
+
+
+pub trait Activity {
+
+
+
+
+
+
+    fn create() -> Self;
+
+
+
+    fn update(&mut self, ctx: &Context);
+
+
+
+    fn on_content_rect_changed(&mut self, _new_rect: Rect) {
+
+    }
+
+
+    fn on_low_memory(&mut self) {
+
+    }
+
+
+
+
+
+
+    fn min_update_frequency(&self) -> Option<Duration> {
+        None
+    }
+}
+</file>
+
+<file path="src/entrypoint.rs">
+#![doc(hidden)]
+
+use crate::{
+    internal::{bindings::application_info::ApplicationInfo, logging, runner::Runner},
+    Activity,
+};
+
+pub use android_activity::AndroidApp;
+
+
+pub fn main<T: Activity>(android_app: AndroidApp) {
+    let app_info = ApplicationInfo::for_android_app(&android_app).unwrap();
+
+    logging::init(app_info.package_name().unwrap());
+
+    Runner::<T>::new(android_app).run_until_closed();
+
+    log::debug!("app exited cleanly");
+}
+
+
+#[macro_export]
+macro_rules! export {
+    ($app:ty) => {
+        #[doc(hidden)]
+        #[no_mangle]
+        pub fn android_main(android_app: $crate::entrypoint::AndroidApp) {
+            $crate::entrypoint::main::<$app>(android_app);
+        }
+    };
+}
+</file>
+
+<file path="src/lib.rs">
+mod activity;
+mod internal;
+
+pub mod entrypoint;
+pub use activity::Activity;
+pub use egui;
+</file>
+
+<file path="Cargo.toml">
+[package]
+name = "egui-android"
+version = "0.1.0"
+edition = "2021"
+authors = ["Stephen M. Coakley <me@stephencoakley.com>"]
+license = "MIT"
+
+[features]
+default = ["logger"]
+logger = ["dep:android_logger", "dep:log-panics"]
+test = ["ndk/test"]
+
+[dependencies]
+android_clipboard = "0.1"
+bincode = "1.3"
+egui_glow.workspace = true
+jni = "0.21"
+log = "0.4"
+ndk = "0.9"
+raw-window-handle = "0.6"
+webbrowser = "1.0"
+
+[dependencies.egui]
+workspace = true
+features = ["persistence"]
+
+[dependencies.glutin]
+version = "0.32"
+default-features = false
+features = ["egl"]
+
+[dependencies.log-panics]
+version = "2.1"
+optional = true
+
+[target.'cfg(target_os = "android")'.dependencies.android-activity]
+version = "0.6"
+features = ["native-activity"]
+
+[target.'cfg(target_os = "android")'.dependencies.android_logger]
+version = "0.13"
+optional = true
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+]
+
+[workspace.dependencies]
+egui = "0.33"
+egui_glow = "0.33"
+</file>
+
+<file path="mise.toml">
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
+
+[tools]
+cargo-binstall = "latest"
+java = "latest"
+pitchfork = "latest"
+
+[tools.android-sdk]
+version = "19.0"
+dependencies = ["java"]
+
+[tools."cargo:cargo-apk"]
+version = "latest"
+dependencies = ["cargo-binstall"]
+
+[env]
+ANDROID_NDK_VERSION = "27.2.12479018"
+
+[env.ANDROID_NDK_ROOT]
+value = "{{env.ANDROID_HOME}}/ndk/{{env.ANDROID_NDK_VERSION}}"
+tools = true
+
+[env.ANDROID_SDK_ROOT]
+value = "{{env.ANDROID_HOME}}"
+tools = true
+
+[env._.path]
+path = ["{{env.ANDROID_HOME}}/build-tools/35.0.1"]
+tools = true
+
+[tasks]
+sdkmanager-install = "yes | sdkmanager --package_file=sdkman.txt"
+test = "cargo test --features ndk/test"
+
+[tasks."demo:build"]
+run = "cargo apk build -p egui-android-demo"
+depends = ["sdkmanager-install"]
+
+[tasks."demo:run"]
+run = "cargo apk run -p egui-android-demo | tee /dev/tty"
+depends = ["demo:build", "emulator:start"]
+
+[tasks."emulator:start"]
+run = "pitchfork start emulator"
+depends = ["demo:build", "emulator:create"]
+
+[tasks."emulator:stop"]
+run = "pitchfork stop emulator"
+</file>
+
+<file path="pitchfork.toml">
+[daemons.emulator]
+run = "emulator -avd egui-android-demo -netdelay none -netspeed full -no-snapshot -restart-when-stalled -gpu swiftshader_indirect"
+mise = true
+</file>
+
+<file path="rust-toolchain.toml">
+[toolchain]
+channel = "stable"
+targets = ["aarch64-linux-android", "armv7-linux-androideabi", "i686-linux-android", "x86_64-linux-android"]
+</file>
+
+</files>

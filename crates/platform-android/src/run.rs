@@ -48,9 +48,9 @@ use egui_android_runtime::{keyboard_controller_id, Application, KeyboardControll
 
 /// Запустить egui-приложение на Android.
 ///
-/// Использует `GlBackend` (основной).
+/// Использует `NativeBackend` (NativeActivity) с IME-вводом через KeyEvent.
 pub fn run<A: Application>(app: AndroidApp) {
-    run_with_backend::<A>(app, AndroidBackendKind::Gl);
+    run_with_backend::<A>(app, AndroidBackendKind::Native);
 }
 
 /// Запустить egui-приложение с указанным backend'ом.
@@ -125,6 +125,7 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                 log::info!("KeyboardController: показать клавиатуру");
                 show_flag.store(true, Ordering::Relaxed);
                 app_show.show_soft_input(false);
+                log::info!("KeyboardController: показать клавиатуру — вызов завершён");
             }),
             Arc::new(move || {
                 log::info!("KeyboardController: скрыть клавиатуру");

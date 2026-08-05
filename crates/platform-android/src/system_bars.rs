@@ -398,4 +398,88 @@ mod inner {
             );
         }
     }
+
+    /// Показать или скрыть программную клавиатуру (IME) через JNI.
+    ///
+    /// Использует `WindowInsetsControllerCompat.show(ime)` / `hide(ime)`.
+    /// Аналог `show_hide_keyboard_fallible` из sagebind/egui-android.
+    pub fn show_hide_keyboard(
+        vm_ptr: *mut std::ffi::c_void,
+        activity_ptr: *mut std::ffi::c_void,
+        show: bool,
+    ) {
+        if vm_ptr.is_null() || activity_ptr.is_null() {
+            log::error!("show_hide_keyboard: null pointer");
+            return;
+        }
+
+        unsafe {
+            let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+                Ok(jvm) => jvm,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: JavaVM::from_raw: {:?}", e);
+                    return;
+                }
+            };
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: attach_current_thread: {:?}", e);
+                    return;
+                }
+            };
+            let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
+
+            let window = match env
+                .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: getWindow: {:?}", e);
+                    return;
+                }
+            };
+
+            let wic = match env
+                .call_method(
+                    window,
+                    "getInsetsController",
+                    "()Landroid/view/WindowInsetsController;",
+                    &[],
+                )
+                .and_then(|v| v.l())
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: getInsetsController: {:?}", e);
+                    return;
+                }
+            };
+
+            let window_insets_types = match env.find_class("android/view/WindowInsets$Type") {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: find WindowInsets$Type: {:?}", e);
+                    return;
+                }
+            };
+            let ime_type = match env
+                .call_static_method(&window_insets_types, "ime", "()I", &[])
+                .and_then(|v| v.i())
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    log::error!("show_hide_keyboard: get ime type: {:?}", e);
+                    return;
+                }
+            };
+
+            let method = if show { "show" } else { "hide" };
+            let sig = "(I)V";
+            if let Err(e) = env.call_method(&wic, method, sig, &[ime_type.into()]) {
+                log::error!("show_hide_keyboard: {}: {:?}", method, e);
+            }
+        }
+    }
 }

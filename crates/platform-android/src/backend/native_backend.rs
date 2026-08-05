@@ -36,6 +36,9 @@ pub struct NativeBackend {
     insets: Insets,
     dpi: f32,
     should_close: AtomicBool,
+    /// Нужно ли пересоздать EGL surface при изменении размера/контента окна
+    /// (например, при открытии клавиатуры).
+    needs_surface_recreate: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Состояние платформы (insets, theme, clear_color, JNI).
     platform_state: PlatformState,
 }
@@ -50,6 +53,7 @@ impl NativeBackend {
             insets: Insets::default(),
             dpi: 1.0,
             should_close: AtomicBool::new(false),
+            needs_surface_recreate: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             platform_state: PlatformState::new(),
         }
     }
@@ -59,6 +63,28 @@ impl NativeBackend {
         &self.app
     }
 
+    /// Конвертировать KeyEvent в юникод-символ для текстового ввода.
+    ///
+    /// Использует `device_key_character_map` + `KeyCharacterMap::get` (как в sagebind).
+    /// Возвращает символ только при KeyAction::Down.
+    fn key_to_char(
+        app: &AndroidApp,
+        key: &android_activity::input::KeyEvent,
+    ) -> Result<String, ()> {
+        if key.action() != android_activity::input::KeyAction::Down {
+            return Err(());
+        }
+        let device_id = key.device_id();
+        let key_map = app.device_key_character_map(device_id).map_err(|_| ())?;
+        let cma = key_map
+            .get(key.key_code(), key.meta_state())
+            .map_err(|_| ())?;
+        match cma {
+            android_activity::input::KeyMapChar::Unicode(unicode) => Ok(unicode.to_string()),
+            _ => Err(()),
+        }
+    }
+
     /// Слить lifecycle события.
     ///
     /// `timeout` — сколько блокироваться в ожидании событий.
@@ -66,6 +92,7 @@ impl NativeBackend {
     fn drain_lifecycle_events(&mut self, timeout: Option<Duration>) {
         let events = &mut self.events;
         let app = &self.app;
+        let needs_recreate = std::sync::Arc::clone(&self.needs_surface_recreate);
 
         app.poll_events(timeout, |event| match event {
             android_activity::PollEvent::Wake | android_activity::PollEvent::Timeout => {}
@@ -90,6 +117,10 @@ impl NativeBackend {
                     log::info!("NativeBackend: Stop");
                     events.push(BackendEvent::Lifecycle(LifecycleEvent::Stop));
                 }
+                MainEvent::ContentRectChanged { .. } | MainEvent::WindowResized { .. } => {
+                    log::info!("NativeBackend: окно/контент изменился — пересоздадим EGL surface");
+                    needs_recreate.store(true, Ordering::Relaxed);
+                }
                 MainEvent::Destroy { .. } => {
                     log::info!("NativeBackend: Destroy");
                     events.push(BackendEvent::Lifecycle(LifecycleEvent::Destroy));
@@ -109,6 +140,11 @@ impl NativeBackend {
             loop {
                 let has = iter.next(|event| match event {
                     InputEvent::MotionEvent(motion) => {
+                        log::info!(
+                            "NativeBackend: MotionEvent action={:?} pointers={}",
+                            motion.action(),
+                            motion.pointer_count()
+                        );
                         let action = motion.action();
                         let pointer = motion.pointers().next();
                         match (action, pointer) {
@@ -151,17 +187,35 @@ impl NativeBackend {
                         }
                     }
                     InputEvent::KeyEvent(key) => {
-                        if key.action() == KeyAction::Down
-                            && key.key_code() == android_activity::input::Keycode::Back
-                        {
-                            events.push(BackendEvent::Input(BackendInputEvent::Key {
-                                key_code: u32::from(key.key_code()) as i32,
-                                action: BackendKeyAction::Down,
-                            }));
+                        // Back — навигация (проверяем до символов).
+                        if key.key_code() == android_activity::input::Keycode::Back {
+                            if key.action() == KeyAction::Down {
+                                events.push(BackendEvent::Input(BackendInputEvent::Key {
+                                    key_code: u32::from(key.key_code()) as i32,
+                                    action: BackendKeyAction::Down,
+                                }));
+                            }
+                            InputStatus::Handled
+                        } else if let Ok(ch) = Self::key_to_char(&self.app, &key) {
+                            // Текст из программной клавиатуры (IME): KeyEvent с юникод-символом.
+                            log::info!("NativeBackend: клавиша '{}'", ch);
+                            events.push(BackendEvent::TextInput(ch));
                             InputStatus::Handled
                         } else {
+                            log::info!(
+                                "NativeBackend: KeyEvent не символ: code={:?} action={:?}",
+                                key.key_code(),
+                                key.action()
+                            );
                             InputStatus::Unhandled
                         }
+                    }
+                    InputEvent::TextEvent(state) => {
+                        if !state.text.is_empty() {
+                            log::info!("NativeBackend: TextEvent текст='{}'", state.text);
+                            events.push(BackendEvent::TextInput(state.text.clone()));
+                        }
+                        InputStatus::Handled
                     }
                     _ => InputStatus::Unhandled,
                 });
@@ -208,6 +262,9 @@ impl AndroidBackend for NativeBackend {
         self.events.clear();
         self.drain_lifecycle_events(timeout);
         self.drain_input_events();
+        if self.needs_surface_recreate.swap(false, Ordering::Relaxed) {
+            let _ = self.recreate_surface();
+        }
         std::mem::take(&mut self.events)
     }
 
@@ -229,15 +286,34 @@ impl AndroidBackend for NativeBackend {
     }
 
     fn show_keyboard(&mut self) {
-        log::info!("NativeBackend: показать клавиатуру — не поддерживается в NativeActivity");
+        let vm = self.app.vm_as_ptr();
+        let activity = self.app.activity_as_ptr();
+        if vm.is_null() || activity.is_null() {
+            log::info!("NativeBackend: показать клавиатуру — нет JNI-указателей");
+            return;
+        }
+        // Вызываем JNI напрямую (attach_current_thread), как в sagebind.
+        // НЕ через run_on_java_main_thread: показ клавиатуры блокирует Java
+        // главный поток, а run_on_java_main_thread ждёт этот поток → deadlock.
+        crate::system_bars::show_hide_keyboard(vm, activity, true);
     }
 
     fn hide_keyboard(&mut self) {
-        log::info!("NativeBackend: скрыть клавиатуру — не поддерживается в NativeActivity");
+        let vm = self.app.vm_as_ptr();
+        let activity = self.app.activity_as_ptr();
+        if vm.is_null() || activity.is_null() {
+            log::info!("NativeBackend: скрыть клавиатуру — нет JNI-указателей");
+            return;
+        }
+        crate::system_bars::show_hide_keyboard(vm, activity, false);
     }
 
     fn should_close(&self) -> bool {
         self.should_close.load(Ordering::Relaxed)
+    }
+
+    fn supports_ime(&self) -> bool {
+        true
     }
 
     fn window_size(&self) -> (u32, u32) {
