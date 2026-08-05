@@ -63,25 +63,51 @@ impl NativeBackend {
         &self.app
     }
 
-    /// Конвертировать KeyEvent в юникод-символ для текстового ввода.
+    /// Конвертировать KeyEvent в юникод-символ для текстового ввода (как sagebind).
     ///
-    /// Использует `device_key_character_map` + `KeyCharacterMap::get` (как в sagebind).
-    /// Возвращает символ только при KeyAction::Down.
+    /// Добавлена детальная диагностика: логируются код клавиши, знак, meta-состояние
+    /// и результат каждого шага, чтобы понять, почему символы не доходят.
     fn key_to_char(
         app: &AndroidApp,
         key: &android_activity::input::KeyEvent,
     ) -> Result<String, ()> {
+        let code = key.key_code();
         if key.action() != android_activity::input::KeyAction::Down {
+            log::info!(
+                "KBD: код={code:?} не DOWN (action={:?}) — пропускаем",
+                key.action()
+            );
             return Err(());
         }
         let device_id = key.device_id();
-        let key_map = app.device_key_character_map(device_id).map_err(|_| ())?;
-        let cma = key_map
-            .get(key.key_code(), key.meta_state())
-            .map_err(|_| ())?;
+        let key_map = match app.device_key_character_map(device_id) {
+            Ok(km) => km,
+            Err(e) => {
+                log::info!("KBD: device_key_character_map(device_id={device_id}) ОШИБКА: {e:?}");
+                return Err(());
+            }
+        };
+        let meta = key.meta_state();
+        let cma = match key_map.get(code, meta) {
+            Ok(c) => c,
+            Err(e) => {
+                log::info!("KBD: key_map.get({code:?}, meta={meta:?}) ОШИБКА: {e:?}");
+                return Err(());
+            }
+        };
         match cma {
-            android_activity::input::KeyMapChar::Unicode(unicode) => Ok(unicode.to_string()),
-            _ => Err(()),
+            android_activity::input::KeyMapChar::Unicode(unicode) => {
+                log::info!("KBD: {code:?} -> Unicode '{unicode}'");
+                Ok(unicode.to_string())
+            }
+            android_activity::input::KeyMapChar::None => {
+                log::info!("KBD: {code:?} -> KeyMapChar::None (нет символа)");
+                Err(())
+            }
+            other => {
+                log::info!("KBD: {code:?} -> не-Unicode вариант: {:?}", other);
+                Err(())
+            }
         }
     }
 
@@ -187,6 +213,14 @@ impl NativeBackend {
                         }
                     }
                     InputEvent::KeyEvent(key) => {
+                        // Диагностика: видим КАЖДЫЙ KeyEvent от физической клавиатуры и IME.
+                        log::info!(
+                            "KBD: KeyEvent code={:?} action={:?} meta={:?} repeat={}",
+                            key.key_code(),
+                            key.action(),
+                            key.meta_state(),
+                            key.repeat_count(),
+                        );
                         // Back — навигация (проверяем до символов).
                         if key.key_code() == android_activity::input::Keycode::Back {
                             if key.action() == KeyAction::Down {
@@ -197,9 +231,13 @@ impl NativeBackend {
                             }
                             InputStatus::Handled
                         } else if let Ok(ch) = Self::key_to_char(&self.app, &key) {
-                            // Текст из программной клавиатуры (IME): KeyEvent с юникод-символом.
-                            log::info!("NativeBackend: клавиша '{}'", ch);
-                            events.push(BackendEvent::TextInput(ch));
+                            // Текст с физической/символьной клавиатуры (KeyEvent с юникод-символом).
+                            // Весь IME-текст консолидируем через IME-очередь `PlatformState`
+                            // (та же, куда JNI-InputConnection кладёт commitText). Так единый
+                            // путь — ввод попадает в egui через `Event::Text`.
+                            log::info!("NativeBackend: клавиша '{}' -> IME queue", ch);
+                            self.platform_state
+                                .push_ime_cmd(crate::event::ImeCmd::Commit(ch));
                             InputStatus::Handled
                         } else {
                             log::info!(
@@ -211,11 +249,16 @@ impl NativeBackend {
                         }
                     }
                     InputEvent::TextEvent(state) => {
-                        if !state.text.is_empty() {
-                            log::info!("NativeBackend: TextEvent текст='{}'", state.text);
-                            events.push(BackendEvent::TextInput(state.text.clone()));
-                        }
-                        InputStatus::Handled
+                        // GameActivity шлёт IME-текст через TextEvent (InputConnection),
+                        // но мы целиком в цепочке NativeActivity/KeyEvent (как референс
+                        // egui-android): `Event::Text` должен приходить из KeyEvent.
+                        // Пуш TextEvent в egui вызывает зависание вставки, поэтому текст
+                        // здесь НЕ читаем и не пушим — только диагностируем.
+                        log::info!(
+                            "NativeBackend: TextEvent текст='{}' (игнорируем, целимся в KeyEvent)",
+                            state.text
+                        );
+                        InputStatus::Unhandled
                     }
                     _ => InputStatus::Unhandled,
                 });

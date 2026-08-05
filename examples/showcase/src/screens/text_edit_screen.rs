@@ -61,45 +61,48 @@ impl Component for TextEditScreen {
                 // ─── 1. Single-line (Email) ───────────────────────────────
                 Text::new("1. Однострочный (Email):").render(ui, dispatch);
                 let email = remember(ui, "te_email", || String::new());
-                TextEdit::new(email.get().clone())
+                // ВАЖНО: read-guard от `email.get()` держим ТОЛЬКО в локальной
+                // переменной, а не в одном выражении с `.render()`. Если построить
+                // `TextEdit::new(email.get().clone()).on_changed(move |v| email.set(v))...
+                // .render(...)` в одном полном выражении, временный `RwLockReadGuard`
+                // живёт до конца `render()`, а `on_changed -> email.set` берёт write на
+                // тот же std::sync::RwLock -> самоблокировка (self-deadlock).
+                let email_init = email.get().clone();
+                let email = email.clone();
+                TextEdit::new(email_init)
                     .hint("example@mail.com")
                     .single_line()
                     .keyboard_type(KeyboardType::Email)
                     .ime_action(ImeAction::Done)
-                    .on_changed({
-                        let email = email.clone();
-                        move |v| email.set(v.to_owned())
-                    })
+                    .on_changed(move |v| email.set(v.to_owned()))
                     .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 2. Password ─────────────────────────────────────────
                 Text::new("2. Пароль (маска):").render(ui, dispatch);
                 let password = remember(ui, "te_password", || String::new());
-                TextEdit::new(password.get().clone())
+                let password_init = password.get().clone();
+                let password = password.clone();
+                TextEdit::new(password_init)
                     .hint("••••••••")
                     .single_line()
                     .password()
                     .keyboard_type(KeyboardType::Password)
                     .ime_action(ImeAction::Done)
-                    .on_changed({
-                        let password = password.clone();
-                        move |v| password.set(v.to_owned())
-                    })
+                    .on_changed(move |v| password.set(v.to_owned()))
                     .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
                 // ─── 3. Multiline комментарий ───────────────────────────
                 Text::new("3. Многострочный комментарий (max 4 строки):").render(ui, dispatch);
                 let comment = remember(ui, "te_comment", || String::new());
-                TextEdit::new(comment.get().clone())
+                let comment_init = comment.get().clone();
+                let comment = comment.clone();
+                TextEdit::new(comment_init)
                     .hint("Введите комментарий...")
                     .multiline()
                     .max_lines(4)
-                    .on_changed({
-                        let comment = comment.clone();
-                        move |v| comment.set(v.to_owned())
-                    })
+                    .on_changed(move |v| comment.set(v.to_owned()))
                     .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 
@@ -115,18 +118,19 @@ impl Component for TextEditScreen {
                 Text::new("5. Подсказка (placeholder):").render(ui, dispatch);
                 let query = remember(ui, "te_query", || String::new());
                 let last_submit = remember(ui, "te_last_submit", || String::new());
-                TextEdit::new(query.get().clone())
+                // Read-guard от `query.get()` разрываем до построения/рендера,
+                // чтобы `on_changed -> query.set` не самоблокировался на RwLock.
+                let query_init = query.get().clone();
+                let query = query.clone();
+                TextEdit::new(query_init)
                     .hint("Поиск...")
                     .single_line()
                     .keyboard_type(KeyboardType::Text)
                     .ime_action(ImeAction::Search)
-                    .on_changed({
-                        let query = query.clone();
-                        move |v| query.set(v.to_owned())
-                    })
+                    .on_changed(move |v| query.set(v.to_owned()))
                     .on_submit({
-                        // Паттерн 2 из контракта: submit — когда пользователь
-                        // нажал Done (singleline) или потерял фокус.
+                        // `last_submit` остаётся в области видимости для отрисовки
+                        // результата; в замыкание уходит clone.
                         let last = last_submit.clone();
                         move |v| last.set(v.to_owned())
                     })

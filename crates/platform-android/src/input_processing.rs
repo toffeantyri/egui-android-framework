@@ -13,15 +13,121 @@ use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
 use crate::input::InputState;
 use egui_android_runtime::Application;
 
+/// Управляющий запрос от IME, требующий действия главного цикла (вне egui-событий).
+///
+/// Возвращается из [`process_ime_cmd`] для `performEditorAction`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImeOutcome {
+    /// `IME_ACTION_NEXT` — пользователь хочет перейти к следующему TextEdit.
+    Next,
+    /// `IME_ACTION_DONE/SEARCH/GO` — завершить редактирование, скрыть клавиатуру.
+    Done,
+    /// Обычное текстовое событие — специального действия не требуется.
+    None,
+}
+
+/// Преобразовать IME-команду (из Kotlin InputConnection) в egui-события.
+///
+/// Возвращает [`ImeOutcome`] для управляющих действий (`Next`/`Done`), которые
+/// главный цикл (`loop.rs`) обрабатывает отдельно. Текстовые команды
+/// (`Commit`, `Composing`, `DeleteSurrounding`) кладутся в
+/// `input_state.ime_pending` и доставляются в egui на **следующем** кадре
+/// (двухкадровая доставка — защита от реентерабельной вставки внутри кадра).
+///
+/// # Содержительное преобразование
+///
+/// - `ImeCmd::Commit(text)` → `egui::Event::Text(text)` — вставка в фокусный TextEdit
+/// - `ImeCmd::Composing(text)` → `egui::Event::Ime(ImeEvent::Preedit)` — preedit
+/// - `ImeCmd::DeleteSurrounding{before,after}` → пары `Event::Key` (Backspace / Delete)
+///
+/// Никакого `InputEvent::TextEvent` / `setTextInputState` — только InputConnection.
+
+pub fn process_ime_cmd(input_state: &mut InputState, cmd: crate::event::ImeCmd) -> ImeOutcome {
+    use egui::Key;
+
+    // Текстовые события кладём в `ime_pending`, а не в `events`: они будут
+    // доставлены в egui на СЛЕДУЮЩЕМ кадре (см. `InputState::ime_pending` и
+    // шаг 8 рендеринга в `loop.rs`). Это двухкадровая доставка IME-текста,
+    // защищающая от реентерабельных вызовов изнутри активного кадра.
+    let pending = &mut input_state.ime_pending;
+
+    match cmd {
+        crate::event::ImeCmd::Commit(text) => {
+            log::info!("IME: commitText -> {:?} (Event::Text, next frame)", text);
+            pending.push(egui::Event::Text(text));
+            ImeOutcome::None
+        }
+        crate::event::ImeCmd::Composing(text)
+        | crate::event::ImeCmd::ComposingRange {
+            text,
+            start: _,
+            end: _,
+        } => {
+            // Предредактируемый текст composition. Если строка пустая — IME
+            // завершил preedit (active_range = None).
+            log::info!("IME: setComposingText -> {:?} (Preedit, next frame)", text);
+            let active_range_chars = if text.is_empty() {
+                None
+            } else {
+                Some(0..text.chars().count())
+            };
+            pending.push(egui::Event::Ime(egui::ImeEvent::Preedit {
+                text,
+                active_range_chars,
+            }));
+            ImeOutcome::None
+        }
+        crate::event::ImeCmd::Next => {
+            log::info!("IME: IME_ACTION_NEXT");
+            ImeOutcome::Next
+        }
+        crate::event::ImeCmd::Done => {
+            log::info!("IME: IME_ACTION_DONE");
+            ImeOutcome::Done
+        }
+        crate::event::ImeCmd::DeleteSurrounding { before, after } => {
+            log::info!(
+                "IME: deleteSurroundingText before={} after={} (Backspace/Delete, next frame)",
+                before,
+                after
+            );
+            // before → Backspace, after → Delete. Ограничиваем разумным числом.
+            let before = before.clamp(0, 4);
+            let after = after.clamp(0, 4);
+            for _ in 0..before {
+                pending.push(egui::Event::Key {
+                    key: Key::Backspace,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                });
+            }
+            for _ in 0..after {
+                pending.push(egui::Event::Key {
+                    key: Key::Delete,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                });
+            }
+            ImeOutcome::None
+        }
+    }
+}
+
 /// Обработать событие от backend'а (кроме Lifecycle).
 ///
 /// Поддерживаемые события:
 /// - `InputEvent::Touch` — сенсорное событие → `egui::Event::Touch` + `PointerMoved`
 /// - `InputEvent::PointerButton` — нажатие/отпускание → `egui::Event::PointerButton`
 /// - `InputEvent::Key` — клавиша (только AKEYCODE_BACK) → `input_state.back_pressed`
-/// - `TextInput` — IME текст → `egui::Event::Text`
 /// - `InsetsChanged` — логирование (применяется в screen_rect на следующем кадре)
 /// - `DpiChanged` — обновление pixels_per_point
+///
+/// IME-текст НЕ обрабатывается здесь: он приходит через [`process_ime_cmd`]
+/// (InputConnection → JNI → `ImeCmd`), см. модуль `ime_jni`.
 ///
 /// Lifecycle-события обрабатываются в `crate::lifecycle::handle_lifecycle_event`.
 pub fn process_backend_input(
@@ -95,10 +201,6 @@ pub fn process_backend_input(
                 }
             }
         },
-        BackendEvent::TextInput(text) => {
-            log::info!("IME: текстовый ввод: '{}'", &text);
-            input_state.events.push(egui::Event::Text(text));
-        }
         BackendEvent::InsetsChanged(insets) => {
             log::info!("InsetsChanged: {:?}", insets);
             // Insets будут применены через screen_rect в следующем кадре

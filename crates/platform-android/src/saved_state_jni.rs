@@ -53,7 +53,10 @@ use std::sync::OnceLock;
 /// 4. Буфер очищается после каждого чтения (`take_saved_state`)
 ///
 /// Инициализируется в `run_with_backend()` после создания backend'а.
-static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
+///
+/// `pub(crate)` — используется также модулем `ime_jni` (мост InputConnection →
+/// IME-команды в `PlatformState.ime_cmds`).
+pub(crate) static GLOBAL_PLATFORM_STATE: OnceLock<PlatformState> = OnceLock::new();
 
 /// Временный буфер для данных, пришедших через `nativeSetSavedState`
 /// до инициализации `GLOBAL_PLATFORM_STATE`.
@@ -102,7 +105,7 @@ pub fn init_jni_platform_state(state: PlatformState) {
 /// Если буфер пуст — возвращает null.
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeGetSavedState(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: jni::objects::JClass,
 ) -> jbyteArray {
     let state = match GLOBAL_PLATFORM_STATE.get() {
@@ -156,7 +159,7 @@ pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeGetSave
 /// Если bytes == null — пропускаем (первый запуск без saved state).
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeSetSavedState(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: jni::objects::JClass,
     byte_array: jni::objects::JByteArray,
 ) {

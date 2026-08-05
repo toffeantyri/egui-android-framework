@@ -48,9 +48,13 @@ impl<T: Clone + Send + Sync + 'static> RememberState<T> {
     /// Принимает `&self` (не требует `&mut self`).
     /// После установки вызывает `request_repaint()`, чтобы UI обновился.
     pub fn set(&self, new_value: T) {
+        log::info!("RememberState.set: begin, id={:?}", self.id);
         *self.value.write().expect("RememberState: RwLock poisoned") = new_value.clone();
+        log::info!("RememberState.set: write done");
         self.persist(&new_value);
+        log::info!("RememberState.set: persist done");
         self.ctx.request_repaint();
+        log::info!("RememberState.set: end");
     }
 
     /// Изменить значение через замыкание и сохранить результат.

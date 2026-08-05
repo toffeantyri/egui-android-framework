@@ -76,13 +76,19 @@ pub enum ImeAction {
 /// ```
 ///
 /// **Паттерн 2 — локальный `remember` + submit**:
+///
+/// ⚠️ Read-guard от `local.get()` нужно разорвать ДО `render`, иначе:
+/// `TextEdit::new(local.get().clone()).on_changed(move |v| local.set(v))...render()`
+/// в одном полном выражении оставляет временный `RwLockReadGuard` живым на время
+/// `render()`, а `on_changed -> local.set` берёт write на тот же `std::sync::RwLock`
+/// -> самоблокировка (self-deadlock). Безопасно:
+///
 /// ```ignore
 /// let local = remember(ui, "email_input", || String::new());
-/// TextEdit::new(&local.get())
-///     .on_changed({
-///         let local = local.clone();
-///         move |v| local.set(v.to_owned())
-///     })
+/// let init = local.get().clone();   // guard уничтожен здесь
+/// let local = local.clone();
+/// TextEdit::new(init)
+///     .on_changed(move |v| local.set(v.to_owned()))
 ///     .on_submit(move |v| dispatch.dispatch(Msg::Submit(v.to_owned())))
 ///     .render(ui, dispatch);
 /// ```
@@ -420,23 +426,37 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
         // ─── Изменение текста → callback ───
         if response.changed() {
-            // Читаем фактическое значение из буфера (egui писал прямо в него).
+            // Снимаем write-lock с буфера ДО вызова пользовательских callback'ов:
+            // они могут обращаться к `remember`/состоянию, и удержание lock на
+            // буфере поверх того же потока приводило к deadlock на RwLock
+            // (std RwLock не reentrant).
             let new_value: String = text_guard.clone();
+            drop(text_guard);
+            log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_value);
+            log::info!("[TextEdit] buffer cloned: {:?}", &new_value);
             // Приоритет: сначала локальный on_changed, затем on_change_msg.
             if let Some(cb) = &self.on_changed {
+                log::info!("[TextEdit] calling on_changed");
                 cb(&new_value);
+                log::info!("[TextEdit] on_changed done");
             }
             if let Some(cb) = &self.on_changed_msg {
+                log::info!("[TextEdit] calling on_change_msg/dispatch");
                 dispatch.dispatch(cb(new_value));
+                log::info!("[TextEdit] on_change_msg done");
             }
+            log::info!("[TextEdit] changed-block done");
         }
 
-        // ─── Submit (Done / потеря фокуса) ───
+        // ─── Submit (Done / потеря фокуса) — использует text_guard, которого
+        // может уже не быть; перечитываем через блокирующий read. ───
         if response.lost_focus() {
+            let snapshot = buffer_arc.read().expect("TextEdit: буфер poisoned").clone();
             if let Some(cb) = &self.on_submit {
-                cb(&text_guard);
+                cb(&snapshot);
             }
         }
+        log::info!("[TextEdit] render end");
     }
 }
 
@@ -640,6 +660,86 @@ mod tests {
                 f(&mut UiWrapper::new_unconstrained(ui));
             });
         });
+    }
+
+    #[test]
+    fn remember_set_inside_on_changed_works_when_guard_dropped() {
+        // Регрессия deadlock: `email.set()` внутри `on_changed` НЕ должен
+        // самоблокироваться на std::sync::RwLock. Условие — read-guard от
+        // `rem.get()` не должен жить через `render()` в одном полном выражении.
+        //
+        // Анти-паттерн, который ПРИВОДИТ к deadlock:
+        //   TextEdit::new(rem.get().clone()).on_changed(move |v| rem.set(v)...)
+        //       .render(...)  // <- временный guard живёт до end::render -> set -> write
+        // Безопасный паттерн — разорвать guard до построения виджета.
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let fixed_id = egui::Id::new("te_guard_dropped_test");
+
+        // Кадр 1: рендерим пустое поле.
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                let rem = crate::remember(ui, "safe_mem", || String::new());
+                let init = rem.get().clone(); // guard уничтожается здесь
+                let rem = rem.clone();
+                TextEdit::<()>::new(init)
+                    .id(fixed_id)
+                    .on_changed(move |v| rem.set(v.to_owned()))
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Фокусируем и шлём Event::Text, как IME commitText.
+        ctx.memory_mut(|m| m.request_focus(fixed_id));
+        let raw = egui::RawInput {
+            focused: true,
+            events: vec![egui::Event::Text("a".into())],
+            ..Default::default()
+        };
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(fixed_id));
+                let rem = crate::remember(ui, "safe_mem", || String::new());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                TextEdit::<()>::new(init)
+                    .id(fixed_id)
+                    .on_changed(move |v| rem.set(v.to_owned()))
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(raw, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Не задеадлокило — и значение записалось в remember.
+        let mut stored = None;
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                let rem = crate::remember(ui, "safe_mem", || String::new());
+                stored = Some(rem.get().clone());
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+        assert_eq!(
+            stored.as_deref(),
+            Some("a"),
+            "remember должен содержать введённый текст"
+        );
     }
 
     #[test]

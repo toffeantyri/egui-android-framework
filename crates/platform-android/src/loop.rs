@@ -32,6 +32,12 @@ pub struct RunState {
     pub destroy_requested: bool,
     repaint_delay: Duration,
     last_theme: Option<egui_android_platform::SystemTheme>,
+    /// Открыта ли сейчас программная клавиатура.
+    ///
+    /// Синхронизируется с `full_output.platform_output.ime` (как в референсе
+    /// egui-android `handle_platform_output`): показываем/скрываем клавиатуру
+    /// только при переходе состояния, чтобы не спамить JNI-вызовы.
+    keyboard_visible: bool,
 }
 
 impl RunState {
@@ -46,6 +52,7 @@ impl RunState {
             destroy_requested: false,
             repaint_delay: Duration::ZERO,
             last_theme: None,
+            keyboard_visible: false,
         }
     }
 
@@ -96,7 +103,10 @@ impl RunState {
         //     poll_elapsed,
         // );
 
-        let had_events = !backend_events.is_empty() || self.input_state.back_pressed;
+        // Есть ли IME-команды, ожидающие обработки (считаем событиями для этого кадра).
+        let had_ime = platform_state.has_ime_cmds();
+
+        let had_events = !backend_events.is_empty() || self.input_state.back_pressed || had_ime;
 
         // --- Шаги 2-3: обработка событий ---
         for event in backend_events {
@@ -118,6 +128,39 @@ impl RunState {
                         &mut self.input_state,
                         egui_ctx,
                     );
+                }
+            }
+        }
+
+        // --- Шаг 2.5: IME-команды из Kotlin InputConnection ---
+        //
+        // JNI-обработчики (`ime_jni`) кладут `ImeCmd` в потокобезопасную очередь
+        // `PlatformState.ime_cmds`. Здесь забираем очередь и конвертируем команды
+        // в egui-события (`Event::Text`, `Event::Ime(ImeEvent::...)`).
+        // Никакого `TextEvent`/`setTextInputState`/`textInputState()` больше нет.
+        let ime_cmds = platform_state.take_ime_cmds();
+        if !ime_cmds.is_empty() {
+            log::info!("LOOP: IME-команд на этом кадре: {}", ime_cmds.len());
+            for cmd in ime_cmds {
+                use crate::input_processing::ImeOutcome;
+                match crate::input_processing::process_ime_cmd(&mut self.input_state, cmd) {
+                    ImeOutcome::Done => {
+                        // Done / Search / Go — завершить редактирование.
+                        log::info!("LOOP: IME Done — закрываем клавиатуру (EguiImeView)");
+                        crate::ime_jni::hide_soft_input_jni(
+                            platform_state.vm_ptr(),
+                            platform_state.activity_ptr(),
+                        );
+                        self.keyboard_visible = false;
+                    }
+                    ImeOutcome::Next => {
+                        // Next — перейти к следующему TextEdit.
+                        // Полная интеграция (знание порядка полей) — в слое фокуса UI.
+                        // Здесь фиксируем намерение и оставляем фокус (имплементация
+                        // передачи фокуса на следующий текст-ввод добавляется в UiWrapper).
+                        log::info!("LOOP: IME Next — (переключение фокуса на след. поле)");
+                    }
+                    ImeOutcome::None => {}
                 }
             }
         }
@@ -189,7 +232,21 @@ impl RunState {
             // Получаем insets для этого кадра
             let insets = get_current_insets(backend, pp, w, h);
 
-            let events_for_frame = std::mem::take(&mut self.input_state.events);
+            // ── Фомируем события кадра (двухкадровая доставка IME) ──
+            //
+            // `events` — обычные события (touch, pointer) текущего кадра.
+            // IME-текст из `ime_pending` (накопленного в ПРОШЛОМ кадре через
+            // `process_ime_cmd`) лежит в `ime_deliver` и добавляется сюда.
+            // После доставки `ime_pending` текущего кадра переносится в
+            // `ime_deliver` для следующего кадра. Так IME-текст не попадает
+            // в кадр своего прихода и не вызывает реентерабельные
+            // `remember().set()` внутри активного прохода `run_ui`.
+            let mut events_for_frame = std::mem::take(&mut self.input_state.events);
+            events_for_frame.extend(std::mem::take(&mut self.input_state.ime_deliver));
+            std::mem::swap(
+                &mut self.input_state.ime_deliver,
+                &mut self.input_state.ime_pending,
+            );
             let num_events = events_for_frame.len();
 
             let screen_rect = egui::Rect::from_min_size(
@@ -216,6 +273,29 @@ impl RunState {
 
             let full_output = app_instance.frame(egui_ctx, raw_input);
             log::info!("LOOP: frame() вернулся");
+
+            // ── Обработка `platform_output.ime` (как в референсе egui-android) ──
+            //
+            // egui выставляет `platform_output.ime` каждый кадр, пока фокусный
+            // виджет `owns_ime_events(id)` (текстовое поле редактируется).
+            // Показываем/скрываем клавиатуру через невидимый EguiImeView (JNI),
+            // только при переходе состояния.
+            let ime_active = full_output.platform_output.ime.is_some();
+            if ime_active && !self.keyboard_visible {
+                log::info!("LOOP: ime активна — показать клавиатуру (EguiImeView)");
+                crate::ime_jni::show_soft_input_jni(
+                    platform_state.vm_ptr(),
+                    platform_state.activity_ptr(),
+                );
+                self.keyboard_visible = true;
+            } else if !ime_active && self.keyboard_visible {
+                log::info!("LOOP: ime неактивна — скрыть клавиатуру (EguiImeView)");
+                crate::ime_jni::hide_soft_input_jni(
+                    platform_state.vm_ptr(),
+                    platform_state.activity_ptr(),
+                );
+                self.keyboard_visible = false;
+            }
 
             if app_instance.request_destroy() {
                 self.destroy_requested = true;

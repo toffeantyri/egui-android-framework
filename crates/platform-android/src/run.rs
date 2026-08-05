@@ -35,7 +35,6 @@
 
 #![cfg(target_os = "android")]
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,9 +47,11 @@ use egui_android_runtime::{keyboard_controller_id, Application, KeyboardControll
 
 /// Запустить egui-приложение на Android.
 ///
-/// Использует `NativeBackend` (NativeActivity) с IME-вводом через KeyEvent.
+/// Использует `GlBackend` (GameActivity). IME работает через собственный
+/// невидимый `EguiImeView` (InputConnection → JNI → Rust), а не через
+/// штатный IME-протокол GameActivity (TextEvent/setTextInputState).
 pub fn run<A: Application>(app: AndroidApp) {
-    run_with_backend::<A>(app, AndroidBackendKind::Native);
+    run_with_backend::<A>(app, AndroidBackendKind::Gl);
 }
 
 /// Запустить egui-приложение с указанным backend'ом.
@@ -60,9 +61,6 @@ pub fn run<A: Application>(app: AndroidApp) {
 /// - `Native` — NativeActivity (fallback, без IME)
 /// - `Game` — зарезервировано (пока использует Gl)
 pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKind) {
-    // Клон AndroidApp для KeyboardController: компилятор не позволяет заимствовать
-    // его из backend после регистрации в egui Context (нужно 'static для closures).
-    let app_for_keyboard = app.clone();
     let mut app_instance = A::create();
 
     android_logger::init_once(
@@ -95,49 +93,9 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
         }
     };
 
-    // Флаг ime_visible — разделяется с KeyboardController (Arc<AtomicBool>).
-    // GlBackend хранит его, KeyboardController обновляет при show/hide.
-    let ime_flag = if backend.supports_ime() {
-        // Безопасно: supports_ime() → это GlBackend, который хранит Arc<AtomicBool>.
-        // Через unsafe downcast до конкретного типа (единственный вариант без трейт-метода).
-        let gl = unsafe {
-            &*(&*backend as *const dyn AndroidBackend as *const crate::backend::GlBackend)
-        };
-        gl.ime_visible_flag()
-    } else {
-        Arc::new(AtomicBool::new(false))
-    };
-
     let egui_ctx = egui::Context::default();
     egui_ctx.set_pixels_per_point(backend.dpi());
     egui_ctx.set_fonts(egui::FontDefinitions::default());
-
-    // Регистрируем контроллер клавиатуры (IME) в egui Context data.
-    // Виджет TextEdit читает его по событию фокуса и вызывает show()/hide().
-    // Если backend не поддерживает IME (NativeBackend) — пропускаем.
-    if backend.supports_ime() {
-        let app_show = app_for_keyboard.clone();
-        let app_hide = app_for_keyboard.clone();
-        let show_flag = Arc::clone(&ime_flag);
-        let hide_flag = Arc::clone(&ime_flag);
-        let kb = KeyboardController::new(
-            Arc::new(move || {
-                log::info!("KeyboardController: показать клавиатуру");
-                show_flag.store(true, Ordering::Relaxed);
-                app_show.show_soft_input(false);
-                log::info!("KeyboardController: показать клавиатуру — вызов завершён");
-            }),
-            Arc::new(move || {
-                log::info!("KeyboardController: скрыть клавиатуру");
-                hide_flag.store(false, Ordering::Relaxed);
-                app_hide.hide_soft_input(false);
-            }),
-        );
-        egui_ctx.data_mut(|d| {
-            d.insert_temp(keyboard_controller_id(), kb);
-        });
-        log::info!("KeyboardController: зарегистрирован в egui Context");
-    }
 
     let waker = backend.create_waker();
 
@@ -148,6 +106,35 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     // в глобальном OnceLock для доступа из nativeGetSavedState/nativeSetSavedState.
     let platform_state = backend.platform_state().clone();
     crate::saved_state_jni::init_jni_platform_state(platform_state.clone());
+
+    // Регистрируем контроллер клавиатуры (IME) в egui Context data.
+    //
+    // Виджет TextEdit вызывает `KeyboardController.show()/hide()` по фокусу.
+    // Фактическое показ/скрытие клавиатуры НЕ происходит здесь — оно
+    // централизовано в `loop.rs` по `platform_output.ime` (как в референсе).
+    // Замыкания — no-op с логом, чтобы не конфликтовать с основным механизмом.
+    //
+    // Показ через невидимый EguiImeView (JNI), НЕ через штатный IME GameActivity
+    // (InputEvent::TextEvent / setTextInputState).
+    if backend.supports_ime() {
+        let kb = KeyboardController::new(
+            Arc::new(move || {
+                // Управление клавиатурой делает loop.rs по `platform_output.ime`.
+                log::info!(
+                    "KeyboardController.show(): запрошено (управляет loop по platform_output.ime)"
+                );
+            }),
+            Arc::new(move || {
+                log::info!(
+                    "KeyboardController.hide(): запрошено (управляет loop по platform_output.ime)"
+                );
+            }),
+        );
+        egui_ctx.data_mut(|d| {
+            d.insert_temp(keyboard_controller_id(), kb);
+        });
+        log::info!("KeyboardController: зарегистрирован в egui Context");
+    }
 
     // --- Главный цикл ---
     while state.tick(

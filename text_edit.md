@@ -601,319 +601,62 @@ TextEdit::new(&state.query)
 
 ---
 
-## 📋 Оценка задачи
+## 16. План работ (отчёт — IME-ввод и двухкадровая доставка)
 
-**Глобально (зачем):**
-- **Пользователь:** получает возможность вводить текст (login, комментарии, поиск) в Rust-приложениях на Android; клавиатура автоматически появляется при фокусе и скрывается при потере фокуса/по Done.
-- **Разработчик:** получает виджет `TextEdit<M>`, интегрированный в MVI (`.on_changed_msg(|v| Msg::X(v))` → dispatch → `store.update`), взамен ручного управления `egui::TextEdit` и IME.
+> Дополнено после выявления deadlock при вставке текста с нативной клавиатуры.
 
-**Задача (что):** Создать виджет `TextEdit<M>` в `crates/ui/src/widgets/text_edit.rs` — обёртку над `egui::TextEdit` с фокус-управлением клавиатурой, MVI-callback и набором builder-опций, плюс unit-тесты в `widget_tests.rs`. Вторая часть — добавить получение вводимого текста из Android IME в `platform-android`.
+### Диагноз
 
-**Критерии успеха:**
-- [x] `TextEdit` рендерится без паники в singleline/multiline, работает в Column/Row/Stack/LazyColumn
-- [x] `hint`, `password`, `read_only`, `char_limit`, `max_lines`, `keyboard_type`, `ime_action` — все builder-методы работают (layout-эффекты)
-- [x] `on_changed` и `on_changed_msg` вызываются при изменении текста (оба — по приоритету §8)
-- [x] `on_submit` + скрытие клавиатуры при Done / потере фокуса
-- [x] Клавиатура открывается на gained_focus, скрывается на lost_focus; **без паники когда контроллер не зарегистрирован**
-- [x] 15 unit-тестов из §11 в `crates/ui/tests/widget_tests.rs`; `cargo test -p egui-android-ui` зелёный
-- [ ] **Фактический ввод текста с Android-клавиатуры попадает в поле (IME → egui)**
-- [ ] Не изменены `core`, `runtime`, `patches/egui`
+Зависание (self-deadlock) на `RememberState::set` при вставке IME-текста.
 
-**Границы (не делаем):**
-- ❌ Кастомные маски (P2), автодополнение, контекстное меню
-- ❌ `Vec<Message>` из View, `OnceLock` для Sender, polling, `process::exit(0)`
-- ❌ Новый крейт; изменения `cargo`-зависимостей
-- ❌ `TextEdit` generic по `&mut String`
-
----
-
-## 🔴 Критический вопрос перед началом (обязательно к согласованию)
-
-Спека **внутренне противоречива** в части клавиатуры (§3 vs §6):
-
-- **§3 (НЕ изменять):** «`crates/platform-android/*` — клавиатура уже работает через `BackendEvent::TextInput`».
-- **§6:** «Регистрация (platform-android, при инициализации): `run.rs` / `GlBackend::init` вставляет `KeyboardController` в `egui::Context::data()`» и «`platform-android` заполняет callback».
-- **Реальность:** сейчас `show_keyboard`/`hide_keyboard` на бэкенде **существуют, но нигде автоматически не вызываются** по фокусу. `KeyboardController` в `egui::Context::data()` **нигде не зарегистрирован**. `ui` не может импортировать `platform-android` (DAG), значит мост через `Context::data()` — единственный корректный способ, но **без правки `platform-android` (минимум ~5 строк в `run.rs`) клавиатура открываться не будет** — виджет будет «красивой заглушкой».
-
-**Возможные варианты — выберите один:**
-
-| Вариант | Что делаем | Клавиатура по фокусу | Затрагивает platform-android |
-|---|---|---|---|
-| **A** (рекомендую) | `KeyboardController` определяется в `ui`, регистрируется бэкендом в `run.rs`; widget вызывает (`gained_focus`/`lost_focus`); если не зарегистрирован — пропуск без паники | ✅ работает | Да, ~5 строк в `run.rs` |
-| **B** | Только API виджета; `keyboard_type`/`ime_action`/фокус-клавиатура — no-op (P2). `KeyboardController` вообще не регистрируется, widget просто читает `Context::data()` (если кто-то зарегистрирует) | ❌ не в P0 | Нет |
-| **C** | Прокинуть клавиатуру через существующий `Application::show_keyboard()/hide_keyboard()` из runtime (не ломая DAG), и вызвать их из frame'а по фокусу | ✅ | Да, но в `runtime` + `Application` trait (затрагивает `runtime`, что §3 тоже запрещает) |
-
----
-
-**План (порядок — от наиболее инвазивного к наименее):**
-
-| # | Шаг | Инвазивность | Тесты |
-|---|-----|--------------|-------|
-| 1 | **Согласовать решение по клавиатуре** (A/B/C) → если A: регистрация `KeyboardController` в `run.rs` | 🟠 | — |
-| 2 | `text_edit.rs`: enums `KeyboardType`/`ImeAction`, структура `TextEdit<M>`, builder-методы, `KeyboardController` + Id-константа (§6) | 🟡 | юнит (builder config) |
-| 3 | `Widget<M> for TextEdit<M>`: render через `ui.add(egui::TextEdit)`, применять опции, обрабатывать gained/lost focus, changed, Enter/lost_focus→submit | 🟡 | юнит + интеграционные |
-| 4 | Подключение: `widgets/mod.rs` `mod text_edit;` + `pub use`, `lib.rs` в `pub use widgets` | 🟢 | — |
-| 5 | **15 тестов** из §11 в `widget_tests.rs` (с паттерном `with_ui` + проверкой dispatch через `Dispatcher::try_iter`) | 🟢 | юнит |
-| 6 | `cargo test -p egui-android-ui` (+ `cargo check --workspace`) | 🟢 | — |
-
-**Резюме валидации:** задача **реализуема**, виджет-часть (`egui::TextEdit` API, focus-события, MVI-callback) полностью поддерживается текущим egui 0.35 и архитектурой. Единственный блокер — регистрация `KeyboardController`: без пункта в плане (правка `platform-android/run.rs`) клавиатура по фокусу работать не будет, несмотря на §3. Нужно ваше решение по варианту **A/B/C** прежде чем начинать.
-
-Какой вариант выбираете?
-
-**A** Вариант выбрали. ✅ Реализован.
-
----
-
-## 16. Что сделано и что осталось
-
-### ✅ Сделано (P0 — виджет + клавиатура)
-
-| # | Что | Статус |
-|---|-----|--------|
-| 1 | Виджет `TextEdit<M>` в `crates/ui/src/widgets/text_edit.rs` | ✅ |
-| 2 | Builder-методы: hint, single_line, multiline, password, read_only, char_limit, max_lines, on_changed, on_changed_msg, on_submit, keyboard_type, ime_action | ✅ |
-| 3 | `KeyboardController` + `keyboard_controller_id()` в `crates/runtime/src/lib.rs` | ✅ |
-| 4 | Регистрация `KeyboardController` в `run.rs` → клавиатура открывается по gained_focus, скрывается по lost_focus | ✅ |
-| 5 | Обработка фокуса в виджете: при gained_focus — `keyboard_show()`, при lost_focus — `keyboard_hide()`, флаг `keyboard_is_owner` чтобы не спамить | ✅ |
-| 6 | Поле `ime_visible: Arc<AtomicBool>` в `GlBackend` для синхронизации состояния клавиатуры | ✅ |
-| 7 | 15 unit-тестов + интеграционные в `widget_tests.rs` — все проходят | ✅ |
-| 8 | Пример `TextEditScreen` в showcase | ✅ |
-| 9 | Флаг `ime_visible` сбрасывается при скрытии клавиатуры и при потере фокуса (idempotent) | ✅ |
-
-### 🔴 Не сделано — ввод текста с клавиатуры (IME)
-
-**Проблема:** Клавиатура открывается, но набранные символы не попадают в `TextEdit`.
-
-**Устройство:** POCO, Android 16, Snapdragon 8 Elite / Adreno 825.
-**android-activity:** 0.6 (единственная доступная версия).
-
-### Хронология экспериментов с IME-вводом
-
-#### Что работает
-
-- **`TextEvent` приходит** через `input_events_iter()` — нажатие «о» доставляет `TextEvent { text: "о", selection: 1:1 }`.
-- **Текст доходит до egui** через цепочку `BackendEvent::TextInput` → `process_backend_input` → `egui::Event::Text` → `TextEdit` обновляет буфер (`changed=true buffer="о"`).
-
-#### Что НЕ работает (регрессия при попытках)
-
-| # | Попытка | Файл | Результат |
-|---|---------|------|-----------|
-| 1 | `TextEvent` handler: **безусловный** `set_text_input_state(reply)` на каждый `TextEvent` | `gl_backend.rs` | ❌ Спам `IME: reply text=''` каждый кадр → **клавиатура ломается во всей системе** до перезагрузки устройства |
-| 2 | Reply только при `text_changed` (`state.text != ime_accumulated_text`) | `gl_backend.rs` | ❌ На пустой `TextEvent` нет reply → IME сессия не стартует, клавиатура не открывается |
-| 3 | Reply при `text_changed OR first_handshake` (флаг `ime_replied`) | `gl_backend.rs` | ❌ Одного handshake недостаточно |
-| 4 | Reply **всегда**, но emit событий только при `is_new` | `gl_backend.rs` | ❌ Всё равно спам |
-| 5 | `set_text_input_state` в `KeyboardController` перед `show_soft_input` | `run.rs` | ❌ Клавиатура не открывается |
-| 6 | `text_input_state()` (take=false) — чтение текста из GameActivity | `gl_backend.rs` | ❌ Нативный краш `from_raw_parts::precondition_check` в `GameActivity_getTextInputState` |
-
-#### Корневая причина
-
-Вызов `set_text_input_state()` внутри цикла `input_events_iter()` в android-activity 0.6 создаёт бесконечную петлю:
-
+**Root cause:** `std::sync::RwLock` из `remember()` не реентерабелен. Если построить
+```rust,ignore
+TextEdit::new(email.get().clone())
+    .on_changed(move |v| email.set(v.to_owned()))
+    .render(ui, dispatch);
 ```
-reply → GameActivity выставляет флаг textInputState
-     → новый input_events_iter() видит флаг → генерирует TextEvent
-     → мы снова reply → флаг снова взводится → ∞
-```
+в одном полном выражении, временный `RwLockReadGuard` от `email.get()` живёт до конца
+`render()`. Внутри `render()` egui вставляет `Event::Text` → `response.changed()` →
+`on_changed` → `email.set` → `value.write()` на тот же RwLock в том же потоке →
+`write()` блокируется на собственном read-guard → deadlock.
 
-Это делает невозможным связку `TextEvent` + `set_text_input_state` в одном потоке через `input_events_iter()`.
+**Это НЕ двухкадровая/многопроходная проблема egui:** `begin_pass()`/`end_pass()` не
+удерживают `Context` под lock во время рендера виджетов, а `ctx.data_mut`/`request_repaint`
+внутри `run_ui` безопасны. Блокируется именно `value.write()` на std RwLock.
 
-#### Что осталось попробовать
+### Что сделано
 
-| # | Подход | Сложность | Риски |
-|---|--------|-----------|-------|
-| 1 | **JNI-обход**: читать текст через `GameActivity.getTextInputState()` напрямую через JNI-вызов, вне цикла `input_events_iter()`, без `set_text_input_state` | 🟠 средняя | Нужен доступ к `JavaVM`/`JNIEnv`; возможны race conditions |
-| 2 | **Отдельный поток для IME**: вынести коммуникацию с IME в отдельный поток через `mpsc::channel`, чтобы не блокировать рендер-цикл | 🔴 высокая | Многопоточность в Android NDK; JNIEnv привязан к потоку |
-| 3 | **Callback через GameActivity**: использовать `GameActivity_setTextInputCallback` для получения текста без `set_text_input_state` reply-petli | 🟡 низкая | Может не поддерживаться в android-activity 0.6 |
+1. **Двухкадровая доставка IME-текста** (`platform-android`):
+   - `input.rs` — `InputState` получил `ime_pending` / `ime_deliver` (double-buffer).
+   - `input_processing.rs` — `process_ime_cmd` кладёт `Event::Text`/`Preedit`/`Key`
+     в `ime_pending`, а не в `events`.
+   - `loop.rs` — в шаге 8 рендеринга события `ime_deliver` (из прошлого кадра)
+     добавляются в кадр, а `ime_pending` текущего кадра переносится в `ime_deliver`.
+   - Итог: IME-текст доставляется в egui на СЛЕДУЮЩЕМ кадре после прихода, защищая
+     от реентерабельной вставки и busy-loop.
 
+2. **Устранение self-deadlock в примере/документации:**
+   - `examples/showcase/src/screens/text_edit_screen.rs` — read-guard от `remember().get()`
+     разрывается до построения `TextEdit` (`let init = email.get().clone();`).
+   - `crates/ui/src/widgets/text_edit.rs` — док-паттерн 2 обновлён на безопасный вариант.
 
+3. **Тест-регрессия:**
+   - `remember_set_inside_on_changed_works_when_guard_dropped` в `widgets/text_edit.rs`
+     воспроизводит ввод `Event::Text` + `on_changed -> remember.set()` с разрывом guard
+     и подтверждает отсутствие deadlock.
 
+### Правило для пользователей виджета (обязательное)
 
+**Не** вызывайте `remember().set()`/`modify()`, пока жив read-guard от `get()` того же
+состояния в том же полном выражении (особенно через `on_changed`/`on_click_with`).
+Всегда разрывайте guard в отдельную локальную переменную.
 
----
+### Не сделано / следующий шаг
 
-🧩 Общая идея патча
-
-1. НЕ доставлять IME‑текст в draininputevents() — это вызывает deadlock.  
-2. Собирать IME‑текст в очередь pendingimetext.  
-3. После первого рендера egui проверить IME‑фокус (ownsimeevents(id)).  
-4. Если IME‑фокус активен — доставить IME‑текст и выполнить второй рендер.
-
-Это строго соответствует внутренней архитектуре egui и гарантирует отсутствие зависаний.
-
----
-
-🧩 DIFF №1 — backend: gl_backend.rs
-📍 Файл: crates/platform-android/src/backend/gl_backend.rs
-
-1. Добавить очередь IME‑текста в структуру
-
-`diff
- pub struct GlBackend {
-     ...
-+    /// Очередь IME-текста, собранного из TextInputEvent.
-+    pendingimetext: Vec<String>,
- }
-`
-
-Инициализация:
-
-`diff
- impl GlBackend {
-     pub fn new(...) -> Self {
-         Self {
-             ...
-+            pendingimetext: Vec::new(),
-         }
-     }
- }
-`
-
----
-
-2. Исправить обработку TextInputEvent
-
-`diff
- match event {
--    InputEvent::TextInputEvent(text_event) => {
--        let text = textevent.text().tostring();
--        if !text.is_empty() {
--            self.events.push(BackendEvent::TextInput(text)); // ❌ НЕЛЬЗЯ
--        }
--        InputStatus::Handled
--    }
-+    InputEvent::TextInputEvent(text_event) => {
-+        let text = textevent.text().tostring();
-+        if !text.is_empty() {
-+            // ✔ Складываем IME-текст в очередь, доставим позже
-+            self.pendingimetext.push(text);
-+        }
-+        InputStatus::Handled
-+    }
-`
-
----
-
-❗ Почему это обязательно
-
-draininputevents() вызывается до рендера, когда egui:
-
-- ещё не установил IME‑фокус,
-- держит undoer.lock(),
-- не готов принимать IME‑события.
-
-Если доставить IME‑текст здесь → deadlock.
-
----
-
-🧩 DIFF №2 — runtime: eguiandroidruntime
-📍 Файл: crates/egui-android-runtime/src/lib.rs
-
-Найти место, где вызывается:
-
-`rust
-ctx.runui(rawinput, |ctx| {
-    // ваш UI
-});
-`
-
-И заменить на двухфазный рендер:
-
----
-
-1. Первый рендер — egui устанавливает IME‑фокус
-
-`diff
- ctx.runui(rawinput.clone(), |ctx| {
-     // ваш UI
- });
-`
-
----
-
-2. Доставка IME‑текста (если egui готов)
-
-`diff
-+// После первого рендера egui обновил память и мог включить IME-фокус
-+if let Some(id) = self.currenttextedit_id {
-+    let imeready = ctx.memory(|m| m.ownsime_events(id));
-+
-+    if ime_ready {
-+        // ✔ Доставляем IME-текст в egui
-+        for text in backend.pendingimetext.drain(..) {
-+            raw_input.events.push(egui::Event::Text(text));
-+        }
-+    }
-+}
-`
-
----
-
-3. Второй рендер — IME‑текст вставляется в TextEdit
-
-`diff
-+// Второй проход — теперь IME-текст будет корректно вставлен
-+ctx.runui(rawinput, |ctx| {
-+    // UI повторно отрисовывается, TextEdit получает Event::Text
-+});
-`
-
----
-
-❗ Почему это обязательно
-
-egui устанавливает IME‑фокус только после рендера.  
-Если IME‑текст доставить раньше → deadlock.
-
----
-
-🧩 DIFF №3 — TextEdit: сохранить ID поля
-📍 Файл: crates/egui-android-runtime/src/widgets/text_edit.rs
-
-Найти:
-
-`rust
-let fieldid = ui.makepersistent_id(self.id.clone());
-`
-
-Добавить:
-
-`diff
-+runtime.currenttexteditid = Some(fieldid);
-`
-
----
-
-❗ Почему это обязательно
-
-IME‑фокус принадлежит конкретному ID.  
-Без него рантайм не знает, какое поле должно получать IME‑события.
-
----
-
-🧪 Проверка отсутствия багов
-
-| Возможный баг | Статус | Причина |
-|---------------|--------|---------|
-| Потеря первой буквы | ✔ исправлено | IME‑текст доставляется после IME‑фокуса |
-| Зависание на второй букве | ✔ исправлено | IME‑события не приходят во время undoer.lock() |
-| Deadlock внутри egui | ✔ исправлено | IME‑события доставляются в безопасный момент |
-| Краш из-за textinputstate() | ✔ исключён | мы не используем textinputstate() |
-| Двойная вставка текста | ✔ исключена | очередь очищается через drain(..) |
-| Проблемы с несколькими TextEdit | ✔ нет | IME‑фокус всегда принадлежит одному ID |
-| Проблемы с read‑only полями | ✔ нет | IME‑фокус не устанавливается → IME‑текст не доставляется |
-| Проблемы с клавиатурой | ✔ нет | ваш код правильно управляет IME‑владельцем |
-
----
-
-📌 Итог
-
-Этот DIFF:
-
-- полностью устраняет зависание,
-- устраняет потерю первой буквы,
-- делает IME‑ввод стабильным,
-- не вызывает побочных багов,
-- соответствует архитектуре egui,
-- совместим с GameActivity.
+- **Деф-ферред вызов `on_changed` после `run_ui`** — возможно, но потребует переноса
+  логики вызова из `TextEdit::render` на уровень главного цикла и завязки платформы
+  на крейт `ui` (нарушение изоляции `platform` не видит `ui`). Отклонено в пользу
+  устранения перекрытия guard в паттерне использования.
+- Нативный прогон на устройстве/эмуляторе для подтверждения отсутствия deadlock в UI.
 
 ---

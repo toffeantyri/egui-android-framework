@@ -68,8 +68,6 @@ pub enum BackendEvent {
     Lifecycle(LifecycleEvent),
     /// Событие ввода (touch, key).
     Input(InputEvent),
-    /// Текстовый ввод от IME.
-    TextInput(String),
     /// Изменение WindowInsets.
     InsetsChanged(Insets),
     /// Изменение DPI.
@@ -115,4 +113,30 @@ pub enum TouchPhase {
 pub enum KeyAction {
     Down,
     Up,
+}
+
+/// IME-команда, пришедшая из Kotlin `InputConnection` через JNI.
+///
+/// Эти команды генерируются на главном Java-потоке (в `EguiImeView`
+/// InputConnection) и доставляются в главный цикл через потокобезопасную
+/// очередь в `PlatformState`. В цикле они конвертируются в `egui::Event`.
+///
+/// Только здесь получается контент для ввода — никакого использования
+/// `InputEvent::TextEvent` / `setTextInputState` / `textInputState()`.
+#[derive(Debug, Clone)]
+pub enum ImeCmd {
+    /// `commitText(text)` — финальный текст (как правило, одна строка/символ).
+    /// Конвертируется в `egui::Event::Text(text)`.
+    Commit(String),
+    /// `setComposingText(text)` — промежуточный предредактируемый текст (composition).
+    /// Используется для отображения preedit, не ломая буфер.
+    Composing(String),
+    /// `performEditorAction(Next)` — перейти к следующему TextEdit.
+    Next,
+    /// `performEditorAction(Done/Search/Go)` — завершить редактирование, скрыть клавиатуру.
+    Done,
+    /// `deleteSurroundingText(before, after)` — удалить текст вокруг курсора.
+    DeleteSurrounding { before: i32, after: i32 },
+    /// `setComposingText` с диапазоном (start..end) в текущей строке.
+    ComposingRange { text: String, start: i32, end: i32 },
 }

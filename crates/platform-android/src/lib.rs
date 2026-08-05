@@ -108,6 +108,7 @@ pub mod backend;
 pub mod egl_backend;
 pub mod event;
 pub mod graphics;
+pub mod ime_jni;
 pub mod input;
 pub mod input_processing;
 pub mod insets;

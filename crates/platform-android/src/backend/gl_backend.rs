@@ -188,25 +188,6 @@ impl GlBackend {
             }
         }
     }
-
-    /// Обработать текстовый ввод из IME (GameActivity InputConnection).
-    fn drain_text_input(&mut self) {
-        // Получаем состояние текстового ввода из GameActivity
-        // text_input_state() возвращает текущий текст, selection, compose_region
-        let text_state = self.app.text_input_state();
-
-        // Если есть новый текст — отправляем событие
-        if !text_state.text.is_empty() {
-            log::info!(
-                "IME: text='{}' sel={}:{} compose={:?}",
-                text_state.text,
-                text_state.selection.start,
-                text_state.selection.end,
-                text_state.compose_region
-            );
-            self.events.push(BackendEvent::TextInput(text_state.text));
-        }
-    }
 }
 
 impl AndroidBackend for GlBackend {

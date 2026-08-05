@@ -46,6 +46,16 @@ struct PlatformStateInner {
     /// новый процесс → Bundle → JNI → этот буфер → `on_restore_state()`.
     /// Platform хранит только raw bytes, не знает про ChildStack.
     saved_state_buffer: Option<Vec<u8>>,
+
+    // ─── IME-очередь ───────────────────────────────────────────────
+    /// Очередь IME-команд, пришедших из Kotlin InputConnection через JNI.
+    ///
+    /// JNI-обработчики вызываются на главном Java-потоке, а главный цикл
+    /// живёт на потоке `android_main`. Очередь под `Mutex` — безопасный мост:
+    /// JNI пушит команды, цикл забирает их каждый кадр.
+    /// Доступна только на Android (тип `ImeCmd` живёт под `cfg target_os="android"`).
+    #[cfg(target_os = "android")]
+    ime_cmds: Vec<crate::event::ImeCmd>,
 }
 
 impl Default for PlatformStateInner {
@@ -63,6 +73,8 @@ impl Default for PlatformStateInner {
             #[cfg(target_os = "android")]
             activity_ptr: std::ptr::null_mut(),
             saved_state_buffer: None,
+            #[cfg(target_os = "android")]
+            ime_cmds: Vec::new(),
         }
     }
 }
@@ -218,6 +230,31 @@ impl PlatformState {
             log::info!("PlatformState: take_saved_state — буфер очищен");
         }
         result
+    }
+
+    // ─── IME-очередь ───────────────────────────────────────────────
+
+    /// Положить IME-команду в очередь.
+    ///
+    /// Вызывается из JNI-обработчиков (главный Java-поток) и native-backend.
+    /// Может вызываться из любого потока — очередь под `Mutex`.
+    #[cfg(target_os = "android")]
+    pub fn push_ime_cmd(&self, cmd: crate::event::ImeCmd) {
+        self.inner.lock().unwrap().ime_cmds.push(cmd);
+    }
+
+    /// Забрать все накопившиеся IME-команды (очищает очередь).
+    ///
+    /// Вызывается из главного цикла каждый кадр.
+    #[cfg(target_os = "android")]
+    pub fn take_ime_cmds(&self) -> Vec<crate::event::ImeCmd> {
+        std::mem::take(&mut self.inner.lock().unwrap().ime_cmds)
+    }
+
+    /// Есть ли накопившиеся IME-команды.
+    #[cfg(target_os = "android")]
+    pub fn has_ime_cmds(&self) -> bool {
+        !self.inner.lock().unwrap().ime_cmds.is_empty()
     }
 }
 
