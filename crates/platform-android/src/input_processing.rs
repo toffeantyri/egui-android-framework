@@ -53,8 +53,15 @@ pub fn process_ime_cmd(input_state: &mut InputState, cmd: crate::event::ImeCmd) 
 
     match cmd {
         crate::event::ImeCmd::Commit(text) => {
-            log::info!("IME: commitText -> {:?} (Event::Text, next frame)", text);
-            pending.push(egui::Event::Text(text));
+            // Commit финализирует IME-композицию: очищает активный preedit и
+            // вставляет текст в позицию курсора (как IME-финал). Использование
+            // `ImeEvent::Commit` (а не `Event::Text`) корректно завершает preedit,
+            // когда перед commitText пришли setComposingText-кадры.
+            log::info!(
+                "IME: commitText -> {:?} (ImeEvent::Commit, next frame)",
+                text
+            );
+            pending.push(egui::Event::Ime(egui::ImeEvent::Commit(text)));
             ImeOutcome::None
         }
         crate::event::ImeCmd::Composing(text)
@@ -112,6 +119,16 @@ pub fn process_ime_cmd(input_state: &mut InputState, cmd: crate::event::ImeCmd) 
                     modifiers: egui::Modifiers::default(),
                 });
             }
+            ImeOutcome::None
+        }
+        crate::event::ImeCmd::SetSelection { start, end } => {
+            // Пользователь переставил курсор/выделение в IME (например, через
+            // touch или движение стрелками внутри клавиатуры). Полноценное
+            // применение к egui-курсору требует обратного маппинга UTF-16 ->
+            // символьные индексы и программной установки cursor range — в
+            // текущей версии управляемо источником (egui сам обрабатывает
+            // тапы/стрелки). Логируем и ничего не меняем.
+            log::info!("IME: setSelection {start}..{end} (no-op, курсором управляет egui)");
             ImeOutcome::None
         }
     }

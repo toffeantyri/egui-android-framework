@@ -56,6 +56,12 @@ struct PlatformStateInner {
     /// Доступна только на Android (тип `ImeCmd` живёт под `cfg target_os="android"`).
     #[cfg(target_os = "android")]
     ime_cmds: Vec<crate::event::ImeCmd>,
+
+    // ─── Двусторонний InputConnection (ui -> platform) ───────────────────
+    /// Слот состояния редактирования активного TextEdit (текст + курсор в
+    /// UTF-16), публикуемый ui-слой и читаемый JNI-функциями InputConnection.
+    #[cfg(target_os = "android")]
+    ime_editor_state: Option<egui_android_runtime::ImeEditorStateSlot>,
 }
 
 impl Default for PlatformStateInner {
@@ -75,6 +81,8 @@ impl Default for PlatformStateInner {
             saved_state_buffer: None,
             #[cfg(target_os = "android")]
             ime_cmds: Vec::new(),
+            #[cfg(target_os = "android")]
+            ime_editor_state: None,
         }
     }
 }
@@ -255,6 +263,26 @@ impl PlatformState {
     #[cfg(target_os = "android")]
     pub fn has_ime_cmds(&self) -> bool {
         !self.inner.lock().unwrap().ime_cmds.is_empty()
+    }
+
+    // ─── Двусторонний InputConnection (ui -> platform) ──────────────────
+
+    /// Привязать слот состояния редактирования (публикуется ui-слой из
+    /// `TextEdit`, читается JNI-функциями `getTextBeforeCursor` и т.п.).
+    #[cfg(target_os = "android")]
+    pub fn set_ime_editor_state_slot(&self, slot: egui_android_runtime::ImeEditorStateSlot) {
+        self.inner.lock().unwrap().ime_editor_state = Some(slot);
+    }
+
+    /// Снимок текущего состояния редактирования активного поля (копия).
+    #[cfg(target_os = "android")]
+    pub fn ime_editor_state(&self) -> Option<egui_android_runtime::ImeEditorState> {
+        self.inner
+            .lock()
+            .unwrap()
+            .ime_editor_state
+            .as_ref()
+            .and_then(|slot| slot.lock().unwrap().clone())
     }
 }
 

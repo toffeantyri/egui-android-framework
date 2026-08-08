@@ -27,10 +27,24 @@ import android.view.inputmethod.InputConnection
  */
 class EguiImeView(context: Context) : View(context) {
 
+    // Последние inputType/imeOptions, переданные из Rust через EguiActivity.setImeOptions.
+    // Используются в onCreateInputConnection, чтобы после restartInput EditorInfo
+    // отражал тип поля/действия текущего TextEdit (а не хардкод).
+    private var currentInputType: Int = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    private var currentImeOptions: Int = EditorInfo.IME_ACTION_NEXT or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+
     // Фокусируемость в touch-режиме, чтобы IME мог активироваться по тапу.
     init {
         isFocusable = true
         isFocusableInTouchMode = true
+    }
+
+    /**
+     * Обновить EditorInfo-настройки IME (переданы из Rust через JNI).
+     */
+    fun applyOptions(inputType: Int, imeOptions: Int) {
+        currentInputType = inputType
+        currentImeOptions = imeOptions
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
@@ -42,12 +56,9 @@ class EguiImeView(context: Context) : View(context) {
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         super.onCreateInputConnection(outAttrs)
 
-        // Базовые настройки: обычный текст (однострочный), без extract UI.
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_ACTION_NEXT
-
-        // Запрещаем fullscreen-extract (всплывающее окно IME поверх Surface не нужно).
-        outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        // Применяем inputType/imeOptions, переданные из Rust через setImeOptions.
+        outAttrs.inputType = currentInputType
+        outAttrs.imeOptions = currentImeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
 
         // Используем BaseInputConnection — он даёт корректное поведение для
         // редактирования (deleteSurroundingText, commitText) без собственной view.
@@ -89,6 +100,48 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
+        // ─── Обратная связь: Rust владеет текстом поля, IME запрашивает его ───
+        // Эти методы переопределяют BaseInputConnection, чтобы Kotlin возвращал
+        // реальный текст/курсор фокусного поля, хранимый в Rust
+        // (PlatformState.ime_editor_state), а не пустоту из невидимого View.
+
+        override fun getTextBeforeCursor(length: Int, flags: Int): CharSequence? {
+            return nativeGetTextBeforeCursor(length, flags)
+        }
+
+        override fun getTextAfterCursor(length: Int, flags: Int): CharSequence? {
+            return nativeGetTextAfterCursor(length, flags)
+        }
+
+        override fun getSelectedText(flags: Int): CharSequence? {
+            return nativeGetSelectedText(flags)
+        }
+
+        override fun getExtractedText(request: android.view.inputmethod.ExtractedTextRequest?, flags: Int): android.view.inputmethod.ExtractedText? {
+            val text = nativeGetFullText() ?: return null
+            val et = android.view.inputmethod.ExtractedText()
+            et.text = text
+            et.startOffset = 0
+            et.selectionStart = nativeGetSelectionStart()
+            et.selectionEnd = nativeGetSelectionEnd()
+            et.flags = 0
+            return et
+        }
+
+        override fun getCursorCapsMode(reqModes: Int): Int {
+            return nativeGetCursorCapsMode(reqModes)
+        }
+
+        override fun setSelection(start: Int, end: Int): Boolean {
+            nativeSetSelection(start, end)
+            return true
+        }
+
+        override fun setComposingRegion(start: Int, end: Int): Boolean {
+            nativeSetComposingRegion(start, end)
+            return true
+        }
+
         override fun performEditorAction(editorAction: Int): Boolean {
             logIme("performEditorAction", editorAction.toString())
             when (editorAction) {
@@ -116,4 +169,15 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeOnDeleteSurroundingText(beforeLength: Int, afterLength: Int)
     private external fun nativeOnImeActionNext()
     private external fun nativeOnImeActionDone()
+
+    // Двусторонний InputConnection: чтение текста/курсора из Rust (editor_state).
+    private external fun nativeGetTextBeforeCursor(length: Int, flags: Int): String?
+    private external fun nativeGetTextAfterCursor(length: Int, flags: Int): String?
+    private external fun nativeGetSelectedText(flags: Int): String?
+    private external fun nativeGetFullText(): String?
+    private external fun nativeGetCursorCapsMode(reqModes: Int): Int
+    private external fun nativeGetSelectionStart(): Int
+    private external fun nativeGetSelectionEnd(): Int
+    private external fun nativeSetSelection(start: Int, end: Int)
+    private external fun nativeSetComposingRegion(start: Int, end: Int)
 }

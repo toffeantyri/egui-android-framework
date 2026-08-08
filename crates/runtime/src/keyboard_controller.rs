@@ -22,7 +22,8 @@
 //! Это подчиняется event-driven (push) архитектуре: клавиатура управляется
 //! по событию фокуса, никакого polling нет.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// Ключ хранения контроллера клавиатуры в `egui::Context::data()`.
 const KEYBOARD_CONTROLLER_ID: &str = "egui_keyboard_controller";
@@ -31,6 +32,36 @@ const KEYBOARD_CONTROLLER_ID: &str = "egui_keyboard_controller";
 pub type KeyboardShowCallback = Arc<dyn Fn() + Send + Sync>;
 /// Callback для скрытия клавиатуры.
 pub type KeyboardHideCallback = Arc<dyn Fn() + Send + Sync>;
+/// Callback для обновления настроек клавиатуры (inputType + imeOptions, EditorInfo).
+pub type KeyboardOptionsCallback = Arc<dyn Fn(i32, i32) + Send + Sync>;
+
+/// Состояние редактирования активного (`focused`) `TextEdit`, публикуемое
+/// ui-слой в платформу для двустороннего `InputConnection`.
+///
+/// Позиции заданы в **UTF-16 code units** (как Android `InputConnection`), т.к.
+/// JNI-функции Kotlin работают с индексами `int` UTF-16. `Option` означает
+/// отсутствие активной IME-композиции (preedit).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImeEditorState {
+    /// Сфокусировано ли поле (есть ли активный редактор).
+    pub focused: bool,
+    /// Текущий текст поля (клонированный).
+    pub text: String,
+    /// Длина текста в UTF-16 code units.
+    pub text_len: usize,
+    /// Начало выделения в UTF-16 code units.
+    pub selection_start: usize,
+    /// Конец выделения в UTF-16 code units.
+    pub selection_end: usize,
+    /// Начало активной IME-композиции, если есть preedit.
+    pub composing_start: Option<usize>,
+    /// Конец активной IME-композиции, если есть preedit.
+    pub composing_end: Option<usize>,
+}
+
+/// Общее хранилище состояния редактирования: ui-слой пишет, платформа (JNI)
+/// читает. Опционально — заполняется фреймворком, а не пользователем.
+pub type ImeEditorStateSlot = Arc<Mutex<Option<ImeEditorState>>>;
 
 /// Контроллер клавиатуры (IME).
 ///
@@ -45,12 +76,44 @@ pub struct KeyboardController {
     show: KeyboardShowCallback,
     /// Скрыть клавиатуру.
     hide: KeyboardHideCallback,
+    /// Обновить inputType + imeOptions (EditorInfo) через JNI.
+    options: KeyboardOptionsCallback,
+    /// Общее состояние редактора (ui -> platform) для двустороннего InputConnection.
+    editor_state: Option<ImeEditorStateSlot>,
+    /// Флаг «прейти к следующему полю» (Next), выставляется платформой,
+    /// считывается ui-слой (`TextEdit`) для перевода фокуса.
+    move_focus_next: Arc<AtomicBool>,
 }
 
 impl KeyboardController {
-    /// Создать контроллер из двух callbac'ов.
+    /// Создать контроллер из show/hide callbac'ов (без настройки EditorInfo).
+    ///
+    /// `set_options` будет no-op. Для полной поддержки используйте
+    /// [`Self::with_options`].
     pub fn new(show: KeyboardShowCallback, hide: KeyboardHideCallback) -> Self {
-        Self { show, hide }
+        let noop = Arc::new(|_input_type: i32, _ime_options: i32| {}) as KeyboardOptionsCallback;
+        Self {
+            show,
+            hide,
+            options: noop,
+            editor_state: None,
+            move_focus_next: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Создать контроллер с поддержкой обновления EditorInfo (inputType/imeOptions).
+    pub fn with_options(
+        show: KeyboardShowCallback,
+        hide: KeyboardHideCallback,
+        options: KeyboardOptionsCallback,
+    ) -> Self {
+        Self {
+            show,
+            hide,
+            options,
+            editor_state: None,
+            move_focus_next: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// Показать клавиатуру.
@@ -62,11 +125,57 @@ impl KeyboardController {
     pub fn hide(&self) {
         (self.hide)();
     }
+
+    /// Обновить `inputType` + `imeOptions` для IME (EditorInfo).
+    ///
+    /// Вызывается `TextEdit` при `gained_focus` с маппингом
+    /// `KeyboardType`/`ImeAction` -> битовые маски Android. Если контроллер
+    /// создан через `new()` (без options) — no-op.
+    pub fn set_options(&self, input_type: i32, ime_options: i32) {
+        (self.options)(input_type, ime_options);
+    }
+
+    /// Зарегистрировать общее хранилище состояния редактора для двустороннего
+    /// `InputConnection`. Платформа создаёт `Arc<Mutex<Option<ImeEditorState>>>`,
+    /// ui-слой (`TextEdit`) каждый кадр пишет туда текущее состояние фокусного
+    /// поля, а JNI-функции читают его для `getTextBeforeCursor` и т.п.
+    pub fn bind_editor_state(&mut self, slot: ImeEditorStateSlot) {
+        self.editor_state = Some(slot);
+    }
+
+    /// Получить слот состояния редактора (если привязан платформой).
+    pub fn editor_state(&self) -> Option<&ImeEditorStateSlot> {
+        self.editor_state.as_ref()
+    }
+
+    /// Попросить ui-слой перейти к следующему полю (`IME_ACTION_NEXT`).
+    /// Вызывается платформой (loop.rs) при `ImeOutcome::Next`.
+    pub fn request_move_focus_next(&self) {
+        self.move_focus_next.store(true, Ordering::SeqCst);
+    }
+
+    /// Считать и сбросить флаг «перейти к следующему полю».
+    /// Вызывается ui-слой (`TextEdit`) в кадре обработки.
+    pub fn take_move_focus_next(&self) -> bool {
+        self.move_focus_next.swap(false, Ordering::SeqCst)
+    }
 }
 
 /// Получить `Id` для хранения [`KeyboardController`] в `egui::Context::data()`.
 pub fn keyboard_controller_id() -> egui::Id {
     egui::Id::new(KEYBOARD_CONTROLLER_ID)
+}
+
+/// Найти следующее поле ввода после `current` в упорядоченном реестре полей
+/// (порядок отрисовки).
+///
+/// Используется для `IME_ACTION_NEXT`: переход к следующему `TextEdit`.
+/// Порядок задаёт упорядоченный список id полей (`ordered`). Если `current` не
+/// найден в списке или `current` — последнее поле — возвращается `None`
+/// (фокус не переводим; обычно IME закрывает клавиатуру).
+pub fn next_ime_field_after(ordered: &[egui::Id], current: egui::Id) -> Option<egui::Id> {
+    let pos = ordered.iter().position(|&id| id == current)?;
+    ordered.get(pos + 1).copied()
 }
 
 #[cfg(test)]
@@ -119,5 +228,99 @@ mod tests {
             keyboard_controller_id(),
             "Id должен быть стабильным"
         );
+    }
+
+    #[test]
+    fn test_set_options_calls_underlying_callback() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<(i32, i32)>::new()));
+        let calls_clone = Arc::clone(&calls);
+        let kb = KeyboardController::with_options(
+            Arc::new(|| {}),
+            Arc::new(|| {}),
+            Arc::new(move |input_type, ime_options| {
+                calls_clone.lock().unwrap().push((input_type, ime_options));
+            }),
+        );
+        kb.set_options(1, 2);
+        kb.set_options(0x8000, 0x05);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![(1, 2), (0x8000, 0x05)],
+            "set_options должен передать пары (inputType, imeOptions) платформе"
+        );
+    }
+
+    #[test]
+    fn test_set_options_noop_without_with_options() {
+        // Контроллер, созданный через new(), должен молча игнорировать set_options.
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        kb.set_options(0x0b, 0x04); // не должно паниковать
+    }
+
+    #[test]
+    fn test_bind_editor_state_and_publish() {
+        // Двусторонний канал: bind_editor_state привязывает слот, ui-слой пишет,
+        // платформа читает.
+        let mut kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        let slot: ImeEditorStateSlot = Arc::new(Mutex::new(None));
+        kb.bind_editor_state(Arc::clone(&slot));
+
+        // ui-слой публикует состояние.
+        *slot.lock().unwrap() = Some(ImeEditorState {
+            focused: true,
+            text: "привет".to_owned(),
+            text_len: "привет".encode_utf16().count(),
+            selection_start: 3,
+            selection_end: 3,
+            composing_start: None,
+            composing_end: None,
+        });
+
+        // Платформа читает через слот, полученный из контроллера.
+        let read = kb.editor_state().unwrap().lock().unwrap().clone();
+        let state = read.expect("состояние опубликовано");
+        assert!(state.focused);
+        assert_eq!(state.text, "привет");
+        assert_eq!(state.text_len, 6); // 'п','р','и','в','е','т' = 6 UTF-16
+        assert_eq!(state.selection_start, 3);
+    }
+
+    #[test]
+    fn next_ime_field_after_returns_following_field() {
+        let a = egui::Id::new("a");
+        let b = egui::Id::new("b");
+        let c = egui::Id::new("c");
+        let ordered = [a, b, c];
+
+        assert_eq!(next_ime_field_after(&ordered, a), Some(b));
+        assert_eq!(next_ime_field_after(&ordered, b), Some(c));
+        // Последнее поле — следующего нет (фокус не переводим).
+        assert_eq!(next_ime_field_after(&ordered, c), None);
+    }
+
+    #[test]
+    fn next_ime_field_after_handles_missing_and_empty() {
+        let a = egui::Id::new("a");
+        let b = egui::Id::new("b");
+        let ordered = [a, b];
+
+        // current не в реестре — None.
+        assert_eq!(next_ime_field_after(&ordered, egui::Id::new("zzz")), None);
+        // Пустой реестр — None.
+        assert_eq!(next_ime_field_after(&[], a), None);
+        // Один элемент — после него None.
+        assert_eq!(next_ime_field_after(&[a], a), None);
+    }
+
+    #[test]
+    fn move_focus_next_flag_sets_and_clears() {
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        // По умолчанию флаг сброшен.
+        assert!(!kb.take_move_focus_next());
+        // Платформа просит переход.
+        kb.request_move_focus_next();
+        assert!(kb.take_move_focus_next(), "флаг должен установиться");
+        // Повторный take — снова false.
+        assert!(!kb.take_move_focus_next(), "take сбрасывает флаг");
     }
 }

@@ -123,9 +123,9 @@ class EguiActivity : GameActivity() {
     fun setImeOptions(imeOptions: Int, inputType: Int) {
         imeView?.let { v ->
             v.post {
-                val attrs = android.view.inputmethod.EditorInfo()
-                attrs.imeOptions = imeOptions
-                attrs.inputType = inputType
+                // Сохраняем настройки в EguiImeView, чтобы onCreateInputConnection
+                // (вызываемый restartInput) применил их, а не хардкод.
+                v.applyOptions(inputType, imeOptions)
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.restartInput(v)
                 android.util.Log.i(
@@ -134,6 +134,21 @@ class EguiActivity : GameActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Передать прямоугольник курсора (экранные px) для candidate window IME.
+     * Вызывается из Rust каждый кадр, пока IME активна. Храним последнее
+     * значение — IME способно позиционировать свой candidate window.
+     */
+    fun updateCursorRect(left: Int, top: Int, right: Int, bottom: Int) {
+        android.util.Log.i(
+            "EguiActivity",
+            "updateCursorRect: [$left, $top, $right, $bottom]"
+        )
+        // Здесь можно передать IME через InputMethodManager.setImeHint /
+        // updateCursorAnchorInfo — на текущем этапе фиксируем координаты для
+        // отладки и будущего размещения candidate window.
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

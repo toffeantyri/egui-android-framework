@@ -35,7 +35,7 @@
 
 #![cfg(target_os = "android")]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use android_activity::AndroidApp;
@@ -117,7 +117,11 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     // Показ через невидимый EguiImeView (JNI), НЕ через штатный IME GameActivity
     // (InputEvent::TextEvent / setTextInputState).
     if backend.supports_ime() {
-        let kb = KeyboardController::new(
+        // Захватываем клон PlatformState (Send + Sync) и внутри options-callback
+        // читаем свежие указатели JVM/Activity, вызывая set_ime_options_jni для
+        // передачи inputType/imeOptions активного TextEdit в EditorInfo.
+        let kb_platform_state = platform_state.clone();
+        let mut kb = KeyboardController::with_options(
             Arc::new(move || {
                 // Управление клавиатурой делает loop.rs по `platform_output.ime`.
                 log::info!(
@@ -129,11 +133,31 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
                     "KeyboardController.hide(): запрошено (управляет loop по platform_output.ime)"
                 );
             }),
+            Arc::new(move |input_type, ime_options| {
+                // Передаём inputType + imeOptions текущего TextEdit в EditorInfo
+                // невидимого EguiImeView (информируем IME о типе поля/действии).
+                crate::ime_jni::set_ime_options_jni(
+                    kb_platform_state.vm_ptr(),
+                    kb_platform_state.activity_ptr(),
+                    ime_options,
+                    input_type,
+                );
+            }),
         );
+
+        // Двусторонний InputConnection: ui-слой публикует текст/курсор в этот
+        // слот, JNI-функции читают его. Клон слота передаём в PlatformState.
+        let editor_state_slot: egui_android_runtime::ImeEditorStateSlot =
+            Arc::new(Mutex::new(None));
+        kb.bind_editor_state(Arc::clone(&editor_state_slot));
+        platform_state.set_ime_editor_state_slot(editor_state_slot);
+
         egui_ctx.data_mut(|d| {
             d.insert_temp(keyboard_controller_id(), kb);
         });
-        log::info!("KeyboardController: зарегистрирован в egui Context");
+        log::info!(
+            "KeyboardController: зарегистрирован в egui Context (с set_options + editor_state)"
+        );
     }
 
     // --- Главный цикл ---

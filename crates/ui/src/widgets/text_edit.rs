@@ -30,7 +30,9 @@
 use std::sync::{Arc, RwLock};
 
 use egui_android_core::{widget::Widget, UiWrapper};
-use egui_android_runtime::{keyboard_controller_id, Dispatcher, KeyboardController};
+use egui_android_runtime::{
+    keyboard_controller_id, Dispatcher, ImeEditorState, KeyboardController,
+};
 
 /// Тип клавиатуры для IME.
 ///
@@ -405,8 +407,19 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         // а не когда кто-то ещё стреляет `lost_focus`.
         if !self.read_only {
             let is_focused = response.has_focus();
+            // Регистрируем поле в упорядоченном реестре (для IME_ACTION_NEXT),
+            // независимо от фокуса — порядок отрисовки сохраняется между кадрами.
+            ime_field_register(ui, field_id);
 
             if is_focused {
+                // При получении фокуса передаём IME тип клавиатуры и действие
+                // кнопки (KeyboardType/ImeAction) для обновления EditorInfo.
+                if response.gained_focus() {
+                    keyboard_set_options(ui, self.keyboard_type, self.ime_action);
+                }
+                // Пока поле в фокусе — публикуем состояние (текст + курсор в
+                // UTF-16) в платформу для двустороннего InputConnection.
+                keyboard_publish_editor_state(ui, field_id, &*text_guard);
                 // Я — фокусный редактируемый editor. Если ещё не я владею клавиатурой
                 // (вызов idempotent по кадрам, `show_soft_input` не спамится).
                 if !keyboard_is_owner(ui, field_id) {
@@ -418,6 +431,7 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 // Если фокус ушёл на другой TextEdit — он уже стал владельцем (или станет
                 // в этот же кадр), и это условие не сработает.
                 if keyboard_is_owner(ui, field_id) {
+                    keyboard_publish_editor_blur(ui);
                     keyboard_hide(ui);
                     keyboard_clear_owner(ui);
                 }
@@ -479,6 +493,155 @@ fn keyboard_hide(ui: &UiWrapper) {
             kb.hide();
         }
     });
+}
+
+/// Передать `inputType` + `imeOptions` текущего поля в IME (EditorInfo),
+/// если `KeyboardController` поддерживает настройку (платформа-регистратор).
+fn keyboard_set_options(ui: &UiWrapper, keyboard_type: KeyboardType, ime_action: ImeAction) {
+    ui.ctx().data(|d| {
+        if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+            let input_type = android_input_type(keyboard_type);
+            let ime_options = android_ime_options(ime_action);
+            kb.set_options(input_type, ime_options);
+        }
+    });
+}
+
+/// Число UTF-16 code units в первых `n` символах строки.
+///
+/// Android `InputConnection` индексирует текст в UTF-16 code units, тогда как
+/// egui-курсор — в символах (`CharIndex`).
+fn utf16_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// Позиция в UTF-16 code units для символьного индекса `char_index`.
+fn utf16_char_index(text: &str, char_index: usize) -> usize {
+    text.chars().take(char_index).map(|c| c.len_utf16()).sum()
+}
+
+/// Публикация состояния редактирования фокусного поля в платформу
+/// (двусторонний `InputConnection`).
+///
+/// Если `KeyboardController` привязал слот `ImeEditorStateSlot` (платформа),
+/// записываем позицию курсора/выделения в UTF-16 code units. Если поля
+/// не имеют egui-курсора (None) — помещаем курсор в конец текста.
+fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str) {
+    let slot = ui.ctx().data(|d| {
+        d.get_temp::<KeyboardController>(keyboard_controller_id())
+            .and_then(|kb| kb.editor_state().cloned())
+    });
+    let Some(slot) = slot else {
+        return; // платформа не привязала двусторонний канал
+    };
+
+    let text_len = utf16_len(text);
+    let char_range =
+        egui::TextEdit::load_state(ui.ctx(), field_id).and_then(|state| state.cursor.char_range());
+    let (selection_start, selection_end) = match char_range {
+        Some(range) => {
+            let sorted = range.as_sorted_char_range();
+            let start = utf16_char_index(text, sorted.start.0);
+            let end = utf16_char_index(text, sorted.end.0);
+            (start, end)
+        }
+        None => (text_len, text_len),
+    };
+
+    let state = ImeEditorState {
+        focused: true,
+        text: text.to_owned(),
+        text_len,
+        selection_start,
+        selection_end,
+        composing_start: None,
+        composing_end: None,
+    };
+    *slot.lock().unwrap() = Some(state);
+}
+
+/// Сбросить состояние редактора (поле потеряло фокус): IME/InputConnection
+/// больше не должен отдавать текст/курсор.
+fn keyboard_publish_editor_blur(ui: &UiWrapper) {
+    let slot = ui.ctx().data(|d| {
+        d.get_temp::<KeyboardController>(keyboard_controller_id())
+            .and_then(|kb| kb.editor_state().cloned())
+    });
+    if let Some(slot) = slot {
+        *slot.lock().unwrap() = None;
+    }
+}
+
+// ─── Реестр полей ввода (порядок отрисовки) для IME_ACTION_NEXT ──────────
+//
+// Упорядоченный список id редактируемых полей хранится в `Context::data()`.
+// Каждый кадр, пока поле рендерится, оно обеспечивает своё присутствие в
+// списке (без дубликатов). `IME_ACTION_NEXT` переводит фокус к следующему.
+
+/// Id хранения упорядоченного реестра полей ввода в `Context::data()`.
+fn ime_field_registry_id() -> egui::Id {
+    egui::Id::new("egui_ime_field_order")
+}
+
+/// Зарегистрировать поле в упорядоченном реестре (без дубликатов).
+fn ime_field_register(ui: &UiWrapper, field_id: egui::Id) {
+    ui.ctx().data_mut(|d| {
+        let mut list = d
+            .get_temp::<Vec<egui::Id>>(ime_field_registry_id())
+            .unwrap_or_default();
+        if !list.contains(&field_id) {
+            list.push(field_id);
+            d.insert_temp(ime_field_registry_id(), list);
+        }
+    });
+}
+
+// ─── Маппинг KeyboardType/ImeAction в битовые маски Android (EditorInfo) ───
+//
+// Значения совпадают с константами Android SDK:
+// - `android.text.InputType` (TYPE_CLASS_*, TYPE_TEXT_VARIATION_*)
+// - `android.view.inputmethod.EditorInfo` (IME_ACTION_*, IME_FLAG_*)
+// Хранятся здесь (в ui), т.к. `KeyboardType`/`ImeAction` — типы виджета;
+// платформа передаёт числа в Kotlin, где они интерпретируются нативно.
+
+/// `InputType` из `KeyboardType` (базовый класс + вариация).
+pub(crate) fn android_input_type(kt: KeyboardType) -> i32 {
+    use KeyboardType::*;
+    // InputType
+    const TYPE_CLASS_TEXT: i32 = 0x0000_0001;
+    const TYPE_CLASS_NUMBER: i32 = 0x0000_0002;
+    const TYPE_CLASS_PHONE: i32 = 0x0000_0003;
+    const TYPE_TEXT_VARIATION_EMAIL_ADDRESS: i32 = 0x0000_0020;
+    const TYPE_TEXT_VARIATION_URI: i32 = 0x0000_0010;
+    const TYPE_TEXT_VARIATION_PASSWORD: i32 = 0x0000_0080;
+
+    match kt {
+        Email => TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+        Phone => TYPE_CLASS_PHONE,
+        Number => TYPE_CLASS_NUMBER,
+        Password => TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_PASSWORD,
+        Uri => TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_URI,
+        Text => TYPE_CLASS_TEXT,
+    }
+}
+
+/// `imeOptions` (imeAction + флаги) из `ImeAction`.
+pub(crate) fn android_ime_options(action: ImeAction) -> i32 {
+    use ImeAction::*;
+    // EditorInfo.IME_ACTION_*
+    const FLAG_NO_EXTRACT_UI: i32 = 0x1000_0000;
+    const ACTION_GO: i32 = 0x0000_0002;
+    const ACTION_SEARCH: i32 = 0x0000_0003;
+    const ACTION_NEXT: i32 = 0x0000_0005;
+    const ACTION_DONE: i32 = 0x0000_0006;
+
+    let action = match action {
+        Go => ACTION_GO,
+        Search => ACTION_SEARCH,
+        Next => ACTION_NEXT,
+        Done => ACTION_DONE,
+    };
+    action | FLAG_NO_EXTRACT_UI
 }
 
 /// Ключ хранения буфера текста поля в `Context::data()` (по `ui.id()` поля).
@@ -818,6 +981,128 @@ mod tests {
         assert!(
             focused,
             "поле должно быть сфокусировано — egui рисует курсор"
+        );
+    }
+
+    #[test]
+    fn android_input_type_mapping_matches_editorinfo() {
+        // Маппиг `KeyboardType` -> InputType из Android SDK (android.text.InputType).
+        use KeyboardType::*;
+        const TYPE_CLASS_TEXT: i32 = 0x1;
+        const TYPE_CLASS_NUMBER: i32 = 0x2;
+        const TYPE_CLASS_PHONE: i32 = 0x3;
+        const TYPE_TEXT_VARIATION_EMAIL_ADDRESS: i32 = 0x20;
+        const TYPE_TEXT_VARIATION_URI: i32 = 0x10;
+        const TYPE_TEXT_VARIATION_PASSWORD: i32 = 0x80;
+
+        assert_eq!(super::android_input_type(Text), TYPE_CLASS_TEXT);
+        assert_eq!(
+            super::android_input_type(Email),
+            TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        );
+        assert_eq!(super::android_input_type(Phone), TYPE_CLASS_PHONE);
+        assert_eq!(super::android_input_type(Number), TYPE_CLASS_NUMBER);
+        assert_eq!(
+            super::android_input_type(Password),
+            TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_PASSWORD
+        );
+        assert_eq!(
+            super::android_input_type(Uri),
+            TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_URI
+        );
+    }
+
+    #[test]
+    fn android_ime_options_mapping_matches_editorinfo() {
+        // Маппиг `ImeAction` -> imeOptions (android.view.inputmethod.EditorInfo).
+        use ImeAction::*;
+        const FLAG_NO_EXTRACT_UI: i32 = 0x1000_0000;
+        const ACTION_GO: i32 = 0x2;
+        const ACTION_SEARCH: i32 = 0x3;
+        const ACTION_NEXT: i32 = 0x5;
+        const ACTION_DONE: i32 = 0x6;
+
+        assert_eq!(
+            super::android_ime_options(Done),
+            ACTION_DONE | FLAG_NO_EXTRACT_UI
+        );
+        assert_eq!(
+            super::android_ime_options(Next),
+            ACTION_NEXT | FLAG_NO_EXTRACT_UI
+        );
+        assert_eq!(
+            super::android_ime_options(Search),
+            ACTION_SEARCH | FLAG_NO_EXTRACT_UI
+        );
+        assert_eq!(
+            super::android_ime_options(Go),
+            ACTION_GO | FLAG_NO_EXTRACT_UI
+        );
+    }
+
+    #[test]
+    fn utf16_len_counts_surrogate_pairs() {
+        // UTF-16 code units: BMP-символ = 1 unit, эмодзи (суррогатная пара) = 2.
+        assert_eq!(super::utf16_len("abc"), 3);
+        assert_eq!(super::utf16_len("привет"), 6); // кириллица — BMP, 1 unit/символ
+        assert_eq!(super::utf16_len("a😀b"), 4); // 'a'+эмодзи(2)+'b'
+        assert_eq!(super::utf16_len(""), 0);
+    }
+
+    #[test]
+    fn utf16_char_index_maps_char_to_utf16_offset() {
+        // char_index (символы) -> позиция в UTF-16 code units.
+        let text = "a😀b";
+        // 'a'(1), '😀'(2), 'b'(1)
+        assert_eq!(super::utf16_char_index(text, 0), 0);
+        assert_eq!(super::utf16_char_index(text, 1), 1); // после 'a'
+        assert_eq!(super::utf16_char_index(text, 2), 3); // после '😀' (1+2)
+        assert_eq!(super::utf16_char_index(text, 3), 4); // конец (1+2+1)
+                                                         // запрос за границы — берём все символы
+        assert_eq!(super::utf16_char_index(text, 10), 4);
+        assert_eq!(super::utf16_char_index("", 0), 0);
+    }
+
+    #[test]
+    fn ime_field_registry_builds_ordered_list() {
+        // Рендер двух полей должен заполнить упорядоченный реестр [A, B]
+        // (это базис для IME_ACTION_NEXT; сам переход фокуса делает платформа
+        // по `next_ime_field_after` — покрыто в runtime).
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let id_a = egui::Id::new("te_nx_a");
+        let id_b = egui::Id::new("te_nx_b");
+
+        let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+            TextEdit::<()>::new("")
+                .id(id_a)
+                .on_changed(|_| {})
+                .render(ui, &dispatch);
+            TextEdit::<()>::new("")
+                .id(id_b)
+                .on_changed(|_| {})
+                .render(ui, &dispatch);
+        }));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut f = f.borrow_mut().take().unwrap();
+                f(&mut UiWrapper::new_unconstrained(ui));
+            });
+        });
+
+        let registry = ctx
+            .data(|d| d.get_temp::<Vec<egui::Id>>(ime_field_registry_id()))
+            .expect("реестр полей должен существовать");
+        assert_eq!(
+            registry,
+            vec![id_a, id_b],
+            "порядок полей = порядок отрисовки"
+        );
+
+        // И `next_ime_field_after` по этому реестру даёт B от A.
+        assert_eq!(
+            egui_android_runtime::next_ime_field_after(&registry, id_a),
+            Some(id_b)
         );
     }
 }

@@ -17,7 +17,7 @@ use crate::input::InputState;
 use crate::platform_state::PlatformState;
 use egui::viewport::ViewportId;
 use egui_android_platform::Waker;
-use egui_android_runtime::{Application, RuntimeContext};
+use egui_android_runtime::{next_ime_field_after, Application, RuntimeContext};
 
 /// Состояние главного цикла.
 ///
@@ -38,6 +38,9 @@ pub struct RunState {
     /// egui-android `handle_platform_output`): показываем/скрываем клавиатуру
     /// только при переходе состояния, чтобы не спамить JNI-вызовы.
     keyboard_visible: bool,
+    /// Пользователь нажал Next (IME_ACTION_NEXT): после `frame()` перевести
+    /// фокус на следующее поле из реестра.
+    move_focus_next_pending: bool,
 }
 
 impl RunState {
@@ -53,6 +56,7 @@ impl RunState {
             repaint_delay: Duration::ZERO,
             last_theme: None,
             keyboard_visible: false,
+            move_focus_next_pending: false,
         }
     }
 
@@ -154,11 +158,11 @@ impl RunState {
                         self.keyboard_visible = false;
                     }
                     ImeOutcome::Next => {
-                        // Next — перейти к следующему TextEdit.
-                        // Полная интеграция (знание порядка полей) — в слое фокуса UI.
-                        // Здесь фиксируем намерение и оставляем фокус (имплементация
-                        // передачи фокуса на следующий текст-ввод добавляется в UiWrapper).
-                        log::info!("LOOP: IME Next — (переключение фокуса на след. поле)");
+                        // Next — перейти к следующему TextEdit по реестру полей.
+                        // Переход выполняем ПОСЛЕ frame() (вне прохода рендера),
+                        // чтобы не вызывать request_focus посреди активного кадра.
+                        log::info!("LOOP: IME Next — отложенное переключение фокуса");
+                        self.move_focus_next_pending = true;
                     }
                     ImeOutcome::None => {}
                 }
@@ -295,6 +299,38 @@ impl RunState {
                     platform_state.activity_ptr(),
                 );
                 self.keyboard_visible = false;
+            }
+
+            // ── Cursor rect для candidate window IME ──
+            // Пока клавиатура активна, каждый кадр передаём прямоугольник
+            // курсора (экранные px) в Kotlin для позиционирования кандидатов.
+            if let Some(ime_out) = &full_output.platform_output.ime {
+                let c = ime_out.cursor_rect;
+                let to_px = |v: f32| (v * pp).round() as i32;
+                crate::ime_jni::update_cursor_rect_jni(
+                    platform_state.vm_ptr(),
+                    platform_state.activity_ptr(),
+                    to_px(c.min.x),
+                    to_px(c.min.y),
+                    to_px(c.max.x),
+                    to_px(c.max.y),
+                );
+            }
+
+            // ── Переключение фокуса по IME_ACTION_NEXT ──
+            // После frame() контекст свободен, безопасно звать memory_mut.
+            if self.move_focus_next_pending {
+                self.move_focus_next_pending = false;
+                let current = egui_ctx.memory(|m| m.focused());
+                let registry_id = egui::Id::new("egui_ime_field_order");
+                let next = egui_ctx.data(|d| {
+                    let registry = d.get_temp::<Vec<egui::Id>>(registry_id).unwrap_or_default();
+                    current.and_then(|c| next_ime_field_after(&registry, c))
+                });
+                if let Some(id) = next {
+                    egui_ctx.memory_mut(|m| m.request_focus(id));
+                    log::info!("LOOP: IME Next -> фокус на {:?}", id);
+                }
             }
 
             if app_instance.request_destroy() {

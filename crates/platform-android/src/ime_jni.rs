@@ -17,6 +17,7 @@
 use crate::event::ImeCmd;
 use crate::saved_state_jni::GLOBAL_PLATFORM_STATE;
 use jni::objects::JClass;
+use jni::sys::jint;
 use jni::JNIEnv;
 
 /// Общий обработчик: положить команду в `PlatformState.ime_cmds`.
@@ -137,6 +138,175 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnCompos
     push_cmd(ImeCmd::ComposingRange { text, start, end });
 }
 
+// ─── Что читают JNI-функции: слот состояния редактирования ────────────────
+//
+// ui-слой (`TextEdit`) пишет `ImeEditorState` (текст + курсор в UTF-16) в
+// `PlatformState.ime_editor_state` каждый кадр, пока поле в фокусе.
+// Kotlin `EguiImeView.EguiImeInputConnection` запрашивает эти данные через
+// JNI для полноценного `InputConnection` (getTextBeforeCursor и т.п.).
+
+/// Текущее состояние редактирования активного поля (копия).
+fn current_editor_state() -> Option<egui_android_runtime::ImeEditorState> {
+    GLOBAL_PLATFORM_STATE
+        .get()
+        .and_then(|ps| ps.ime_editor_state())
+}
+
+/// Вырезать UTF-16-подстроку из текста в диапазоне [start, end).
+fn utf16_substr(text: &str, start: usize, end: usize) -> String {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let start = start.min(units.len());
+    let end = end.min(units.len()).max(start);
+    String::from_utf16_lossy(&units[start..end])
+}
+
+/// `getTextBeforeCursor(n, flags)` — текст из `n` UTF-16 units до курсора.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetTextBeforeCursor<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+    length: i32,
+    _flags: i32,
+) -> jni::objects::JString<'a> {
+    let s = current_editor_state();
+    let out = match s {
+        Some(st) => {
+            let len = length as usize;
+            let from = st.selection_start.saturating_sub(len);
+            utf16_substr(&st.text, from, st.selection_start)
+        }
+        None => String::new(),
+    };
+    string_to_jstring(&mut env, &out)
+}
+
+/// `getTextAfterCursor(n, flags)` — текст из `n` UTF-16 units после курсора.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetTextAfterCursor<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+    length: i32,
+    _flags: i32,
+) -> jni::objects::JString<'a> {
+    let s = current_editor_state();
+    let out = match s {
+        Some(st) => {
+            let len = length as usize;
+            utf16_substr(
+                &st.text,
+                st.selection_end,
+                st.selection_end.saturating_add(len),
+            )
+        }
+        None => String::new(),
+    };
+    string_to_jstring(&mut env, &out)
+}
+
+/// `getSelectedText(flags)` — выделенный текст поля.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetSelectedText<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+    _flags: i32,
+) -> jni::objects::JString<'a> {
+    let s = current_editor_state();
+    let out = match s {
+        Some(st) => utf16_substr(&st.text, st.selection_start, st.selection_end),
+        None => String::new(),
+    };
+    string_to_jstring(&mut env, &out)
+}
+
+/// `getTextLength()` — длина текста в UTF-16 units.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetTextLength(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    current_editor_state().map_or(0, |st| st.text_len as jint)
+}
+
+/// Преобразовать Rust String в JNI строку.
+fn string_to_jstring<'a>(env: &mut JNIEnv<'a>, s: &str) -> jni::objects::JString<'a> {
+    match env.new_string(s) {
+        Ok(js) => js,
+        Err(e) => {
+            log::error!("IME-JNI: не удалось создать JString: {:?}", e);
+            jni::objects::JString::from(jni::objects::JObject::null())
+        }
+    }
+}
+
+// ─── Ещё read-функции InputConnection + setSelection ─────────────────────
+
+/// `getFullText()` — весь текст активного поля (для `getExtractedText`).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetFullText<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+) -> jni::objects::JString<'a> {
+    let out = current_editor_state().map_or(String::new(), |st| st.text.clone());
+    string_to_jstring(&mut env, &out)
+}
+
+/// `getCursorCapsMode(reqModes)` — всегда 0 (поле не знает о регистре; IME
+/// сам решает по inputType).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetCursorCapsMode(
+    _env: JNIEnv,
+    _class: JClass,
+    _req_modes: i32,
+) -> jint {
+    0
+}
+
+/// `getSelectionStart()` — позиция начала выделения (UTF-16), для getExtractedText.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetSelectionStart(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    current_editor_state().map_or(0, |st| st.selection_start as jint)
+}
+
+/// `getSelectionEnd()` — позиция конца выделения (UTF-16).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetSelectionEnd(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    current_editor_state().map_or(0, |st| st.selection_end as jint)
+}
+
+/// `setSelection(start, end)` — IME просит передвинуть курсор/выделение.
+/// Пушим `ImeCmd::SetSelection`; применение к egui-курсору на текущий момент
+/// no-op (логируется) — курсором управляет сам egui (тапы/стрелки).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetSelection(
+    _env: JNIEnv,
+    _class: JClass,
+    start: i32,
+    end: i32,
+) {
+    log::info!("IME-JNI: setSelection {start}..{end}");
+    push_cmd(ImeCmd::SetSelection { start, end });
+}
+
+/// `setComposingRegion(start, end)` — IME помечает диапазон композиции
+/// (candidate window). Сам preedit уже отображается через `setComposingText`;
+/// здесь фиксируем регион для будущей публикации в `ImeEditorState.composing_*`.
+/// На текущий момент — no-op с логом (диапазон до конца не привязан к egui).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetComposingRegion(
+    _env: JNIEnv,
+    _class: JClass,
+    start: i32,
+    end: i32,
+) {
+    log::info!("IME-JNI: setComposingRegion {start}..{end}");
+}
+
 // ─── Rust → Kotlin: показ/скрытие клавиатуры через EguiImeView ───────────
 //
 // Главный цикл (`loop.rs`) вызывает эти функции вместо `backend.show_keyboard()`
@@ -184,6 +354,47 @@ pub fn set_ime_options_jni(
             &[
                 jni::objects::JValue::Int(ime_options),
                 jni::objects::JValue::Int(input_type),
+            ],
+        );
+    }
+}
+
+/// Передать прямоугольник курсор (экранные px) в Kotlin для candidate window
+/// и позиционирования кандидатов IME. Вызывается главным циклом каждый кадр,
+/// пока IME активна (cursor_rect из `platform_output.ime`).
+///
+/// `left/top/right/bottom` — пиксели экрана (px), вертикально ориентированы
+/// на физический размер окна (уже умножены на `pixels_per_point` в loop).
+pub fn update_cursor_rect_jni(
+    vm_ptr: *mut std::ffi::c_void,
+    activity_ptr: *mut std::ffi::c_void,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) {
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+            Ok(j) => j,
+            Err(_) => return,
+        };
+        let mut env = match jvm.attach_current_thread() {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        let activity = jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject);
+        let _ = env.call_method(
+            &activity,
+            "updateCursorRect",
+            "(IIII)V",
+            &[
+                jni::objects::JValue::Int(left),
+                jni::objects::JValue::Int(top),
+                jni::objects::JValue::Int(right),
+                jni::objects::JValue::Int(bottom),
             ],
         );
     }

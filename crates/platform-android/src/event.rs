@@ -126,7 +126,7 @@ pub enum KeyAction {
 #[derive(Debug, Clone)]
 pub enum ImeCmd {
     /// `commitText(text)` — финальный текст (как правило, одна строка/символ).
-    /// Конвертируется в `egui::Event::Text(text)`.
+    /// Конвертируется в `egui::ImeEvent::Commit(text)` — финализирует IME-композицию.
     Commit(String),
     /// `setComposingText(text)` — промежуточный предредактируемый текст (composition).
     /// Используется для отображения preedit, не ломая буфер.
@@ -139,4 +139,9 @@ pub enum ImeCmd {
     DeleteSurrounding { before: i32, after: i32 },
     /// `setComposingText` с диапазоном (start..end) в текущей строке.
     ComposingRange { text: String, start: i32, end: i32 },
+    /// `setSelection(start, end)` — пользователь переставил курсор/выделение.
+    /// Позиции — в UTF-16 code units (как Android). В текущей версии полностью
+    /// применить к egui-курсору сложно; инкапсулируется как no-op (см.
+    /// `process_ime_cmd`).
+    SetSelection { start: i32, end: i32 },
 }

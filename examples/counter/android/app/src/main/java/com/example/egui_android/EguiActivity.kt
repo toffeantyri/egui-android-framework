@@ -63,6 +63,10 @@ class EguiActivity : GameActivity() {
         logSavedState("onCreate", savedBytes)
     }
 
+    /**
+     * Создать (лениво) невидимый IME-View и добавить его поверх контента.
+     * View не рисует ничего (`onDraw` пуст), поэтому не мешает GL-рендеру в Surface.
+     */
     private fun ensureImeView(): EguiImeView {
         imeView?.let { return it }
 
@@ -77,6 +81,10 @@ class EguiActivity : GameActivity() {
         return view
     }
 
+    /**
+     * Показать клавиатуру: дать фокус невидимому IME-View и вызвать
+     * `showSoftInput`. Вызывается из Rust (через JNI) при активации TextEdit.
+     */
     fun showSoftInputForIme() {
         val view = ensureImeView()
         android.util.Log.i("egui-showcase", "Kotlin: showSoftInputForIme begin")
@@ -93,6 +101,10 @@ class EguiActivity : GameActivity() {
         android.util.Log.i("egui-showcase", "Kotlin: showSoftInputForIme scheduled")
     }
 
+    /**
+     * Скрыть клавиатуру. Вызывается из Rust (через JNI) при завершении
+     * редактирования (Done) или потере фокуса TextEdit.
+     */
     fun hideSoftInputForIme() {
         val view = imeView
         if (view == null) {
@@ -104,12 +116,16 @@ class EguiActivity : GameActivity() {
         android.util.Log.i("EguiActivity", "hideSoftInputForIme: скрыта")
     }
 
+    /**
+     * Обновить imeOptions (Next/Done) и inputType для текущего TextEdit.
+     * Вызывается из Rust при смене активного поля.
+     */
     fun setImeOptions(imeOptions: Int, inputType: Int) {
         imeView?.let { v ->
             v.post {
-                val attrs = android.view.inputmethod.EditorInfo()
-                attrs.imeOptions = imeOptions
-                attrs.inputType = inputType
+                // Сохраняем настройки в EguiImeView, чтобы onCreateInputConnection
+                // (вызываемый restartInput) применил их, а не хардкод.
+                v.applyOptions(inputType, imeOptions)
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.restartInput(v)
                 android.util.Log.i(
@@ -120,9 +136,25 @@ class EguiActivity : GameActivity() {
         }
     }
 
+    /**
+     * Передать прямоугольник курсора (экранные px) для candidate window IME.
+     * Вызывается из Rust каждый кадр, пока IME активна. Храним последнее
+     * значение — IME способно позиционировать свой candidate window.
+     */
+    fun updateCursorRect(left: Int, top: Int, right: Int, bottom: Int) {
+        android.util.Log.i(
+            "EguiActivity",
+            "updateCursorRect: [$left, $top, $right, $bottom]"
+        )
+        // Здесь можно передать IME через InputMethodManager.setImeHint /
+        // updateCursorAnchorInfo — на текущем этапе фиксируем координаты для
+        // отладки и будущего размещения candidate window.
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
 
+        // Сохраняем состояние для следующего запуска после kill
         val bytes = nativeGetSavedState()
         if (bytes != null) {
             outState.putByteArray(SAVED_STATE_KEY, bytes)
@@ -141,6 +173,8 @@ class EguiActivity : GameActivity() {
             android.util.Log.i("EguiActivity", "$method: saved_state = null")
         }
     }
+
+    // ─── JNI-методы (реализованы в Rust) ─────────────────────────
 
     private external fun nativeGetSavedState(): ByteArray?
     private external fun nativeSetSavedState(bytes: ByteArray?)
