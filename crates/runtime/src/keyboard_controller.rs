@@ -23,7 +23,7 @@
 //! по событию фокуса, никакого polling нет.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Ключ хранения контроллера клавиатуры в `egui::Context::data()`.
 const KEYBOARD_CONTROLLER_ID: &str = "egui_keyboard_controller";
@@ -83,6 +83,16 @@ pub struct KeyboardController {
     /// Флаг «прейти к следующему полю» (Next), выставляется платформой,
     /// считывается ui-слой (`TextEdit`) для перевода фокуса.
     move_focus_next: Arc<AtomicBool>,
+    /// Владелец клавиатуры (Id фокусного поля). Хранится тут (а не в
+    /// `egui::Context::data`), чтобы ui-слой мог читать/писать его БЕЗ
+    /// `ctx.data_mut` внутри render (reentrant write-lock на Context -> dead).
+    owner_slot: Arc<RwLock<Option<egui::Id>>>,
+    /// Упорядоченный реестр полей ввода (порядок отрисовки). Тоже вне
+    /// `Context::data`, чтобы избежать `data_mut` в render.
+    registry_slot: Arc<RwLock<Vec<egui::Id>>>,
+    /// Буферы текста каждого поля — `Arc<RwLock<String>>` по `egui::Id`.
+    /// Хранятся тут (а не в `Context::data`) — инициализация без `data_mut` внутри render.
+    text_buffers: Arc<Mutex<std::collections::HashMap<egui::Id, Arc<RwLock<String>>>>>,
 }
 
 impl KeyboardController {
@@ -98,6 +108,9 @@ impl KeyboardController {
             options: noop,
             editor_state: None,
             move_focus_next: Arc::new(AtomicBool::new(false)),
+            owner_slot: Arc::new(RwLock::new(None)),
+            registry_slot: Arc::new(RwLock::new(Vec::new())),
+            text_buffers: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -113,6 +126,9 @@ impl KeyboardController {
             options,
             editor_state: None,
             move_focus_next: Arc::new(AtomicBool::new(false)),
+            owner_slot: Arc::new(RwLock::new(None)),
+            registry_slot: Arc::new(RwLock::new(Vec::new())),
+            text_buffers: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -146,6 +162,27 @@ impl KeyboardController {
     /// Получить слот состояния редактора (если привязан платформой).
     pub fn editor_state(&self) -> Option<&ImeEditorStateSlot> {
         self.editor_state.as_ref()
+    }
+
+    /// Слот владельца клавиатуры (Id фокусного поля).
+    pub fn owner_slot(&self) -> &Arc<RwLock<Option<egui::Id>>> {
+        &self.owner_slot
+    }
+
+    /// Слот упорядоченного реестра полей ввода.
+    pub fn registry_slot(&self) -> &Arc<RwLock<Vec<egui::Id>>> {
+        &self.registry_slot
+    }
+
+    /// Получить или создать буфер текста для поля `id`.
+    ///
+    /// Возвращает `Arc<RwLock<String>>` — разделяемое, мутабельное хранилище
+    /// текста поля, не требующее `ctx.data_mut` внутри render.
+    pub fn text_buffer(&self, id: egui::Id) -> Arc<RwLock<String>> {
+        let mut map = self.text_buffers.lock().unwrap();
+        map.entry(id)
+            .or_insert_with(|| Arc::new(RwLock::new(String::new())))
+            .clone()
     }
 
     /// Попросить ui-слой перейти к следующему полю (`IME_ACTION_NEXT`).

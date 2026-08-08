@@ -319,26 +319,32 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         //
         // `egui::TextEdit` вставляет введённое прямо в переданный `&mut String`,
         // и это значение нужно хранить стабильно между кадрами (иначе текст
-        // «пропадает»). Буфер живёт в `Context::data()` и должен ключеваться по
-        // ТОМУ ЖЕ id, что использует само поле. egui выбирает id поля как
-        // `ui.next_auto_id()` (не `ui.id()`), поэтому мы заранее берём `field_id`
-        // и передаём его и в буфер, и в `egui::TextEdit` через `.id(field_id)`,
-        // чтобы ключи совпадали и не коллизировали между полями на одном экране.
+        // «пропадает»). Буфер теперь хранится в `KeyboardController.text_buffers`
+        // (`Arc<Mutex<HashMap<Id, Arc<RwLock<String>>>>>`), чтобы инициализация
+        // НЕ вызывала `ctx.data_mut` внутри render (reentrant write-lock на
+        // Context -> deadlock).
         let field_id = self.field_id.unwrap_or_else(|| ui.next_auto_id());
-        let ctx = ui.ctx().clone();
-        let storage_key = field_buffer_key(field_id);
 
-        let buffer_arc: Arc<RwLock<String>> = ctx
-            .data(|d| d.get_temp::<Arc<RwLock<String>>>(storage_key))
+        let buffer_arc: Arc<RwLock<String>> = ui
+            .ctx()
+            .data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| kb.text_buffer(field_id))
+            })
             .unwrap_or_else(|| {
-                let buf = Arc::new(RwLock::new(self.value.clone()));
-                ctx.data_mut(|d| {
-                    d.insert_temp(storage_key, Arc::clone(&buf));
-                });
-                buf
+                // Если контроллер не зарегистрирован (десктоп/тесты) — создаём
+                // буфер локально (не в контексте).
+                Arc::new(RwLock::new(self.value.clone()))
             });
 
         let mut text_guard = buffer_arc.write().expect("TextEdit: буфер poisoned");
+
+        // При первом создании буфер пуст — записываем начальное значение
+        // виджета (если задано). Это заменяет старую инициализацию через
+        // `ctx.data_mut`.
+        if text_guard.is_empty() && !self.value.is_empty() {
+            *text_guard = self.value.clone();
+        }
 
         let mut te = if self.single_line {
             egui::TextEdit::singleline(&mut *text_guard)
@@ -438,25 +444,24 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             }
         }
 
+        // Снимаем write-lock с буфера — теперь он только читается в changed/submit.
+        drop(text_guard);
+
         // ─── Изменение текста → callback ───
         if response.changed() {
-            // Снимаем write-lock с буфера ДО вызова пользовательских callback'ов:
-            // они могут обращаться к `remember`/состоянию, и удержание lock на
-            // буфере поверх того же потока приводило к deadlock на RwLock
-            // (std RwLock не reentrant).
-            let new_value: String = text_guard.clone();
-            drop(text_guard);
-            log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_value);
-            log::info!("[TextEdit] buffer cloned: {:?}", &new_value);
+            // write-lock уже снят (drop выше). Читаем изменённое значение через read.
+            let new_text: String = buffer_arc.read().expect("TextEdit: буфер poisoned").clone();
+            log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_text);
+            log::info!("[TextEdit] buffer cloned: {:?}", &new_text);
             // Приоритет: сначала локальный on_changed, затем on_change_msg.
             if let Some(cb) = &self.on_changed {
                 log::info!("[TextEdit] calling on_changed");
-                cb(&new_value);
+                cb(&new_text);
                 log::info!("[TextEdit] on_changed done");
             }
             if let Some(cb) = &self.on_changed_msg {
                 log::info!("[TextEdit] calling on_change_msg/dispatch");
-                dispatch.dispatch(cb(new_value));
+                dispatch.dispatch(cb(new_text));
                 log::info!("[TextEdit] on_change_msg done");
             }
             log::info!("[TextEdit] changed-block done");
@@ -498,6 +503,7 @@ fn keyboard_hide(ui: &UiWrapper) {
 /// Передать `inputType` + `imeOptions` текущего поля в IME (EditorInfo),
 /// если `KeyboardController` поддерживает настройку (платформа-регистратор).
 fn keyboard_set_options(ui: &UiWrapper, keyboard_type: KeyboardType, ime_action: ImeAction) {
+    log::info!("[TextEdit] set_options enter");
     ui.ctx().data(|d| {
         if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
             let input_type = android_input_type(keyboard_type);
@@ -505,6 +511,7 @@ fn keyboard_set_options(ui: &UiWrapper, keyboard_type: KeyboardType, ime_action:
             kb.set_options(input_type, ime_options);
         }
     });
+    log::info!("[TextEdit] set_options exit");
 }
 
 /// Число UTF-16 code units в первых `n` символах строки.
@@ -527,11 +534,13 @@ fn utf16_char_index(text: &str, char_index: usize) -> usize {
 /// записываем позицию курсора/выделения в UTF-16 code units. Если поля
 /// не имеют egui-курсора (None) — помещаем курсор в конец текста.
 fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str) {
+    log::info!("[TextEdit] publish_editor_state enter {:?}", field_id);
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
             .and_then(|kb| kb.editor_state().cloned())
     });
     let Some(slot) = slot else {
+        log::info!("[TextEdit] publish_editor_state: нет слота");
         return; // платформа не привязала двусторонний канал
     };
 
@@ -558,11 +567,13 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str)
         composing_end: None,
     };
     *slot.lock().unwrap() = Some(state);
+    log::info!("[TextEdit] publish_editor_state exit {:?}", field_id);
 }
 
 /// Сбросить состояние редактора (поле потеряло фокус): IME/InputConnection
 /// больше не должен отдавать текст/курсор.
 fn keyboard_publish_editor_blur(ui: &UiWrapper) {
+    log::info!("[TextEdit] publish_editor_blur enter");
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
             .and_then(|kb| kb.editor_state().cloned())
@@ -570,6 +581,7 @@ fn keyboard_publish_editor_blur(ui: &UiWrapper) {
     if let Some(slot) = slot {
         *slot.lock().unwrap() = None;
     }
+    log::info!("[TextEdit] publish_editor_blur exit");
 }
 
 // ─── Реестр полей ввода (порядок отрисовки) для IME_ACTION_NEXT ──────────
@@ -578,20 +590,17 @@ fn keyboard_publish_editor_blur(ui: &UiWrapper) {
 // Каждый кадр, пока поле рендерится, оно обеспечивает своё присутствие в
 // списке (без дубликатов). `IME_ACTION_NEXT` переводит фокус к следующему.
 
-/// Id хранения упорядоченного реестра полей ввода в `Context::data()`.
-fn ime_field_registry_id() -> egui::Id {
-    egui::Id::new("egui_ime_field_order")
-}
-
 /// Зарегистрировать поле в упорядоченном реестре (без дубликатов).
+///
+/// Реестр хранится в `KeyboardController.registry_slot` (Arc<RwLock>) —
+/// мутация без `ctx.data_mut` в render (reentrant write-lock -> dead).
 fn ime_field_register(ui: &UiWrapper, field_id: egui::Id) {
-    ui.ctx().data_mut(|d| {
-        let mut list = d
-            .get_temp::<Vec<egui::Id>>(ime_field_registry_id())
-            .unwrap_or_default();
-        if !list.contains(&field_id) {
-            list.push(field_id);
-            d.insert_temp(ime_field_registry_id(), list);
+    ui.ctx().data(|d| {
+        if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+            let mut list = kb.registry_slot().write().unwrap();
+            if !list.contains(&field_id) {
+                list.push(field_id);
+            }
         }
     });
 }
@@ -644,58 +653,40 @@ pub(crate) fn android_ime_options(action: ImeAction) -> i32 {
     action | FLAG_NO_EXTRACT_UI
 }
 
-/// Ключ хранения буфера текста поля в `Context::data()` (по `ui.id()` поля).
-fn field_buffer_key(id: egui::Id) -> egui::Id {
-    egui::Id::new(("egui_textedit_buffer", id))
-}
-
-/// Ключ общего состояния "владелец клавиатуры" (Id фокусного TextEdit).
-fn keyboard_owner_key() -> egui::Id {
-    egui::Id::new("egui_keyboard_owner")
-}
-
-/// Тип общего состояния владельца клавиатуры.
-/// `Arc<RwLock<Option<Id>>>` — Send + Sync + Clone, хранится в `Context::data()`.
-fn keyboard_owner_storage() -> Arc<RwLock<Option<egui::Id>>> {
-    Arc::new(RwLock::new(None))
-}
+// Буфер поля теперь хранится в `KeyboardController.text_buffers`.
 
 /// Является ли `id` текущим владельцем клавиатуры.
 fn keyboard_is_owner(ui: &UiWrapper, id: egui::Id) -> bool {
     ui.ctx().data(|d| {
-        d.get_temp::<Arc<RwLock<Option<egui::Id>>>>(keyboard_owner_key())
-            .map(|s| {
-                // Если lock poisoned — считаем, что владелец не мы (безопасно).
-                s.read().ok().map_or(false, |guard| *guard == Some(id))
-            })
+        d.get_temp::<KeyboardController>(keyboard_controller_id())
+            .map(|kb| *kb.owner_slot().read().unwrap() == Some(id))
             .unwrap_or(false)
     })
 }
 
 /// Назначить `id` владельцем клавиатуры.
+///
+/// Пишем в `owner_slot` внутри контроллера (Arc<RwLock>) — без `ctx.data_mut`
+/// в render (reentrant write-lock на Context -> deadlock).
 fn keyboard_set_owner(ui: &UiWrapper, id: egui::Id) {
-    ui.ctx().data_mut(|d| {
-        let storage = d
-            .get_temp::<Arc<RwLock<Option<egui::Id>>>>(keyboard_owner_key())
-            .unwrap_or_else(keyboard_owner_storage);
-        if let Ok(mut guard) = storage.write() {
-            *guard = Some(id);
+    log::info!("[TextEdit] set_owner enter {:?}", id);
+    ui.ctx().data(|d| {
+        if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+            *kb.owner_slot().write().unwrap() = Some(id);
         }
-        d.insert_temp(keyboard_owner_key(), storage);
     });
+    log::info!("[TextEdit] set_owner exit {:?}", id);
 }
 
 /// Сбросить владельца клавиатуры.
 fn keyboard_clear_owner(ui: &UiWrapper) {
-    ui.ctx().data_mut(|d| {
-        let storage = d
-            .get_temp::<Arc<RwLock<Option<egui::Id>>>>(keyboard_owner_key())
-            .unwrap_or_else(keyboard_owner_storage);
-        if let Ok(mut guard) = storage.write() {
-            *guard = None;
+    log::info!("[TextEdit] clear_owner enter");
+    ui.ctx().data(|d| {
+        if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+            *kb.owner_slot().write().unwrap() = None;
         }
-        d.insert_temp(keyboard_owner_key(), storage);
     });
+    log::info!("[TextEdit] clear_owner exit");
 }
 
 #[cfg(test)]
@@ -783,11 +774,14 @@ mod tests {
     #[test]
     fn buffer_persists_across_frames() {
         // Введённый текст не должен сбрасываться между кадрами и между полями:
-        // буфер живёт в `Context::data()` по stable id поля. Явный `id` задаёт
-        // детерминированный ключ — буфер и поле используют один и тот же id.
+        // буфер живёт в `KeyboardController.text_buffers` по id поля.
         let ctx = egui::Context::default();
         let (dispatch, _rx) = Dispatcher::<()>::new();
         let fixed_id = egui::Id::new("te_buffer_test");
+
+        // Регистрируем контроллер (буферы в нём).
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
 
         let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
             // Кадр 1: буфер инициализируется от value="abc".
@@ -796,7 +790,10 @@ mod tests {
                 .render(ui, &dispatch);
             let b = ui
                 .ctx()
-                .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+                .data(|d| {
+                    d.get_temp::<KeyboardController>(keyboard_controller_id())
+                        .map(|kb| kb.text_buffer(fixed_id))
+                })
                 .expect("буфер должен быть создан");
             assert_eq!(&*b.read().unwrap(), "abc", "буфер инициализирован от value");
 
@@ -809,7 +806,10 @@ mod tests {
                 .render(ui, &dispatch);
             let b = ui
                 .ctx()
-                .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+                .data(|d| {
+                    d.get_temp::<KeyboardController>(keyboard_controller_id())
+                        .map(|kb| kb.text_buffer(fixed_id))
+                })
                 .expect("буфер должен существовать");
             assert_eq!(
                 &*b.read().unwrap(),
@@ -913,6 +913,10 @@ mod tests {
         let (dispatch, _rx) = Dispatcher::<()>::new();
         let fixed_id = egui::Id::new("te_input_test");
 
+        // Регистрируем контроллер (нужен для буфера поля).
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
         // Кадр 1: рендерим пустое поле.
@@ -961,7 +965,10 @@ mod tests {
 
         // Буфер поля должен содержать "a" (введённое значение).
         let buf = ctx
-            .data(|d| d.get_temp::<Arc<RwLock<String>>>(field_buffer_key(fixed_id)))
+            .data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| kb.text_buffer(fixed_id))
+            })
             .expect("буфер должен существовать");
         assert_eq!(
             &*buf.read().unwrap(),
@@ -1073,6 +1080,10 @@ mod tests {
         let id_a = egui::Id::new("te_nx_a");
         let id_b = egui::Id::new("te_nx_b");
 
+        // Реестр теперь хранится в KeyboardController.
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+
         let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
             TextEdit::<()>::new("")
                 .id(id_a)
@@ -1090,19 +1101,136 @@ mod tests {
             });
         });
 
-        let registry = ctx
-            .data(|d| d.get_temp::<Vec<egui::Id>>(ime_field_registry_id()))
-            .expect("реестр полей должен существовать");
-        assert_eq!(
-            registry,
-            vec![id_a, id_b],
-            "порядок полей = порядок отрисовки"
-        );
+        let list = ctx
+            .data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| kb.registry_slot().read().unwrap().clone())
+            })
+            .expect("контроллер должен существовать");
+        assert_eq!(list, vec![id_a, id_b], "порядок полей = порядок отрисовки");
 
         // И `next_ime_field_after` по этому реестру даёт B от A.
         assert_eq!(
-            egui_android_runtime::next_ime_field_after(&registry, id_a),
+            egui_android_runtime::next_ime_field_after(&list, id_a),
             Some(id_b)
+        );
+    }
+
+    #[test]
+    fn ime_commit_two_frame_delivery_does_not_deadlock() {
+        // Воспроизводит реальный путь IME: commitText доставляется на
+        // СЛЕДУЮЩЕМ кадре (`ime_deliver`), поле в фокусе, публикуется editor_state.
+        // Основной риск — deadlock на `remember.set`/`ctx` при вставке текста.
+        //
+        // Шаблон из примера (после фикса): guard от get() разорван в переменную.
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let fixed_id = egui::Id::new("te_two_frame_commit");
+
+        // Регистрируем KeyboardController с привязанным слотом editor-state
+        // (как платформа в run.rs) — включаем публикацию состояния.
+        let kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+
+        let last_value = Arc::new(std::sync::Mutex::new(String::new()));
+        let last_a = Arc::clone(&last_value);
+        let last_b = Arc::clone(&last_value);
+        let last_c = Arc::clone(&last_value);
+
+        // Кадр 0: инициализация remember + рендер (фокус ещё нет).
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                let rem = crate::remember(ui, "two_frame_mem", || String::new());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                let last = Arc::clone(&last_a);
+                TextEdit::<()>::new(init)
+                    .id(fixed_id)
+                    .on_changed(move |v| {
+                        rem.set(v.to_owned());
+                        *last.lock().unwrap() = v.to_owned();
+                    })
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Фокусируем.
+        ctx.memory_mut(|m| m.request_focus(fixed_id));
+        // Кадр 1: фокус закреплён, рендер.
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(fixed_id));
+                let rem = crate::remember(ui, "two_frame_mem", || String::new());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                let last = Arc::clone(&last_b);
+                TextEdit::<()>::new(init)
+                    .id(fixed_id)
+                    .on_changed(move |v| {
+                        rem.set(v.to_owned());
+                        *last.lock().unwrap() = v.to_owned();
+                    })
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Кадр 2: IME `ImeEvent::Commit` вставлен (как from `ime_deliver`).
+        let raw = egui::RawInput {
+            focused: true,
+            events: vec![egui::Event::Ime(egui::ImeEvent::Commit("a".into()))],
+            ..Default::default()
+        };
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(fixed_id));
+                let rem = crate::remember(ui, "two_frame_mem", || String::new());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                let last = Arc::clone(&last_c);
+                TextEdit::<()>::new(init)
+                    .id(fixed_id)
+                    .on_changed(move |v| {
+                        rem.set(v.to_owned());
+                        *last.lock().unwrap() = v.to_owned();
+                    })
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(raw, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Если не задедлокило — текст должен был дойти до буфера/колбэка.
+        let buffer = ctx
+            .data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| kb.text_buffer(fixed_id))
+            })
+            .expect("буфер поля должен существовать");
+        assert_eq!(
+            &*buffer.read().unwrap(),
+            "a",
+            "текст Commit должен попасть в буфер"
+        );
+        assert_eq!(
+            &*last_value.lock().unwrap(),
+            "a",
+            "on_changed должен сработать"
         );
     }
 }

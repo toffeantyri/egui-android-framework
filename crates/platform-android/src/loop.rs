@@ -17,7 +17,9 @@ use crate::input::InputState;
 use crate::platform_state::PlatformState;
 use egui::viewport::ViewportId;
 use egui_android_platform::Waker;
-use egui_android_runtime::{next_ime_field_after, Application, RuntimeContext};
+use egui_android_runtime::{
+    keyboard_controller_id, next_ime_field_after, Application, KeyboardController, RuntimeContext,
+};
 
 /// Состояние главного цикла.
 ///
@@ -322,10 +324,14 @@ impl RunState {
             if self.move_focus_next_pending {
                 self.move_focus_next_pending = false;
                 let current = egui_ctx.memory(|m| m.focused());
-                let registry_id = egui::Id::new("egui_ime_field_order");
                 let next = egui_ctx.data(|d| {
-                    let registry = d.get_temp::<Vec<egui::Id>>(registry_id).unwrap_or_default();
-                    current.and_then(|c| next_ime_field_after(&registry, c))
+                    match d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+                        Some(kb) => {
+                            let list = kb.registry_slot().read().unwrap().clone();
+                            current.and_then(|c| next_ime_field_after(&list, c))
+                        }
+                        None => None,
+                    }
                 });
                 if let Some(id) = next {
                     egui_ctx.memory_mut(|m| m.request_focus(id));

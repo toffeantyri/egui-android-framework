@@ -25,6 +25,7 @@ use jni::JNIEnv;
 /// JNI-функции вызываются на главном Java-потоке. Если `PlatformState` ещё
 /// не инициализирован (цикл не запущен) — команду просто игнорируем.
 fn push_cmd(cmd: ImeCmd) {
+    log::info!("IME-JNI: push_cmd enter (thread={})", thread_name());
     match GLOBAL_PLATFORM_STATE.get() {
         Some(state) => state.push_ime_cmd(cmd),
         None => log::warn!(
@@ -32,6 +33,7 @@ fn push_cmd(cmd: ImeCmd) {
             cmd
         ),
     }
+    log::info!("IME-JNI: push_cmd exit (thread={})", thread_name());
 }
 
 /// Прочитать `JNIString` из JNIEnv (JString → String), безопасно.
@@ -147,9 +149,28 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnCompos
 
 /// Текущее состояние редактирования активного поля (копия).
 fn current_editor_state() -> Option<egui_android_runtime::ImeEditorState> {
-    GLOBAL_PLATFORM_STATE
+    log::info!(
+        "IME-EDIT: current_editor_state enter (thread={})",
+        thread_name()
+    );
+    let r = GLOBAL_PLATFORM_STATE
         .get()
-        .and_then(|ps| ps.ime_editor_state())
+        .and_then(|ps| ps.ime_editor_state());
+    log::info!("IME-EDIT: current_editor_state exit -> {}", r.is_some());
+    r
+}
+
+/// Имя текущего потока (для диагностики deadlock между Rust-циклом и JNI).
+fn thread_name() -> String {
+    std::thread::current()
+        .name()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| "<no-name>".to_owned())
+}
+
+/// Лог входа в JNI-функцию с именем потока.
+fn thread_id_log(fn_name: &str) {
+    log::info!("IME-JNI: {} enter (thread={})", fn_name, thread_name());
 }
 
 /// Вырезать UTF-16-подстроку из текста в диапазоне [start, end).
@@ -168,6 +189,7 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetTextB
     length: i32,
     _flags: i32,
 ) -> jni::objects::JString<'a> {
+    thread_id_log("nativeGetTextBeforeCursor");
     let s = current_editor_state();
     let out = match s {
         Some(st) => {
@@ -315,12 +337,16 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetCompo
 
 /// Вызвать `EguiActivity.showSoftInputForIme()` на главном Java-потоке.
 pub fn show_soft_input_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
+    log::info!("LOOP-JNI: show_soft_input enter");
     call_activity_noarg_uithread(vm_ptr, activity_ptr, "showSoftInputForIme", "()V");
+    log::info!("LOOP-JNI: show_soft_input exit");
 }
 
 /// Вызвать `EguiActivity.hideSoftInputForIme()` на главном Java-потоке.
 pub fn hide_soft_input_jni(vm_ptr: *mut std::ffi::c_void, activity_ptr: *mut std::ffi::c_void) {
+    log::info!("LOOP-JNI: hide_soft_input enter");
     call_activity_noarg_uithread(vm_ptr, activity_ptr, "hideSoftInputForIme", "()V");
+    log::info!("LOOP-JNI: hide_soft_input exit");
 }
 
 /// Обновить imeOptions/inputType текущего IME-View.
@@ -334,6 +360,7 @@ pub fn set_ime_options_jni(
     ime_options: i32,
     input_type: i32,
 ) {
+    log::info!("LOOP-JNI: set_ime_options enter ({input_type:#x}, {ime_options:#x})");
     if vm_ptr.is_null() || activity_ptr.is_null() {
         return;
     }
@@ -357,6 +384,7 @@ pub fn set_ime_options_jni(
             ],
         );
     }
+    log::info!("LOOP-JNI: set_ime_options exit");
 }
 
 /// Передать прямоугольник курсор (экранные px) в Kotlin для candidate window
@@ -373,6 +401,7 @@ pub fn update_cursor_rect_jni(
     right: i32,
     bottom: i32,
 ) {
+    log::info!("LOOP-JNI: update_cursor_rect enter [{left},{top},{right},{bottom}]");
     if vm_ptr.is_null() || activity_ptr.is_null() {
         return;
     }
@@ -398,6 +427,7 @@ pub fn update_cursor_rect_jni(
             ],
         );
     }
+    log::info!("LOOP-JNI: update_cursor_rect exit");
 }
 
 /// Вспомогательный вызов метода Activity без аргументов на главном Java-потоке.

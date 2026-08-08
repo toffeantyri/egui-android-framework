@@ -159,7 +159,8 @@ class EguiImeView(context: Context) : View(context) {
     }
 
     private fun logIme(method: String, arg: String) {
-        android.util.Log.i("EguiImeView", "$method: '$arg'")
+        val tid = Thread.currentThread().name
+        android.util.Log.i("EguiImeView", "$method: '$arg' (thread=$tid)")
     }
 
     // ─── JNI (реализованы в Rust: crates/platform-android/src/ime_jni.rs) ───

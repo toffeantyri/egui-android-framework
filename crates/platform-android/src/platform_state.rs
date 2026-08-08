@@ -275,14 +275,27 @@ impl PlatformState {
     }
 
     /// Снимок текущего состояния редактирования активного поля (копия).
+    ///
+    /// ВАЖНО: не удерживаем `inner.lock()` при взятии `slot.lock()` — иначе
+    /// lock-ordering (outer -> inner) может пересечься с Rust-циклом, который
+    /// берёт только `slot.lock()`, и дать взаимный deadlock.
     #[cfg(target_os = "android")]
     pub fn ime_editor_state(&self) -> Option<egui_android_runtime::ImeEditorState> {
-        self.inner
-            .lock()
-            .unwrap()
-            .ime_editor_state
-            .as_ref()
-            .and_then(|slot| slot.lock().unwrap().clone())
+        // JNI (getText*) вызывается на Java-потоке. НЕ блокируемся ни на
+        // inner, ни на slot: если Rust-цикл в этот момент держит lock,
+        // try_lock вернёт None (не взаимный ожидатель) — исключаем deadlock.
+        let inner_guard = match self.inner.try_lock() {
+            Ok(g) => g,
+            Err(_) => return None, // Rust-цикл держит inner — не ждём
+        };
+        let slot_cloned: egui_android_runtime::ImeEditorStateSlot =
+            inner_guard.ime_editor_state.clone()?;
+        drop(inner_guard);
+        let result = slot_cloned.try_lock();
+        match result {
+            Ok(inner) => (*inner).clone(),
+            Err(_) => None,
+        }
     }
 }
 
