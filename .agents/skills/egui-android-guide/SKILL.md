@@ -246,6 +246,26 @@ Message = и событие, и семантика
 - Принимает `Option<Waker>` — waker из `egui-android-platform` (создаётся в backend).
 - Не знает про Domain, Components, Reducer.
 
+### `KeyboardController` — `egui-android-runtime`
+- Мост UI ↔ Platform для управления нативной клавиатурой (IME).
+- Хранится в `egui::Context::data()` по ключу `egui_keyboard_controller`.
+- Регистрируется платформой (`platform-android`) при инициализации.
+- Виджет `TextEdit` читает его через `ctx.data()` и вызывает show/hide/options.
+- **Поля (архитектурно важные — вынесены из `Context::data()` в контроллер):
+  - `owner_slot: Arc<RwLock<Option<egui::Id>>>` — Id фокусного поля (владелец клавиатуры).
+  - `registry_slot: Arc<RwLock<Vec<egui::Id>>>` — упорядоченный реестр полей (для IME_ACTION_NEXT).
+  - `text_buffers: Arc<Mutex<HashMap<egui::Id, Arc<RwLock<String>>>>>` — буферы текста каждого поля.
+  - `editor_state: Option<ImeEditorStateSlot>` — состояние редактора для двустороннего InputConnection.
+  - `move_focus_next: Arc<AtomicBool>` — флаг «перейти к следующему полю» (IME_ACTION_NEXT).
+- **Почему не в `Context::data()`:** `ctx.data_mut()` внутри `render()` вызывает reentrant deadlock (egui Context удерживает внутренний RwLock). Вынос в `KeyboardController` (чтение через `ctx.data()` — read, без `data_mut`) устраняет deadlock.
+
+### `ImeEditorState` — `egui-android-runtime`
+- Состояние редактирования активного `TextEdit`, публикуемое UI-слоем в платформу.
+- Позиции — в UTF-16 code units (требование Android InputConnection).
+- Поля: `focused`, `text`, `text_len`, `selection_start`, `selection_end`, `composing_start`, `composing_end`.
+- Хранится в `KeyboardController.editor_state` (`Arc<Mutex<Option<ImeEditorState>>>`).
+- JNI-чтение (на Java-потоке) использует `try_lock` — неблокирующее, без deadlock'а с главным циклом.
+
 ### `Widget<M>` — `egui-android-core`
 - Базовый трейт для всех виджетов и модификаторов.
 - `render(&self, ui: &mut UiWrapper, dispatch)` — рендерит виджет, может диспатчить сообщения.
@@ -261,7 +281,7 @@ Message = и событие, и семантика
 - Extension trait для анимаций: `fade(opacity)`, `slide(direction, offset)`.
 - Реализован blanket-impl для всех `Widget<M>`.
 
-### `Button<M>`, `Text`, `Spacer`, `Icon` — `egui-android-ui`
+### `Button<M>`, `TextEdit<M>`, `Text`, `Spacer`, `Icon` — `egui-android-ui`
 - Готовые виджеты, реализующие `Widget<M>`.
 - `Button::new(text).on_click(msg)` — при клике диспатчит сообщение (MVI-поток).
 - `Button::new(text).on_click_with(closure)` — при клике вызывает closure (локальное UI-действие).
@@ -269,6 +289,16 @@ Message = и событие, и семантика
 - `Button::theme_colors(color)` — pressed вычисляется автоматически (затемняет/осветляет).
 - `Button::colors(normal, pressed)` — полный контроль цветов кнопки.
 - `Button::text_color(color)` — цвет текста кнопки.
+- `TextEdit::new(value)` — поле ввода, обёртка над `egui::TextEdit`.
+  - `.hint(text)`, `.single_line()`, `.multiline()`, `.password()`, `.max_lines(n)`, `.char_limit(n)`, `.read_only(true)`
+  - `.keyboard_type(KeyboardType::...)` — Email, Phone, Number, Password, Uri, Text
+  - `.ime_action(ImeAction::...)` — Done, Search, Next, Go
+  - `.on_changed(|s| ...)` — вызывается при каждом изменении текста.
+  - `.on_change_msg(|s| Msg::...)` — диспатчит Message при изменении.
+  - `.on_submit(|s| ...)` — вызывается при потере фокуса (Done / переход на другое поле).
+  - `.internal_padding(N)` — отступ внутри поля между текстом и рамкой.
+  - Буфер текста хранится в `KeyboardController.text_buffers` (не в `Context::data()`).
+  - При получении фокуса автоматически показывает клавиатуру + передаёт `KeyboardType`/`ImeAction` в платформу.
 - `Text::new(text)` — отображает строку.
 - `Spacer::new(size)` — вертикальный отступ.
 - `Icon::new(image)` — отображает изображение.

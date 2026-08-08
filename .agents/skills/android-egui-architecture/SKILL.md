@@ -392,11 +392,41 @@ state.value = ...
 из UI.
 
 **Готовые компоненты входят в крейты фреймворка:**
-- `egui-android-ui/widgets`: `Button<M>`, `Text`, `Spacer`, `Icon` — все реализуют `Widget<M>`
+- `egui-android-ui/widgets`: `Button<M>`, `TextEdit<M>`, `Text`, `Spacer`, `Icon` — все реализуют `Widget<M>`
 - `egui-android-ui/containers`: `Column`, `Row`, `Stack`, `LazyColumn` — контейнеры на замыканиях (без generic M)
 - `egui-android-ui/animation`: `AnimatedVisibility<M>`, `Fade<W,M>`, `Slide<W,M>`, `AnimationExt<M>`
 - `egui-android-ui/theme`: `Theme`, `ColorPalette`, `MaterialTheme`, `Typography`, `Shapes`
 - `egui-android-ui`: `remember()`, `ModifierExt<M>`, `AnimationExt<M>`, builders
+
+### Правило: `ctx.data_mut()` запрещён внутри `render()`
+
+**Правило:** Никогда не вызывать `ctx.data_mut()` внутри `Widget::render()`.
+
+**Причина:** egui `Context` защищён внутренним `RwLock`. При вызове
+data_mut (write-lock) повторно внутри render (read-lock уже удерживается
+egui)—`std::RwLock` не реентерабелен → **self-deadlock**.
+
+**Следствие для виджетов:**
+- `Widget::render()` может ТОЛЬКО читать через `ctx.data()` (read).
+- Инициализация разделяемого состояния (буфер, owner, реестр) должна
+  происходить через структуры, хранимые ВНЕ `Context::data()` — например,
+  в `KeyboardController`, доступном через `ctx.data()` (read).
+- `KeyboardController` — мост UI↔Platform из `egui-android-runtime`,
+  хранящий буферы `text_buffers`, владельца `owner_slot`, реестр
+  `registry_slot` и состояние редактора `editor_state`.
+  Все они доступны без `data_mut` (read через `Arc<*Lock<*>>`).
+
+### Архитектурный контракт KeyboardController
+
+`KeyboardController` (в `egui-android-runtime`) — инфраструктурный
+посредник между UI (`TextEdit`) и платформой (IME).
+
+Соблюдает изоляцию крейтов:
+- Определён в `runtime` — и `ui`, и `platform-android` зависят от runtime
+  (ноль новых рёбер в DAG).
+- Не знает ни про Android (JNI, InputConnection), ни про UI (TextEdit).
+- Содержит только абстрактные callbacks (`show`, `hide`, `options`) +
+  разделяемые структуры (`Arc<*Lock<*>>`).
 
 ---
 
