@@ -11,7 +11,7 @@
 use crate::backend::AndroidBackend;
 use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
 use crate::input::InputState;
-use egui_android_runtime::Application;
+use egui_android_runtime::{keyboard_controller_id, Application, KeyboardController};
 
 // Чистая IME-логика (ImeCmd → egui::Event, batch-буферизация) вынесена в
 // хост-совместимый модуль `ime_logic` и покрыта юнит-тестами (`cargo test`).
@@ -147,9 +147,20 @@ pub fn process_back_pressed<A: Application>(
     app_instance: &mut A,
     backend: &mut dyn AndroidBackend,
     input_state: &mut InputState,
+    egui_ctx: &egui::Context,
 ) {
     log::info!("Back нажата — отправляем в Application");
     input_state.back_pressed = false;
+
+    // Системный Back на Android скрывает клавиатуру на уровне системы (если CTCH
+    // открыта), но не сообщает нам. Сбрасываем владельца клавиатуры БЕЗУСЛОВНО:
+    // чтобы повторный тап на то же поле снова открыл клавиатуру. Иначе
+    // `keyboard_is_owner` остаётся true, и show не перезапускается.
+    egui_ctx.data(|d| {
+        if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+            *kb.owner_slot().write().unwrap() = None;
+        }
+    });
 
     // Если IME открыта — закрываем, иначе — навигация
     if app_instance.is_keyboard_visible() {

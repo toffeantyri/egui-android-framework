@@ -419,15 +419,12 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
             if is_focused {
                 // Я — фокусный редактируемый editor. Если ещё не я владею клавиатурой
-                // (вызов idempotent по кадрам, `show_soft_input` не спамится).
+                // (вызов idempotent по кадрам, `show_soft_input` не спамится),
+                // становимся владельцем, обновляем EditorInfo и показываем клавиатуру.
                 if !keyboard_is_owner(ui, field_id) {
-                    // Становимся владельцем — обновляем EditorInfo (inputType + imeOptions)
-                    // для ЭТОГО поля. Не только при egui gained_focus: переход по
-                    // IME_ACTION_NEXT (request_focus после frame) тоже должен переключить
-                    // тип/действие клавиатуры (Next→Done и т.п.).
                     keyboard_set_options(ui, self.keyboard_type, self.ime_action);
-                    keyboard_show(ui);
                     keyboard_set_owner(ui, field_id);
+                    keyboard_show(ui);
                 }
                 // Пока поле в фокусе — публикуем состояние (текст + курсор в
                 // UTF-16) в платформу для двустороннего InputConnection.
@@ -1260,6 +1257,37 @@ mod tests {
         );
     }
 
+    /// Регистрация контроллера + счетчики show/hide И захват последних
+    /// `set_options`. Нужно для интеграционных тестов действий IME-кнопок
+    /// (проверка show/hide и смены imeOptions при смене фокуса/владельца).
+    fn register_controller_full(
+        ctx: &egui::Context,
+    ) -> (
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+        Arc<Mutex<Option<(i32, i32)>>>,
+    ) {
+        let show_count = Arc::new(AtomicUsize::new(0));
+        let hide_count = Arc::new(AtomicUsize::new(0));
+        let last = Arc::new(Mutex::new(None));
+        let sc = Arc::clone(&show_count);
+        let hc = Arc::clone(&hide_count);
+        let last_b = Arc::clone(&last);
+        let kb = KeyboardController::with_options(
+            Arc::new(move || {
+                sc.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move || {
+                hc.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move |input_type, ime_options| {
+                *last_b.lock().unwrap() = Some((input_type, ime_options));
+            }),
+        );
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+        (show_count, hide_count, last)
+    }
+
     /// Проверка: при смене владельца фокуса поле обновляет EditorInfo
     /// (inputType + imeOptions) через `KeyboardController.set_options`.
     ///
@@ -1339,5 +1367,198 @@ mod tests {
             ACTION_NEXT,
             "постed перехода imeOptions не должен остаться NEXT"
         );
+    }
+
+    /// Интеграция: получение фокуса (+ следующее по IME_ACTION_NEXT) вызывает
+    /// `show()` и `set_options` у нового поля; потеря фокуса вызывает `hide()`
+    /// и сброс владельца.
+    ///
+    /// Моделирует действие кнопки Next: поле A (Next) теряет фокус, фокус
+    /// переходит на B (Done), B становится владельцем → `show()` + `set_options(Done)`.
+    #[test]
+    fn ime_next_transfers_focus_show_hide_and_options() {
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let (show_count, hide_count, last_options) = register_controller_full(&ctx);
+        let id_a = egui::Id::new("te_nxt_a");
+        let id_b = egui::Id::new("te_nxt_b");
+        // Заполняем реестр полей (как платформа при двух request_focus),
+        // иначе Next не найдёт следующее поле.
+        ctx.data(|d| {
+            let kb = d
+                .get_temp::<KeyboardController>(keyboard_controller_id())
+                .expect("контроллер зарегистрирован");
+            *kb.registry_slot().write().unwrap() = vec![id_a, id_b];
+        });
+
+        // Кадр 1: A в фокусе (Next) → становится владельцем, show + set_options.
+        ctx.memory_mut(|m| m.request_focus(id_a));
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id_a));
+                TextEdit::<()>::new("")
+                    .id(id_a)
+                    .ime_action(ImeAction::Next)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+        // A стал владельцем и показал клавиатуру.
+        assert!(
+            ctx.data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| *kb.owner_slot().read().unwrap() == Some(id_a))
+                    .unwrap_or(false)
+            }),
+            "A должен быть владельцем"
+        );
+        assert!(
+            show_count.load(Ordering::SeqCst) >= 1,
+            "show должен быть вызван для A"
+        );
+
+        // Кадр 2: фокус уходит A и приходит B (как при Next-переходе).
+        ctx.memory_mut(|m| m.request_focus(id_b));
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id_b));
+                // A рендерится и теряет фокус → hide (A был владельцем).
+                TextEdit::<()>::new("")
+                    .id(id_a)
+                    .ime_action(ImeAction::Next)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+                // B получает фокус → становится владельцем, show + set_options(Done).
+                TextEdit::<()>::new("")
+                    .id(id_b)
+                    .ime_action(ImeAction::Done)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Владелец теперь B, hide (для A-lost_focus) и show (для B) сработали,
+        // set_options для B имеет imeOptions Done.
+        assert!(
+            ctx.data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| *kb.owner_slot().read().unwrap() == Some(id_b))
+                    .unwrap_or(false)
+            }),
+            "B должен стать владельцем"
+        );
+        assert!(
+            hide_count.load(Ordering::SeqCst) >= 1,
+            "hide должен быть вызван при потере фокуса"
+        );
+        let last = *last_options.lock().unwrap();
+        assert_eq!(
+            last.map(|(_, io)| io & 0xF),
+            Some(6), // ACTION_DONE
+            "set_options для B должен быть Done, фактически: {:?}",
+            last
+        );
+    }
+
+    /// Регрессия: после того, как системный Back скрыл клавиатуру и сбросил
+    /// владельца (поле осталось в фокусе), повторный рендер с фокусом снова
+    /// вызывает `show()` и восстанавливает владельца.
+    ///
+    /// Моделирует: фокус на поле → owner=A → системный Back (owner=None,
+    /// поле не потеряло фокус) → следующий кадр → show() снова.
+    #[test]
+    fn ime_reopen_after_back_resets_owner_and_shows() {
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let (show_count, _hide_count) = register_controller(&ctx);
+        let id = egui::Id::new("te_reopen_back");
+
+        // Кадр 1: поле в фокусе → show + owner.
+        ctx.memory_mut(|m| m.request_focus(id));
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id));
+                TextEdit::<()>::new("")
+                    .id(id)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+        // Owner установлен, клавиатура показана.
+        assert!(
+            ctx.data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| *kb.owner_slot().read().unwrap() == Some(id))
+                    .unwrap_or(false)
+            }),
+            "поле должно стать владельцем"
+        );
+        assert!(
+            show_count.load(Ordering::SeqCst) >= 1,
+            "первый фокус должен показать"
+        );
+
+        // Системный Back: сбрасываем owner (поле НЕ теряет фокус в egui).
+        ctx.data(|d| {
+            let kb = d
+                .get_temp::<KeyboardController>(keyboard_controller_id())
+                .expect("контроллер есть");
+            *kb.owner_slot().write().unwrap() = None;
+        });
+        let before_after_back = show_count.load(Ordering::SeqCst);
+
+        // Кадр 2: поле всё ещё в фокусе (focused=true), owner пуст → show снова.
+        let raw = egui::RawInput {
+            focused: true,
+            events: Vec::new(),
+            ..Default::default()
+        };
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id));
+                TextEdit::<()>::new("")
+                    .id(id)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(raw, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+        // Owner восстановлен, show вызван снова.
+        assert!(
+            ctx.data(|d| {
+                d.get_temp::<KeyboardController>(keyboard_controller_id())
+                    .map(|kb| *kb.owner_slot().read().unwrap() == Some(id))
+                    .unwrap_or(false)
+            }),
+            "после Back повторный фокус должен восстановить owner"
+        );
+        assert!(
+            show_count.load(Ordering::SeqCst) > before_after_back,
+            "после Back повторный фокус должен снова вызвать show()"
+        );
+        let _ = dispatch;
     }
 }

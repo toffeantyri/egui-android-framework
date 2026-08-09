@@ -203,6 +203,7 @@ impl RunState {
                 app_instance,
                 backend,
                 &mut self.input_state,
+                egui_ctx,
             );
         }
 
