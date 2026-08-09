@@ -418,20 +418,20 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             ime_field_register(ui, field_id);
 
             if is_focused {
-                // При получении фокуса передаём IME тип клавиатуры и действие
-                // кнопки (KeyboardType/ImeAction) для обновления EditorInfo.
-                if response.gained_focus() {
+                // Я — фокусный редактируемый editor. Если ещё не я владею клавиатурой
+                // (вызов idempotent по кадрам, `show_soft_input` не спамится).
+                if !keyboard_is_owner(ui, field_id) {
+                    // Становимся владельцем — обновляем EditorInfo (inputType + imeOptions)
+                    // для ЭТОГО поля. Не только при egui gained_focus: переход по
+                    // IME_ACTION_NEXT (request_focus после frame) тоже должен переключить
+                    // тип/действие клавиатуры (Next→Done и т.п.).
                     keyboard_set_options(ui, self.keyboard_type, self.ime_action);
+                    keyboard_show(ui);
+                    keyboard_set_owner(ui, field_id);
                 }
                 // Пока поле в фокусе — публикуем состояние (текст + курсор в
                 // UTF-16) в платформу для двустороннего InputConnection.
                 keyboard_publish_editor_state(ui, field_id, &*text_guard);
-                // Я — фокусный редактируемый editor. Если ещё не я владею клавиатурой
-                // (вызов idempotent по кадрам, `show_soft_input` не спамится).
-                if !keyboard_is_owner(ui, field_id) {
-                    keyboard_show(ui);
-                    keyboard_set_owner(ui, field_id);
-                }
             } else if response.lost_focus() {
                 // Я потерял фокус. Прячем клавиатуру ТОЛЬКО если я был её владельцем.
                 // Если фокус ушёл на другой TextEdit — он уже стал владельцем (или станет
@@ -694,6 +694,7 @@ mod tests {
     use super::*;
     use egui_android_runtime::KeyboardController;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     /// Прогон UI-замыкания в egui Context (как в интеграционных тестах).
     fn with_ui(f: impl FnOnce(&mut UiWrapper)) {
@@ -713,18 +714,43 @@ mod tests {
         let hide_count = Arc::new(AtomicUsize::new(0));
         let sc = Arc::clone(&show_count);
         let hc = Arc::clone(&hide_count);
-        let kb = KeyboardController::new(
+        let kb = KeyboardController::with_options(
             Arc::new(move || {
                 sc.fetch_add(1, Ordering::SeqCst);
             }),
             Arc::new(move || {
                 hc.fetch_add(1, Ordering::SeqCst);
             }),
+            Arc::new(|_, _| {}),
         );
         ctx.data_mut(|d| {
             d.insert_temp(keyboard_controller_id(), kb);
         });
         (show_count, hide_count)
+    }
+
+    /// Регистрация контроллера + захват последних аргументов `set_options`
+    /// (inputType, imeOptions) и счётчика вызовов. Нужно для проверки, что при
+    /// смене владельца/фокуса поле обновляет EditorInfo (Next→Done и т.п.).
+    fn register_controller_with_options(
+        ctx: &egui::Context,
+    ) -> (Arc<Mutex<Option<(i32, i32)>>>, Arc<AtomicUsize>) {
+        let last = Arc::new(Mutex::new(None));
+        let count = Arc::new(AtomicUsize::new(0));
+        let last_b = Arc::clone(&last);
+        let count_b = Arc::clone(&count);
+        let kb = KeyboardController::with_options(
+            Arc::new(|| {}),
+            Arc::new(|| {}),
+            Arc::new(move |input_type, ime_options| {
+                *last_b.lock().unwrap() = Some((input_type, ime_options));
+                count_b.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        ctx.data_mut(|d| {
+            d.insert_temp(keyboard_controller_id(), kb);
+        });
+        (last, count)
     }
 
     #[test]
@@ -1231,6 +1257,87 @@ mod tests {
             &*last_value.lock().unwrap(),
             "a",
             "on_changed должен сработать"
+        );
+    }
+
+    /// Проверка: при смене владельца фокуса поле обновляет EditorInfo
+    /// (inputType + imeOptions) через `KeyboardController.set_options`.
+    ///
+    /// Моделирует переход по IME_ACTION_NEXT: поле A (Next) теряет фокус,
+    /// поле B (Done) получает его и становится владельцем → должен быть
+    /// вызван `set_options` с imeOptions Done. Это ключевой кейс — иначе
+    /// после Next на клавиатуре останется кнопка Next вместо Done.
+    #[test]
+    fn ime_set_options_updates_editor_info_on_owner_change() {
+        const ACTION_DONE: i32 = 6; // EditorInfo.IME_ACTION_DONE
+        const ACTION_NEXT: i32 = 5; // EditorInfo.IME_ACTION_NEXT
+
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let (last_options, _set_count) = register_controller_with_options(&ctx);
+
+        // Рендер поля A с ImeAction::Next — A становится владельцем и вызывает
+        // set_options(inputType, imeOptions=NEXT).
+        // (В тесте нет реального тапа, поэтому владельцем A делается через
+        //  `render`, где при is_focused && !is_owner вызывается set_options.)
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("te_opt_a")));
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                TextEdit::<()>::new("")
+                    .id(egui::Id::new("te_opt_a"))
+                    .ime_action(ImeAction::Next)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // Рендер поля B с ImeAction::Done — B перетирает владельца и вызывает
+        // set_options(inputType, imeOptions=DONE).
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("te_opt_b")));
+        {
+            let f = std::cell::RefCell::new(Some(|ui: &mut UiWrapper| {
+                TextEdit::<()>::new("")
+                    .id(egui::Id::new("te_opt_b"))
+                    .ime_action(ImeAction::Done)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+                // A тоже рендерится (но потерял фокус) — не должен затирать B.
+                TextEdit::<()>::new("")
+                    .id(egui::Id::new("te_opt_a"))
+                    .ime_action(ImeAction::Next)
+                    .on_changed(|_| {})
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        // После перехода фокуса A→B последний set_options должен быть от B:
+        // imeOptions = DONE (а не NEXT от A). Из-за FLAG_NO_EXTRACT_UI проверяем
+        // битовое И с ACTION_DONE/ACTION_NEXT.
+        let last = *last_options.lock().unwrap();
+        assert!(last.is_some(), "set_options должен был быть вызван");
+        let (_ty, ime_options) = last.unwrap();
+        assert_eq!(
+            ime_options & 0xF,
+            ACTION_DONE,
+            "после перехода на B(Done) imeOptions должен быть DONE, фактически: 0x{:x}",
+            ime_options
+        );
+        assert_ne!(
+            ime_options & 0xF,
+            ACTION_NEXT,
+            "постed перехода imeOptions не должен остаться NEXT"
         );
     }
 }

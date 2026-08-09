@@ -286,21 +286,24 @@ impl RunState {
             // виджет `owns_ime_events(id)` (текстовое поле редактируется).
             // Показываем/скрываем клавиатуру через невидимый EguiImeView (JNI),
             // только при переходе состояния.
+            // Показ клавиатуры НЕ управляется здесь: его делает `TextEdit`
+            // через `KeyboardController.show()` при `gained_focus` (см. run.rs
+            // регистрация callbacks). Это предотвращает конфликт: иначе после
+            // IME Done (когда поле в фокусе) auto-show открывал клавиатуру заново.
+            // Здесь только скрытие по потере фокуса (`!ime_active`).
             let ime_active = full_output.platform_output.ime.is_some();
-            if ime_active && !self.keyboard_visible {
-                log::info!("LOOP: ime активна — показать клавиатуру (EguiImeView)");
-                crate::ime_jni::show_soft_input_jni(
-                    platform_state.vm_ptr(),
-                    platform_state.activity_ptr(),
-                );
-                self.keyboard_visible = true;
-            } else if !ime_active && self.keyboard_visible {
+            if !ime_active && self.keyboard_visible {
                 log::info!("LOOP: ime неактивна — скрыть клавиатуру (EguiImeView)");
                 crate::ime_jni::hide_soft_input_jni(
                     platform_state.vm_ptr(),
                     platform_state.activity_ptr(),
                 );
                 self.keyboard_visible = false;
+            }
+            // Если IME активна (поле в фокусе/редактируется) — считаем её видимой,
+            // чтобы hide-ветка не дёргала JNI при каждом кадре.
+            if ime_active {
+                self.keyboard_visible = true;
             }
 
             // ── Cursor rect для candidate window IME ──
