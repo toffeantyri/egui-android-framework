@@ -266,6 +266,22 @@ Message = и событие, и семантика
 - Хранится в `KeyboardController.editor_state` (`Arc<Mutex<Option<ImeEditorState>>>`).
 - JNI-чтение (на Java-потоке) использует `try_lock` — неблокирующее, без deadlock'а с главным циклом.
 
+### `ime_logic` — `egui-android-platform-android` (хост-совместимый модуль)
+- Чистая IME-логика: преобразование `ImeCmd` → `egui::Event`.
+- **Без `cfg(target_os = "android")`** — покрывается юнит-тестами на хосте (`cargo test`).
+- Содержит: `ImeCmd`, `ImeOutcome`, `ImeBuffer`, `process_ime_cmd`, `utf16_offset_to_char_index`.
+- `ImeCmd` — команда из Kotlin `InputConnection` (Commit/Composing/Next/Done/DeleteSurrounding/ComposingRange/SetSelection/BeginBatchEdit/EndBatchEdit).
+- `ImeBuffer` — накопитель egui-событий с batch-операциями (`batch_depth` + `batch_buffer`).
+- `event.rs` реэкспортирует `ImeCmd` (`pub use crate::ime_logic::ImeCmd`).
+- `input_processing.rs` делегирует `process_ime_cmd`, соединяя `ImeBuffer` с полями `InputState`.
+- **Почему вынесено:** `event.rs`/`input.rs`/`input_processing.rs` под `cfg(target_os = "android")` — их тесты не запускались на хосте (dead code). Вынос позволил реально протестировать batch, UTF-16, actions.
+
+### Управление показом/скрытием клавиатуры (важно)
+- **Показ** делает ТОЛЬКО `TextEdit` через `KeyboardController.show()` при `gained_focus`/становлении владельцем. `loop.rs` НЕ показывает по `platform_output.ime`.
+- **Скрытие**: `ImeOutcome::Done` (кнопка клавиатуры) → `hide_soft_input_jni`; потеря фокуса (`!ime_active`) → скрытие в loop.
+- **Системный Back** сбрасывает `owner_slot` БЕЗУСЛОВНО (`process_back_pressed`), чтобы повторный тап на то же поле снова открывал клавиатуру.
+- `keyboard_set_options` вызывается при становлении владельцем (не только `gained_focus`) — переход по `IME_ACTION_NEXT` обновляет кнопку клавиатуры (Next→Done).
+
 ### `Widget<M>` — `egui-android-core`
 - Базовый трейт для всех виджетов и модификаторов.
 - `render(&self, ui: &mut UiWrapper, dispatch)` — рендерит виджет, может диспатчить сообщения.
@@ -881,6 +897,8 @@ loop {
 │   │       ├── graphics.rs        — GraphicsPipeline — Painter + рендеринг
 │   │       ├── input_processing.rs — Конвертация BackendEvent → egui::Event
 │   │       ├── input.rs           — InputState + process_input_events() (NativeActivity)
+│   │       ├── ime_logic.rs       — Чистая IME-логика (ImeCmd→egui::Event), хост-тесты
+│   │       ├── ime_jni.rs         — JNI-мост EguiImeView ↔ Rust (commitText, delete, etc.)
 │   │       ├── egl_backend.rs     — EGL FFI + EglState
 │   │       ├── insets.rs          — JNI WindowInsets + get_pp()
 │   │       ├── platform_state.rs  — PlatformState (Arc<Mutex>)

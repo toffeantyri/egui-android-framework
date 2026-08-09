@@ -428,6 +428,20 @@ egui)—`std::RwLock` не реентерабелен → **self-deadlock**.
 - Содержит только абстрактные callbacks (`show`, `hide`, `options`) +
   разделяемые структуры (`Arc<*Lock<*>>`).
 
+### Правило: показ клавиатуры — только из UI, не из platform_output.ime
+
+- **Показ** нативной клавиатуры делает ТОЛЬКО `TextEdit` в ответ на фокус
+  (`KeyboardController.show()` при gained_focus / становлении владельцем).
+- `loop.rs` НЕ связывает показ с `full_output.platform_output.ime`: это
+  поле egui выставляет для штатного IME, который наш кастомный TextEdit
+  не использует. Иначе после `Done` (поле в фокусе) auto-show открывал
+  клавиатуру заново.
+- **Системный Back** сбрасывает `owner_slot` (см. `process_back_pressed`),
+  чтобы повторный тап на то же поле снова открывал клавиатуру.
+- **IME-действия** (`Next`/`Done`) обрабатываются в `ime_logic`
+  (хост-совместимый модуль без `cfg(android)`): `ImeCmd → egui::Event`.
+  `event.rs` реэкспортирует `ImeCmd` из `ime_logic`.
+
 ---
 
 ### Component
