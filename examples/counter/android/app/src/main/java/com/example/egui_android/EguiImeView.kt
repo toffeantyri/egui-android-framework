@@ -91,6 +91,8 @@ class EguiImeView(context: Context) : View(context) {
 
         override fun finishComposingText(): Boolean {
             logIme("finishComposingText", "")
+            // Пустой текст = завершение composition (Preedit с пустой строкой).
+            nativeOnComposingText("", 0)
             return true
         }
 
@@ -142,6 +144,16 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
+        override fun beginBatchEdit(): Boolean {
+            nativeBeginBatchEdit()
+            return true
+        }
+
+        override fun endBatchEdit(): Boolean {
+            nativeEndBatchEdit()
+            return true
+        }
+
         override fun performEditorAction(editorAction: Int): Boolean {
             logIme("performEditorAction", editorAction.toString())
             when (editorAction) {
@@ -154,8 +166,10 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
-        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean =
-            super.performPrivateCommand(action, data)
+        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean {
+            logIme("performPrivateCommand", "action=$action")
+            return false  // не обрабатываем — каждая IME шлёт своё
+        }
     }
 
     private fun logIme(method: String, arg: String) {
@@ -181,4 +195,8 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeGetSelectionEnd(): Int
     private external fun nativeSetSelection(start: Int, end: Int)
     private external fun nativeSetComposingRegion(start: Int, end: Int)
+    private external fun nativeGetComposingStart(): Int
+    private external fun nativeGetComposingEnd(): Int
+    private external fun nativeBeginBatchEdit()
+    private external fun nativeEndBatchEdit()
 }

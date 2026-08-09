@@ -137,18 +137,27 @@ class EguiActivity : GameActivity() {
     }
 
     /**
-     * Передать прямоугольник курсора (экранные px) для candidate window IME.
-     * Вызывается из Rust каждый кадр, пока IME активна. Храним последнее
-     * значение — IME способно позиционировать свой candidate window.
+     * Передать позицию курсора в IME для позиционирования candidate window.
+     * Вызывается из Rust каждый кадр, пока IME активна.
+     *
+     * Координаты (left/top/right/bottom) — пиксельные, для отладки.
+     * Реальное позиционирование кандидат-окна — через `updateSelection`
+     * с данными из `ImeEditorState` (selection + composing range).
      */
     fun updateCursorRect(left: Int, top: Int, right: Int, bottom: Int) {
         android.util.Log.i(
             "EguiActivity",
             "updateCursorRect: [$left, $top, $right, $bottom]"
         )
-        // Здесь можно передать IME через InputMethodManager.setImeHint /
-        // updateCursorAnchorInfo — на текущем этапе фиксируем координаты для
-        // отладки и будущего размещения candidate window.
+        imeView?.post {
+            val view = imeView ?: return@post
+            val selStart = view.nativeGetSelectionStart()
+            val selEnd = view.nativeGetSelectionEnd()
+            val compStart = view.nativeGetComposingStart()
+            val compEnd = view.nativeGetComposingEnd()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.updateSelection(view, selStart, selEnd, compStart, compEnd)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

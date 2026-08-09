@@ -117,28 +117,22 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     // Показ через невидимый EguiImeView (JNI), НЕ через штатный IME GameActivity
     // (InputEvent::TextEvent / setTextInputState).
     if backend.supports_ime() {
-        // Захватываем клон PlatformState (Send + Sync) и внутри options-callback
-        // читаем свежие указатели JVM/Activity, вызывая set_ime_options_jni для
-        // передачи inputType/imeOptions активного TextEdit в EditorInfo.
-        let kb_platform_state = platform_state.clone();
+        let kb_ps_show = platform_state.clone();
+        let kb_ps_hide = platform_state.clone();
+        let kb_ps_opts = platform_state.clone();
         let mut kb = KeyboardController::with_options(
             Arc::new(move || {
-                // Управление клавиатурой делает loop.rs по `platform_output.ime`.
-                log::info!(
-                    "KeyboardController.show(): запрошено (управляет loop по platform_output.ime)"
-                );
+                log::info!("KeyboardController.show(): показываем через EguiImeView");
+                crate::ime_jni::show_soft_input_jni(kb_ps_show.vm_ptr(), kb_ps_show.activity_ptr());
             }),
             Arc::new(move || {
-                log::info!(
-                    "KeyboardController.hide(): запрошено (управляет loop по platform_output.ime)"
-                );
+                log::info!("KeyboardController.hide(): скрываем через EguiImeView");
+                crate::ime_jni::hide_soft_input_jni(kb_ps_hide.vm_ptr(), kb_ps_hide.activity_ptr());
             }),
             Arc::new(move |input_type, ime_options| {
-                // Передаём inputType + imeOptions текущего TextEdit в EditorInfo
-                // невидимого EguiImeView (информируем IME о типе поля/действии).
                 crate::ime_jni::set_ime_options_jni(
-                    kb_platform_state.vm_ptr(),
-                    kb_platform_state.activity_ptr(),
+                    kb_ps_opts.vm_ptr(),
+                    kb_ps_opts.activity_ptr(),
                     ime_options,
                     input_type,
                 );

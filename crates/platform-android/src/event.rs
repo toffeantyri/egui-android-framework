@@ -144,4 +144,10 @@ pub enum ImeCmd {
     /// применить к egui-курсору сложно; инкапсулируется как no-op (см.
     /// `process_ime_cmd`).
     SetSelection { start: i32, end: i32 },
+    /// `beginBatchEdit()` — начало пакетной операции IME. Пока буфер открыт,
+    /// текстовые события буферизуются, а не пушатся в `ime_pending`.
+    BeginBatchEdit,
+    /// `endBatchEdit()` — завершение пакетной операции. Накопленные события
+    /// переносятся в `ime_pending`.
+    EndBatchEdit,
 }

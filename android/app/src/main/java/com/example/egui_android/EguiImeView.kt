@@ -30,7 +30,7 @@ class EguiImeView(context: Context) : View(context) {
     // Последние inputType/imeOptions, переданные из Rust через EguiActivity.setImeOptions.
     // Используются в onCreateInputConnection, чтобы после restartInput EditorInfo
     // отражал тип поля/действия текущего TextEdit (а не хардкод).
-    private var currentInputType: Int = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    private var currentInputType: Int = InputType.TYPE_CLASS_TEXT
     private var currentImeOptions: Int = EditorInfo.IME_ACTION_NEXT or EditorInfo.IME_FLAG_NO_EXTRACT_UI
 
     // Фокусируемость в touch-режиме, чтобы IME мог активироваться по тапу.
@@ -91,11 +91,43 @@ class EguiImeView(context: Context) : View(context) {
 
         override fun finishComposingText(): Boolean {
             logIme("finishComposingText", "")
+            // Пустой текст = завершение composition (Preedit с пустой строкой).
+            nativeOnComposingText("", 0)
             return true
         }
 
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
             logIme("deleteSurroundingText", "[$beforeLength, $afterLength]")
+            nativeOnDeleteSurroundingText(beforeLength, afterLength)
+            return true
+        }
+
+        // IME иногда шлёт DEL и через sendKeyEvent, и через deleteSurroundingText —
+        // чтобы не удалить дважды, НЕ нативные удаление здесь, а пробрасываем в
+        // deleteSurroundingText (который перехватывает и шлёт 1 нативный вызов).
+        override fun sendKeyEvent(event: android.view.KeyEvent): Boolean {
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DEL &&
+                (event.action == android.view.KeyEvent.ACTION_DOWN ||
+                    event.action == android.view.KeyEvent.ACTION_MULTIPLE)
+            ) {
+                logIme("sendKeyEvent", "DEL -> deleteSurroundingText(${event.repeatCount + 1},0)")
+                deleteSurroundingText(event.repeatCount + 1, 0)
+                return true
+            }
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL &&
+                (event.action == android.view.KeyEvent.ACTION_DOWN ||
+                    event.action == android.view.KeyEvent.ACTION_MULTIPLE)
+            ) {
+                logIme("sendKeyEvent", "FORWARD_DEL -> deleteSurroundingText(0,${event.repeatCount + 1})")
+                deleteSurroundingText(0, event.repeatCount + 1)
+                return true
+            }
+            return super.sendKeyEvent(event)
+        }
+
+        // Unicode 9+ метод — IME может вызвать его вместо deleteSurroundingText.
+        override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+            logIme("deleteSurroundingTextInCodePoints", "[$beforeLength, $afterLength]")
             nativeOnDeleteSurroundingText(beforeLength, afterLength)
             return true
         }
@@ -142,6 +174,16 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
+        override fun beginBatchEdit(): Boolean {
+            nativeBeginBatchEdit()
+            return true
+        }
+
+        override fun endBatchEdit(): Boolean {
+            nativeEndBatchEdit()
+            return true
+        }
+
         override fun performEditorAction(editorAction: Int): Boolean {
             logIme("performEditorAction", editorAction.toString())
             when (editorAction) {
@@ -154,8 +196,10 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
-        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean =
-            super.performPrivateCommand(action, data)
+        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean {
+            logIme("performPrivateCommand", "action=$action")
+            return false  // не обрабатываем — каждая IME шлёт своё
+        }
     }
 
     private fun logIme(method: String, arg: String) {
@@ -181,4 +225,14 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeGetSelectionEnd(): Int
     private external fun nativeSetSelection(start: Int, end: Int)
     private external fun nativeSetComposingRegion(start: Int, end: Int)
+    private external fun nativeGetComposingStart(): Int
+    private external fun nativeGetComposingEnd(): Int
+    private external fun nativeBeginBatchEdit()
+    private external fun nativeEndBatchEdit()
+
+    // Публичные обёртки для EguiActivity (updateCursorRect нужен доступ к selection/composing)
+    fun getImeSelectionStart(): Int = nativeGetSelectionStart()
+    fun getImeSelectionEnd(): Int = nativeGetSelectionEnd()
+    fun getImeComposingStart(): Int = nativeGetComposingStart()
+    fun getImeComposingEnd(): Int = nativeGetComposingEnd()
 }

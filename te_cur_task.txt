@@ -1,0 +1,35 @@
+## 📋 Задача: InputConnection — оставшиеся пункты
+
+**Статус:** ✅ ВЫПОЛНЕНО (все 6 пунктов за один проход)
+
+### Критерии успеха
+- [x] `updateCursorRect` → `InputMethodManager.updateSelection` (candidate window)
+- [x] `finishComposingText` → пустой Preedit (composition сбрасывается)
+- [x] `setComposingRegion` → `ImeCmd::ComposingRange` с `active_range_chars`
+- [x] `beginBatchEdit`/`endBatchEdit` → буферизация + вложенность
+- [x] `getCursorCapsMode` → эвристика заглавной (после ./!/?)
+- [x] `performPrivateCommand` → логирование
+- [x] Все тесты зелёные (120 шт.)
+
+### Изменённые файлы
+
+| Файл | Что |
+|---|---|
+| `crates/platform-android/src/event.rs` | +BeginBatchEdit, +EndBatchEdit |
+| `crates/platform-android/src/input.rs` | +ime_batch_depth, +ime_batch_buffer |
+| `crates/platform-android/src/input_processing.rs` | batch-логика, ComposingRange→active_range_chars, utf16_offset_to_char_index, тесты |
+| `crates/platform-android/src/ime_jni.rs` | nativeBeginBatchEdit, nativeEndBatchEdit, nativeGetComposingStart/End, getCursorCapsMode (эвристика), setComposingRegion (ComposingRange) |
+| `android/.../EguiImeView.kt` | beginBatchEdit, endBatchEdit, finishComposingText→JNI, performPrivateCommand→лог, +JNI-декларации |
+| `android/.../EguiActivity.kt` | updateCursorRect→updateSelection (imm) |
+| `examples/showcase/.../EguiImeView.kt` | синхронизировано |
+| `examples/showcase/.../EguiActivity.kt` | синхронизировано |
+| `examples/counter/.../EguiImeView.kt` | синхронизировано |
+| `examples/counter/.../EguiActivity.kt` | синхронизировано |
+
+### Новые тесты
+- `utf16_offset_bmp_chars_match`
+- `utf16_offset_zero_always_zero`
+- `utf16_offset_beyond_text_maps_to_len`
+- `batch_edit_buffers_events`
+- `nested_batch_flushes_only_at_depth_zero`
+- `no_batch_goes_directly_to_pending`

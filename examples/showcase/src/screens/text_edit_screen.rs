@@ -73,7 +73,7 @@ impl Component for TextEditScreen {
                     .hint("example@mail.com")
                     .single_line()
                     .keyboard_type(KeyboardType::Email)
-                    .ime_action(ImeAction::Done)
+                    .ime_action(ImeAction::Next)
                     .on_changed(move |v| email.set(v.to_owned()))
                     .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);

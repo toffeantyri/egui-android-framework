@@ -32,6 +32,12 @@ pub struct InputState {
     /// Буфер доставки: содержит `ime_pending` из ПРОШЛОГО кадра, готовый к
     /// вставке в `RawInput` в текущем кадре.
     pub ime_deliver: Vec<egui::Event>,
+    /// Глубина вложенности batch-операций IME (`beginBatchEdit`/`endBatchEdit`).
+    /// Пока `batch_depth > 0`, текстовые события буферизуются в `ime_batch_buffer`.
+    pub ime_batch_depth: u32,
+    /// Буфер для накопления IME-событий внутри batch-операции. При `endBatchEdit`
+    /// (когда `batch_depth` становится 0) содержимое переносится в `ime_pending`.
+    pub ime_batch_buffer: Vec<egui::Event>,
 }
 
 impl InputState {
@@ -42,6 +48,8 @@ impl InputState {
             back_pressed: false,
             ime_pending: Vec::new(),
             ime_deliver: Vec::new(),
+            ime_batch_depth: 0,
+            ime_batch_buffer: Vec::new(),
         }
     }
 }

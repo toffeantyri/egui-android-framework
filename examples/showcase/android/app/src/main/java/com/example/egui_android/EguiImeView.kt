@@ -8,66 +8,31 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 
-/**
- * Невидимый `View`, который существует только ради IME (InputConnection).
- *
- * GameActivity рендерит UI в Surface (egui/GL). Для работы нативной клавиатуры
- * с собственным вводом не используется штатный IME-протокол GameActivity
- * (`TextEvent`/`setTextInputState`). Вместо этого этот невидимый View:
- *
- *  1. При активации IME Android обращается к `onCreateInputConnection`.
- *  2. Мы возвращаем собственный `InputConnection`, который переопределяет
- *     `commitText`, `setComposingText`, `deleteSurroundingText`,
- *     `performEditorAction`, `finishComposingText`.
- *  3. Каждый такой метод вызывает JNI-функцию `nativeOn*...`, реализованную
- *     в Rust (`ime_jni.rs`). Rust кладёт команду в очередь `PlatformState.ime_cmds`,
- *     которую главный цикл преобразует в `egui::Event`.
- *
- * Никаких draw — View полностью невидим, рисует только рендер в Surface.
- */
 class EguiImeView(context: Context) : View(context) {
 
-    // Последние inputType/imeOptions, переданные из Rust через EguiActivity.setImeOptions.
-    // Используются в onCreateInputConnection, чтобы после restartInput EditorInfo
-    // отражал тип поля/действия текущего TextEdit (а не хардкод).
-    private var currentInputType: Int = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    private var currentInputType: Int = InputType.TYPE_CLASS_TEXT
     private var currentImeOptions: Int = EditorInfo.IME_ACTION_NEXT or EditorInfo.IME_FLAG_NO_EXTRACT_UI
 
-    // Фокусируемость в touch-режиме, чтобы IME мог активироваться по тапу.
     init {
         isFocusable = true
         isFocusableInTouchMode = true
     }
 
-    /**
-     * Обновить EditorInfo-настройки IME (переданы из Rust через JNI).
-     */
     fun applyOptions(inputType: Int, imeOptions: Int) {
         currentInputType = inputType
         currentImeOptions = imeOptions
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
-
-    override fun onDraw(canvas: Canvas) {
-        // Не рисуем ничего — невидимый слой для IME.
-    }
+    override fun onDraw(canvas: Canvas) {}
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         super.onCreateInputConnection(outAttrs)
-
-        // Применяем inputType/imeOptions, переданные из Rust через setImeOptions.
         outAttrs.inputType = currentInputType
         outAttrs.imeOptions = currentImeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-
-        // Используем BaseInputConnection — он даёт корректное поведение для
-        // редактирования (deleteSurroundingText, commitText) без собственной view.
         return EguiImeInputConnection(this)
     }
 
-    /**
-     * Собственный InputConnection, который пробрасывает IME-события в Rust JNI.
-     */
     private inner class EguiImeInputConnection(targetView: View) :
         BaseInputConnection(targetView, true) {
 
@@ -77,8 +42,6 @@ class EguiImeView(context: Context) : View(context) {
                 logIme("commitText", t)
                 nativeOnCommitText(t, newCursorPosition)
             }
-            // Не даём Android самому вставить текст — вставку делает egui из
-            // события `Event::Text`, полученного из Rust после JNI.
             return true
         }
 
@@ -91,6 +54,7 @@ class EguiImeView(context: Context) : View(context) {
 
         override fun finishComposingText(): Boolean {
             logIme("finishComposingText", "")
+            nativeOnComposingText("", 0)
             return true
         }
 
@@ -100,22 +64,35 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
-        // ─── Обратная связь: Rust владеет текстом поля, IME запрашивает его ───
-        // Эти методы переопределяют BaseInputConnection, чтобы Kotlin возвращал
-        // реальный текст/курсор фокусного поля, хранимый в Rust
-        // (PlatformState.ime_editor_state), а не пустоту из невидимого View.
-
-        override fun getTextBeforeCursor(length: Int, flags: Int): CharSequence? {
-            return nativeGetTextBeforeCursor(length, flags)
+        override fun sendKeyEvent(event: android.view.KeyEvent): Boolean {
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DEL &&
+                (event.action == android.view.KeyEvent.ACTION_DOWN ||
+                    event.action == android.view.KeyEvent.ACTION_MULTIPLE)
+            ) {
+                logIme("sendKeyEvent", "DEL -> deleteSurroundingText(${event.repeatCount + 1},0)")
+                deleteSurroundingText(event.repeatCount + 1, 0)
+                return true
+            }
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL &&
+                (event.action == android.view.KeyEvent.ACTION_DOWN ||
+                    event.action == android.view.KeyEvent.ACTION_MULTIPLE)
+            ) {
+                logIme("sendKeyEvent", "FORWARD_DEL -> deleteSurroundingText(0,${event.repeatCount + 1})")
+                deleteSurroundingText(0, event.repeatCount + 1)
+                return true
+            }
+            return super.sendKeyEvent(event)
         }
 
-        override fun getTextAfterCursor(length: Int, flags: Int): CharSequence? {
-            return nativeGetTextAfterCursor(length, flags)
+        override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+            logIme("deleteSurroundingTextInCodePoints", "[$beforeLength, $afterLength]")
+            nativeOnDeleteSurroundingText(beforeLength, afterLength)
+            return true
         }
 
-        override fun getSelectedText(flags: Int): CharSequence? {
-            return nativeGetSelectedText(flags)
-        }
+        override fun getTextBeforeCursor(length: Int, flags: Int): CharSequence? = nativeGetTextBeforeCursor(length, flags)
+        override fun getTextAfterCursor(length: Int, flags: Int): CharSequence? = nativeGetTextAfterCursor(length, flags)
+        override fun getSelectedText(flags: Int): CharSequence? = nativeGetSelectedText(flags)
 
         override fun getExtractedText(request: android.view.inputmethod.ExtractedTextRequest?, flags: Int): android.view.inputmethod.ExtractedText? {
             val text = nativeGetFullText() ?: return null
@@ -128,19 +105,11 @@ class EguiImeView(context: Context) : View(context) {
             return et
         }
 
-        override fun getCursorCapsMode(reqModes: Int): Int {
-            return nativeGetCursorCapsMode(reqModes)
-        }
-
-        override fun setSelection(start: Int, end: Int): Boolean {
-            nativeSetSelection(start, end)
-            return true
-        }
-
-        override fun setComposingRegion(start: Int, end: Int): Boolean {
-            nativeSetComposingRegion(start, end)
-            return true
-        }
+        override fun getCursorCapsMode(reqModes: Int): Int = nativeGetCursorCapsMode(reqModes)
+        override fun setSelection(start: Int, end: Int): Boolean { nativeSetSelection(start, end); return true }
+        override fun setComposingRegion(start: Int, end: Int): Boolean { nativeSetComposingRegion(start, end); return true }
+        override fun beginBatchEdit(): Boolean { nativeBeginBatchEdit(); return true }
+        override fun endBatchEdit(): Boolean { nativeEndBatchEdit(); return true }
 
         override fun performEditorAction(editorAction: Int): Boolean {
             logIme("performEditorAction", editorAction.toString())
@@ -154,16 +123,15 @@ class EguiImeView(context: Context) : View(context) {
             return true
         }
 
-        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean =
-            super.performPrivateCommand(action, data)
+        override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean {
+            logIme("performPrivateCommand", "action=$action")
+            return false
+        }
     }
 
     private fun logIme(method: String, arg: String) {
-        val tid = Thread.currentThread().name
-        android.util.Log.i("EguiImeView", "$method: '$arg' (thread=$tid)")
+        android.util.Log.i("EguiImeView", "$method: '$arg' (thread=${Thread.currentThread().name})")
     }
-
-    // ─── JNI (реализованы в Rust: crates/platform-android/src/ime_jni.rs) ───
 
     private external fun nativeOnCommitText(text: String, newCursorPosition: Int)
     private external fun nativeOnComposingText(text: String, newCursorPosition: Int)
@@ -171,7 +139,6 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeOnImeActionNext()
     private external fun nativeOnImeActionDone()
 
-    // Двусторонний InputConnection: чтение текста/курсора из Rust (editor_state).
     private external fun nativeGetTextBeforeCursor(length: Int, flags: Int): String?
     private external fun nativeGetTextAfterCursor(length: Int, flags: Int): String?
     private external fun nativeGetSelectedText(flags: Int): String?
@@ -181,4 +148,13 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeGetSelectionEnd(): Int
     private external fun nativeSetSelection(start: Int, end: Int)
     private external fun nativeSetComposingRegion(start: Int, end: Int)
+    private external fun nativeGetComposingStart(): Int
+    private external fun nativeGetComposingEnd(): Int
+    private external fun nativeBeginBatchEdit()
+    private external fun nativeEndBatchEdit()
+
+    fun getImeSelectionStart(): Int = nativeGetSelectionStart()
+    fun getImeSelectionEnd(): Int = nativeGetSelectionEnd()
+    fun getImeComposingStart(): Int = nativeGetComposingStart()
+    fun getImeComposingEnd(): Int = nativeGetComposingEnd()
 }

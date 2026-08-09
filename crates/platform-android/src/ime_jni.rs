@@ -274,13 +274,40 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetFullT
 
 /// `getCursorCapsMode(reqModes)` — всегда 0 (поле не знает о регистре; IME
 /// сам решает по inputType).
+/// `getCursorCapsMode(reqModes)` — возвращает битовую маску режимов
+/// капитализации: после точки/!/? — CAP_MODE_SENTENCES, после пробела —
+/// CAP_MODE_WORDS, в начале — все три.
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetCursorCapsMode(
     _env: JNIEnv,
     _class: JClass,
     _req_modes: i32,
 ) -> jint {
-    0
+    /// `CAP_MODE_CHARACTERS` — следующий символ должен быть заглавным.
+    const CAP_MODE_CHARACTERS: i32 = 0x0001;
+    /// `CAP_MODE_WORDS` — начало нового слова.
+    const CAP_MODE_WORDS: i32 = 0x0002;
+    /// `CAP_MODE_SENTENCES` — начало нового предложения.
+    const CAP_MODE_SENTENCES: i32 = 0x0004;
+
+    let state = current_editor_state();
+    let Some(st) = state else {
+        return 0;
+    };
+
+    if st.selection_start == 0 {
+        return CAP_MODE_CHARACTERS | CAP_MODE_WORDS | CAP_MODE_SENTENCES;
+    }
+
+    // Берём символ перед курсором (по UTF-16 индексу).
+    let before = utf16_substr(&st.text, 0, st.selection_start);
+    let last_char = before.chars().last();
+
+    match last_char {
+        Some('.') | Some('!') | Some('?') => CAP_MODE_CHARACTERS | CAP_MODE_SENTENCES,
+        Some(' ') => CAP_MODE_WORDS,
+        _ => 0,
+    }
 }
 
 /// `getSelectionStart()` — позиция начала выделения (UTF-16), для getExtractedText.
@@ -315,10 +342,9 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetSelec
     push_cmd(ImeCmd::SetSelection { start, end });
 }
 
-/// `setComposingRegion(start, end)` — IME помечает диапазон композиции
-/// (candidate window). Сам preedit уже отображается через `setComposingText`;
-/// здесь фиксируем регион для будущей публикации в `ImeEditorState.composing_*`.
-/// На текущий момент — no-op с логом (диапазон до конца не привязан к egui).
+/// `setComposingRegion(start, end)` — IME помечает диапазон композиции.
+/// Читает текст из `ImeEditorState` и отправляет `ImeCmd::ComposingRange`
+/// с вырезанным текстом и границами.
 #[no_mangle]
 pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetComposingRegion(
     _env: JNIEnv,
@@ -327,6 +353,54 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetCompo
     end: i32,
 ) {
     log::info!("IME-JNI: setComposingRegion {start}..{end}");
+    let state = current_editor_state();
+    if let Some(st) = state {
+        let text = utf16_substr(&st.text, start as usize, end as usize);
+        log::info!("IME-JNI: setComposingRegion text={:?}", text);
+        push_cmd(ImeCmd::ComposingRange { text, start, end });
+    }
+}
+
+/// Возвращает composing_start из текущего `ImeEditorState`. Если composing
+/// не активен — `-1` (Android-конвенция).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetComposingStart(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    current_editor_state()
+        .and_then(|st| st.composing_start)
+        .map_or(-1, |v| v as jint)
+}
+
+/// Возвращает composing_end из текущего `ImeEditorState`. Если composing
+/// не активен — `-1` (Android-конвенция).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetComposingEnd(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    current_editor_state()
+        .and_then(|st| st.composing_end)
+        .map_or(-1, |v| v as jint)
+}
+
+/// `beginBatchEdit()` — начало пакетной операции IME.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeBeginBatchEdit(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    push_cmd(ImeCmd::BeginBatchEdit);
+}
+
+/// `endBatchEdit()` — завершение пакетной операции IME.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeEndBatchEdit(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    push_cmd(ImeCmd::EndBatchEdit);
 }
 
 // ─── Rust → Kotlin: показ/скрытие клавиатуры через EguiImeView ───────────
