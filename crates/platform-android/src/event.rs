@@ -117,37 +117,8 @@ pub enum KeyAction {
 
 /// IME-команда, пришедшая из Kotlin `InputConnection` через JNI.
 ///
-/// Эти команды генерируются на главном Java-потоке (в `EguiImeView`
-/// InputConnection) и доставляются в главный цикл через потокобезопасную
-/// очередь в `PlatformState`. В цикле они конвертируются в `egui::Event`.
-///
-/// Только здесь получается контент для ввода — никакого использования
-/// `InputEvent::TextEvent` / `setTextInputState` / `textInputState()`.
-#[derive(Debug, Clone)]
-pub enum ImeCmd {
-    /// `commitText(text)` — финальный текст (как правило, одна строка/символ).
-    /// Конвертируется в `egui::ImeEvent::Commit(text)` — финализирует IME-композицию.
-    Commit(String),
-    /// `setComposingText(text)` — промежуточный предредактируемый текст (composition).
-    /// Используется для отображения preedit, не ломая буфер.
-    Composing(String),
-    /// `performEditorAction(Next)` — перейти к следующему TextEdit.
-    Next,
-    /// `performEditorAction(Done/Search/Go)` — завершить редактирование, скрыть клавиатуру.
-    Done,
-    /// `deleteSurroundingText(before, after)` — удалить текст вокруг курсора.
-    DeleteSurrounding { before: i32, after: i32 },
-    /// `setComposingText` с диапазоном (start..end) в текущей строке.
-    ComposingRange { text: String, start: i32, end: i32 },
-    /// `setSelection(start, end)` — пользователь переставил курсор/выделение.
-    /// Позиции — в UTF-16 code units (как Android). В текущей версии полностью
-    /// применить к egui-курсору сложно; инкапсулируется как no-op (см.
-    /// `process_ime_cmd`).
-    SetSelection { start: i32, end: i32 },
-    /// `beginBatchEdit()` — начало пакетной операции IME. Пока буфер открыт,
-    /// текстовые события буферизуются, а не пушатся в `ime_pending`.
-    BeginBatchEdit,
-    /// `endBatchEdit()` — завершение пакетной операции. Накопленные события
-    /// переносятся в `ime_pending`.
-    EndBatchEdit,
-}
+/// Определена в хост-совместимом модуле [`crate::ime_logic`] (без
+/// `cfg(target_os = "android")`), чтобы преобразование было покрыто
+/// юнит-тестами на хосте. Здесь — только реэкспорт для совместимости
+/// android-кода (`crate::event::ImeCmd`).
+pub use crate::ime_logic::ImeCmd;

@@ -1,35 +1,88 @@
-## 📋 Задача: InputConnection — оставшиеся пункты
+# 📋 Задача: InputConnection — оставшиеся пункты
 
-**Статус:** ✅ ВЫПОЛНЕНО (все 6 пунктов за один проход)
+## Статус: ЧАСТИЧНО (не всё проверено на устройстве!)
 
-### Критерии успеха
-- [x] `updateCursorRect` → `InputMethodManager.updateSelection` (candidate window)
-- [x] `finishComposingText` → пустой Preedit (composition сбрасывается)
-- [x] `setComposingRegion` → `ImeCmd::ComposingRange` с `active_range_chars`
-- [x] `beginBatchEdit`/`endBatchEdit` → буферизация + вложенность
-- [x] `getCursorCapsMode` → эвристика заглавной (после ./!/?)
-- [x] `performPrivateCommand` → логирование
-- [x] Все тесты зелёные (120 шт.)
+> ⚠️ Честный аудит. "Код есть" ≠ "работает". Ниже разделено:
+> - ✅ **Доказано на устройстве** (видел в логах / юзер подтвердил)
+> - ⚠️ **Код есть, но видимый эффект НЕ подтверждён**
+> - ❌ **Не работает**
 
-### Изменённые файлы
+## 1. Таблица тесткейсов — устройство
+
+| # | Тесткейс | Статус | Как проверить |
+|---|---|---|---|
+| T1 | Показ клавиатуры через EguiImeView | ✅ работает | Тап на поле → клавиатура открывается, лог `showSoftInput okFocus=true okShow=true` |
+| T2 | Ввод текста (кириллица) | ✅ работает | Ввести "привет" → буфер `"привет"`, лог `commitText` |
+| T3 | Удаление по одной букве (Backspace) | ✅ работает | Ввести "лоло" → 4× Backspace → `"лол"→"ло"→"л"→""`, лог `deleteSurroundingText [1,0]` |
+| T4 | Переключение полей тапом | ✅ работает | Тап Email → тап Password → фокус переходит |
+| T5 | IME_ACTION_NEXT (кнопка Далее) | ✅ работает | В Email (Next) нажать "Далее" → фокус на след. поле |
+| T6 | Candidate window / подсказки | ❌ нет | Ввести слово → НЕТ полосы подсказок (GBoard не использует composing) |
+| T7 | Автокоррекция | ❌ нет | Нет подчёркивания, нет вариантов (следствие T6) |
+| T8 | Caps после точки (getCursorCapsMode) | ⚠️ не пров. | Ввести "привет." → пробел → должна быть заглавная |
+| T9 | finishComposingText (сброс composition) | ⚠️ не пров. | Нет composing-ввода → эффект не виден |
+| T10 | setComposingRegion (автокоррекция) | ⚠️ не пров. | Нет автокоррекции → эффект не виден |
+| T11 | beginBatchEdit/endBatchEdit (без мерцания) | ⚠️ не пров. | Нет автокоррекции → batch не проявляется |
+| T12 | performPrivateCommand (эмодзи) | ✅ логируется | Выбор эмодзи → `performPrivateCommand: action=...` |
+| T13 | Внешняя клавиатура не нужна — только Gboard | ✅ | Основной сценарий |
+
+**Вывод по устройству:** базовое (ввод, удаление, фокус, Next) — **работает**.
+Подсказки/автокоррекция — **не работают** (требуют composing-модель ввода).
+
+## 2. Что нужно сделать, чтобы T6-T11 реально заработали
+
+Текущая модель: Gboard вводит через `commitText` по одному символу (НЕ composing).
+Для candidate window, автокоррекции и preedit IME необходима composing-модель:
+- Gboard должен слать `setComposingText` (composing), а не `commitText`
+- нужно "держать" composing-регион и отправлять его обратно IME через `updateSelection`
+
+Это **отдельная крупная задача**, не входит в текущий скоуп.
+
+## 3. Тесты — ВСЕ ЗАПУСКАЮТСЯ (было dead code!)
+
+### Проблема (исправлена)
+`event.rs`, `input.rs`, `input_processing.rs` — под `#![cfg(target_os = "android")]`.
+Мои тесты IME в `input_processing.rs` были **dead code** — никогда не запускались на хосте.
+
+### Решение (рефакторинг)
+Вынесена чистая IME-логика в **`crates/platform-android/src/ime_logic.rs`** (без `cfg(android)`):
+- `ImeCmd` (переехал из `event.rs`)
+- `ImeOutcome`, `ImeBuffer`, `process_ime_cmd`, `utf16_offset_to_char_index`
+- `event.rs` теперь `pub use crate::ime_logic::ImeCmd`
+- `input_processing.rs` делегирует в `ime_logic`
+
+### Результат
+`cargo test --workspace --lib` → **21 тест в platform-android** (было 7), **всего 134**:
+```
+25 (ui) + 28 (runtime) + 21 (platform-android: 7 platform_state + 14 ime_logic)
++ 23 (navigation) + 13 (core) + 24 (showcase) = 134  ✅
+```
+
+### Новые тесты (`ime_logic::tests`) — все запускаются на хосте
+- `utf16_offset_bmp_chars_match` — BMP: offset == char index
+- `utf16_offset_zero_always_zero` — offset 0 → 0 даже для эмодзи
+- `utf16_offset_beyond_text_maps_to_len` — offset за пределами → длина
+- `utf16_offset_emoji_reduces_char_index` — non-BMP: char < utf16 offset
+- `commit_goes_directly_to_pending_without_batch`
+- `delete_surrounding_before_emits_backspaces` / `after_emits_deletes`
+- `batch_edit_buffers_and_flushes` — batch буферизует и выгружает
+- `nested_batch_flushes_only_at_depth_zero` — вложенность
+- `composing_sets_active_range_to_full_text` / `empty_composing_resets_active_range`
+- `next_returns_next_outcome` / `done_returns_done_outcome`
+- `set_selection_is_noop`
+
+## 4. Файлы (изменено / добавлено)
 
 | Файл | Что |
 |---|---|
-| `crates/platform-android/src/event.rs` | +BeginBatchEdit, +EndBatchEdit |
-| `crates/platform-android/src/input.rs` | +ime_batch_depth, +ime_batch_buffer |
-| `crates/platform-android/src/input_processing.rs` | batch-логика, ComposingRange→active_range_chars, utf16_offset_to_char_index, тесты |
-| `crates/platform-android/src/ime_jni.rs` | nativeBeginBatchEdit, nativeEndBatchEdit, nativeGetComposingStart/End, getCursorCapsMode (эвристика), setComposingRegion (ComposingRange) |
-| `android/.../EguiImeView.kt` | beginBatchEdit, endBatchEdit, finishComposingText→JNI, performPrivateCommand→лог, +JNI-декларации |
-| `android/.../EguiActivity.kt` | updateCursorRect→updateSelection (imm) |
-| `examples/showcase/.../EguiImeView.kt` | синхронизировано |
-| `examples/showcase/.../EguiActivity.kt` | синхронизировано |
-| `examples/counter/.../EguiImeView.kt` | синхронизировано |
-| `examples/counter/.../EguiActivity.kt` | синхронизировано |
+| `crates/platform-android/src/ime_logic.rs` | **НОВЫЙ** — чистая IME-логика + 14 тестов |
+| `crates/platform-android/src/event.rs` | `ImeCmd` → `pub use ime_logic::ImeCmd` |
+| `crates/platform-android/src/input_processing.rs` | делегирует в `ime_logic`, удалены dead-тесты |
+| `crates/platform-android/src/lib.rs` | + `pub mod ime_logic` |
+| `crates/platform-android/src/run.rs` | KeyboardController show/hide → реальный JNI |
+| `android/.../EguiImeView.kt` | sendKeyEvent→deleteSurroundingText, NO_SUGGESTIONS убран |
+| `examples/showcase|counter/.../EguiImeView.kt` | синхронизировано |
 
-### Новые тесты
-- `utf16_offset_bmp_chars_match`
-- `utf16_offset_zero_always_zero`
-- `utf16_offset_beyond_text_maps_to_len`
-- `batch_edit_buffers_events`
-- `nested_batch_flushes_only_at_depth_zero`
-- `no_batch_goes_directly_to_pending`
+## 5. Известные нерешённые проблемы
+- T6/T7: candidate window и автокоррекция не работают (нужна composing-модель)
+- Т8-T11: видимый эффект не подтверждён (зависят от composing)
+- `updateSelection` вызывается каждый кадр (спам, см. handoff)
