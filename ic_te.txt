@@ -1,0 +1,97 @@
+# 📋 Валидация плана реализации оставшихся пунктов InputConnection
+
+## Architecture Validation
+
+**Затрагиваемые слои:** только `platform-android` (Rust: `ime_jni.rs`, `ime_logic.rs`) и Kotlin-код приложений (`EguiImeView.kt`).
+
+Проверенные правила:
+- ✔ **DAG без циклов**: `ui`/`runtime`/`core`/`navigation` не меняются; `ImeCmd` определён в хост-совместимом `ime_logic.rs` (без `cfg(android)`), `event.rs` его реэкспортирует. Добавление варианта `PrivateCommand` не создаёт новых рёбер.
+- ✔ **Event-driven / Push**: `PrivateCommand` кладётся в `push_cmd` → `PlatformState.ime_cmds` → `loop.rs`, без polling.
+- ✔ **Изоляция**: платформа не знает про UI/State/Runtime-бизнес-логику.
+- ✔ **Нет самоблокировки**: `process_ime_cmd` не трогает `ctx.data_mut`, всё через `ImeBuffer`.
+
+**Потенциальные нарушения (уточнения к плану):**
+
+1. **`input_processing.rs` менять НЕ нужно.** В нём `process_ime_cmd` — это прозрачная обёртка, делегирующая в `ime_logic::process_ime_cmd` (см. `input_processing.rs:28-38`). Новый вариант `ImeCmd::PrivateCommand` покроется автоматически.
+2. **3 копии `EguiImeView.kt`** (все разные): `android/app`, `examples/counter/android/app`, `examples/showcase/android/app`. Правки Kotlin нужны во всех трёх, а не в одном.
+3. **`loop.rs` match по `ImeOutcome` безопасен**: `PrivateCommand` возвращает `ImeOutcome::None`, ветка `None => {}` уже есть.
+4. **`ImeCmd` где-то ещё?** Используется как конструктор в `native_backend.rs:240` (`ImeCmd::Commit`), других match по всем вариантам нет → добавление варианта не сломает exhaustive-матчи.
+
+---
+
+## ✅ Валидация пунктов по коду
+
+### Пункт 1 — `performPrivateCommand` (передача в Rust)
+
+**Текущее состояние (все 3 копии Kotlin):**
+```kotlin
+override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean {
+    logIme("performPrivateCommand", "action=$action")
+    return false
+}
+```
+Логируется только на Kotlin-стороне (`logIme` → Log.i). В Rust не передаётся.
+
+**Что подтверждается для реализации:**
+- `ime_jni.rs`: есть готовый `push_cmd(ImeCmd)` + `jstring_to_string`. Новая JNI-функция `Java_..._nativeOnPrivateCommand` добавляется по образцу `nativeOnComposingText`.
+- `ime_logic.rs`: нет `ImeCmd::PrivateCommand`, нет ветки в `process_ime_cmd`. Нужно добавить.
+- `event.rs`: `ImeCmd` реэкспортируется → вариант придёт автоматически.
+
+**Замечание по дублированию логов:** сейчас `logIme` уже логирует `performPrivateCommand` в Kotlin. Все остальные `ImeCmd` логируются в `process_ime_cmd` (Rust). Чтобы единое место диагностики, логирование в Rust (`log::info!("IME: performPrivateCommand action={:?}")`), а Kotlin-лог можно оставить как быстрый trace вызова. Не критично; сохраню оба для полноты logcat.
+
+**Валидно ✔**
+
+### Пункт 2 — `getExtractedText` с partial offsets
+
+**Текущее состояние (все 3 копии):** уже есть `getExtractedText`, возвращает полный текст, `partialStart/EndOffset` игнорируются.
+
+**Что подтверждается:**
+- `nativeGetFullText`, `nativeGetSelectionStart/End` существуют и возвращают UTF-16 offsets.
+- Обрезка через Kotlin `substring` (UTF-16 units) корректна — Java `char` = UTF-16 unit, `ExtractedText.text` живёт в этих же units.
+- **Корректировка selection относительно `startOffset`** — правильная и обязательная (Android требует offsets относительно `partialStartOffset`).
+
+**Замечание по edge-case:** `selectionStart/End` могут попасть вне диапазона partial (если курсор вне обрезанного куска). `coerceAtLeast(0)`/`coerceAtMost(len)` нужны с обеих сторон — план предусматривает только `coerceAtLeast(0)`, добавлю верхнюю границу.
+
+**Валидно ✔**
+
+### Пункт 3 — тесты
+
+- `private_command_is_noop` — валиден и необходим (ветка должна вернуть `None`, буферы пусты). Покрывает новую ветку.
+- `composing_range_with_emoji_active_range` — валиден: `utf16_offset_to_char_index("a😀b",1..3) → 1..2` (утв. `Some(1..2)`). Уже есть аналог `utf16_offset_emoji_reduces_char_index`. Новый тест не обязателен (логика уже покрыта), но добавлю для явной проверки active_range на эмодзи.
+
+**Ограничение по покрытию 100%:** partial-логика `getExtractedText` живёт в **Kotlin** — в проекте нет JVM-юнит-тестов для Kotlin-кода, а Rust-модуль `ime_jni.rs` под `cfg(target_os="android")` на хосте не собирается. **100% Rust-покрытия для этого пункта недостижимо.** Покрытие возможно только: (а) мануально на устройстве (план уже содержит чек-лист), либо (б) вынести обрезку в чистую Rust-функцию `ime_logic` (новую `extract_partial`) и покрыть юнит-тестом. Это самое честное решение для покрытия пункта 2.
+
+---
+
+# 🎯 Итоговый план реализации
+
+## Глобально (зачем)
+- **Пользователь:** при проблемном IME (Gboard/Samsung) видно в logcat, какие private commands шлёт клавиатура; длинные поля открываются/подсказывают быстрее за счёт partial extract.
+- **Разработчик:** возможность диагностировать IME и в будущем обрабатывать конкретные private-commands; нет лишней передачи полного текста при каждом обновлении.
+
+## Задача
+Дополнить InputConnection: передача `performPrivateCommand` в Rust (диагностика) + partial-режим `getExtractedText` + тесты, минимизируя инвазивность и сохраняя TDD.
+
+## Критерии успеха
+- [ ] `ImeCmd::PrivateCommand(String)` добавлен; ветка возвращает `ImeOutcome::None`; юнит-тест `private_command_is_noop` зелёный.
+- [ ] `nativeOnPrivateCommand` в Rust + JNI-объявление + вызов в 3 Kotlin-копиях; в logcat виден action.
+- [ ] `getExtractedText` возвращает partial-текст при `partialStartOffset>=0` с корректной коррекцией selection; полный текст при `-1`.
+- [ ] Обрезка partial вынесена в чистую Rust-функцию (для хостовых юнит-тестов) — покрытие пункта 2.
+- [ ] `cargo test -p egui-android-platform-android` и `cargo check --workspace` зелёные.
+
+## Границы (не делаем)
+- ❌ Не обрабатываем private-команды функционально (только лог) — P2.
+- ❌ Не трогаем `ui`/`runtime`/`core`/`navigation`.
+- ❌ Не выносим новую JNI-обвязку за пределы `ime_jni.rs`.
+- ❌ Не пишем JVM-граду — ручной чек-лист на устройстве для интеграционного на устройстве.
+
+## План (от наиболее инвазивного)
+
+| # | Шаг | Инвазивность | Тесты |
+|---|-----|--------------|-------|
+| 1 | **ImeCmd::PrivateCommand**: добавить вариант в `ime_logic.rs` + ветку no-op в `process_ime_cmd` (возвращает `None`) | 🟠 Средняя — меняет публичный enum `ImeCmd` (re-экспорт через `event.rs`) | Юнит: `private_command_is_noop` (ветка + буферы) |
+| 2 | **JNI `nativeOnPrivateCommand`** в `ime_jni.rs` (`jstring_to_string` + `push_cmd(ImeCmd::PrivateCommand)`) | 🟡 Низкая — новый `#[no_mangle]`, локальный | — (под `cfg(android)`, не собирается на хосте; логика уже покрыта в ime_logic) |
+| 3 | **Kotlin ×3 `performPrivateCommand`**: заменить `logIme`-only на `nativeOnPrivateCommand(action)` | 🟡 Низкая | Ручной (logcat) |
+| 4 | **Partial `getExtractedText`** — вынести обрезку в чистую Rust-функцию `extract_partial(text, sel_start, sel_end, start, end)` в `ime_logic.rs` + покрыть юнит-тестами | 🟠 Средняя — новая чистая функция + JNI-мост для чтения | Юнит: граничные случаи (start/end, selection внутри/вне, эмодзи/UTF-16) |
+| 5 | **Kotlin ×3 `getExtractedText`** — вызвать partial-логику через новые JNI-функции (или остаться на `nativeGetFullText` + Kotlin-обрезке) | 🟡 Низкая | Ручной (чек-лист) |
+| 6 | Расширенный юнит-тест `composing_range_with_emoji_active_range` (эксплуатирует `utf16_offset_to_char_index` на эмодзи) | 🟢 Косметика | Юнит |

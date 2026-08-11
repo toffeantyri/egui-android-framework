@@ -101,6 +101,7 @@ GRADLE_TASK="assembleDebug"
 INSTALL=false
 SHOW_LOGS=false
 CLEAN=false
+CACHE_CLEAN=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -109,6 +110,13 @@ for arg in "$@"; do
             GRADLE_TASK="assembleRelease"
             ;;
         --clean) CLEAN=true ;;
+        # Полная чистка gradle-Кэша перед сборкой: останавливает daemon и удаляет
+        # .gradle + app/build (избавляет от повреждённых transforms-артефактов),
+        # затем применяет ту же логику, что и --clean.
+        --cache-clean)
+            CACHE_CLEAN=true
+            CLEAN=true
+            ;;
         --install) INSTALL=true ;;
         --log) SHOW_LOGS=true ;;
         --run)
@@ -175,6 +183,12 @@ echo "  $JNI_DIR/$TARGET/$LIB_NAME"
 echo ""
 echo "=== 3/4: Сборка APK ==="
 cd "$ANDROID_DIR"
+
+if [ "$CACHE_CLEAN" = true ]; then
+    echo "  --cache-clean: останавливаем gradle daemon и чистим .gradle + app/build"
+    ./gradlew --stop
+    rm -rf .gradle app/build
+fi
 
 if [ "$CLEAN" = true ]; then
     echo "  --clean: очищаем прошлую сборку Gradle"
