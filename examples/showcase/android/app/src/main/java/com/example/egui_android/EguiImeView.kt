@@ -125,6 +125,11 @@ class EguiImeView(context: Context) : View(context) {
 
         override fun performPrivateCommand(action: String?, data: android.os.Bundle?): Boolean {
             logIme("performPrivateCommand", "action=$action")
+            if (action != null) {
+                // Передаём в Rust (ImeCmd::PrivateCommand) для диагностики — каждая
+                // IME шлёт свои action, egui их не обрабатывает (только лог).
+                nativeOnPrivateCommand(action)
+            }
             return false
         }
     }
@@ -136,6 +141,7 @@ class EguiImeView(context: Context) : View(context) {
     private external fun nativeOnCommitText(text: String, newCursorPosition: Int)
     private external fun nativeOnComposingText(text: String, newCursorPosition: Int)
     private external fun nativeOnDeleteSurroundingText(beforeLength: Int, afterLength: Int)
+    private external fun nativeOnPrivateCommand(action: String)
     private external fun nativeOnImeActionNext()
     private external fun nativeOnImeActionDone()
 

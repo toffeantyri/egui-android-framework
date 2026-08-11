@@ -140,6 +140,24 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnCompos
     push_cmd(ImeCmd::ComposingRange { text, start, end });
 }
 
+/// `performPrivateCommand(action, data)` — приватная команда IME (Gboard, Samsung и т.д.).
+///
+/// Не обрабатывается функционально (egui не имеет API для private-команд), но
+/// передаётся в Rust через `ImeCmd::PrivateCommand`, где логируется для
+/// диагностики проблем с клавиатурой (см. ветку в `process_ime_cmd`).
+/// При необходимости в будущем здесь можно добавить обработку конкретных
+/// команд (например, emoji-panel от Gboard).
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnPrivateCommand<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+    action: jni::objects::JString<'a>,
+) {
+    let action = jstring_to_string(&mut env, action);
+    log::info!("IME-JNI: performPrivateCommand action={:?}", action);
+    push_cmd(ImeCmd::PrivateCommand(action));
+}
+
 // ─── Что читают JNI-функции: слот состояния редактирования ────────────────
 //
 // ui-слой (`TextEdit`) пишет `ImeEditorState` (текст + курсор в UTF-16) в

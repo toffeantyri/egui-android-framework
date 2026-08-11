@@ -49,6 +49,10 @@ pub enum ImeCmd {
     /// `endBatchEdit()` — завершение пакетной операции. Накопленные события
     /// переносятся в `pending`.
     EndBatchEdit,
+    /// `performPrivateCommand(action)` — приватная команда IME (Gboard, Samsung и т.д.).
+    /// Не обрабатывается функционально (egui не имеет API для private-команд),
+    /// только логируется для диагностики проблем с клавиатурой.
+    PrivateCommand(String),
 }
 
 /// Управляющий запрос от IME, требующий действия главного цикла (вне egui-событий).
@@ -221,6 +225,14 @@ pub fn process_ime_cmd(buffer: &mut ImeBuffer, cmd: ImeCmd) -> ImeOutcome {
                     buffer.pending.extend(buffered);
                 }
             }
+            ImeOutcome::None
+        }
+        ImeCmd::PrivateCommand(action) => {
+            // Приватная команда IME (action — нестандартизированная строка Gboard,
+            // Samsung и др.). egui не имеет API для private-команд, поэтому не
+            // порождаем egui-событие и не меняем состояние буфера. Только фиксируем
+            // для диагностики проблем с клавиатурой.
+            log::info!("IME: performPrivateCommand action={:?}", action);
             ImeOutcome::None
         }
     }
@@ -454,5 +466,32 @@ mod tests {
         assert_eq!(outcome, ImeOutcome::None);
         assert!(buf.pending.is_empty());
         assert!(buf.batch_buffer.is_empty());
+    }
+
+    /// Проверка: PrivateCommand — no-op (не генерирует egui-событий, буферы пусты).
+    #[test]
+    fn private_command_is_noop() {
+        let mut buf = ImeBuffer::new();
+        let outcome = process_ime_cmd(
+            &mut buf,
+            ImeCmd::PrivateCommand("com.google.android.inputmethod.latin.emoji".into()),
+        );
+        assert_eq!(outcome, ImeOutcome::None);
+        assert!(buf.pending.is_empty());
+        assert_eq!(buf.batch_depth, 0, "batch_depth не должен меняться");
+        assert!(buf.batch_buffer.is_empty());
+    }
+
+    /// Проверка: PrivateCommand внутри batch тоже no-op — не попадает ни в pending,
+    /// ни в batch_buffer, и не влияет на глубину batch.
+    #[test]
+    fn private_command_is_noop_inside_batch() {
+        let mut buf = ImeBuffer::new();
+        process_ime_cmd(&mut buf, ImeCmd::BeginBatchEdit);
+        let outcome = process_ime_cmd(&mut buf, ImeCmd::PrivateCommand("x".into()));
+        assert_eq!(outcome, ImeOutcome::None);
+        assert!(buf.pending.is_empty());
+        assert!(buf.batch_buffer.is_empty());
+        assert_eq!(buf.batch_depth, 1);
     }
 }
