@@ -158,6 +158,24 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnPrivat
     push_cmd(ImeCmd::PrivateCommand(action));
 }
 
+/// Системный Back закрыл IME на Kotlin-стороне (`EguiActivity.handleOnBackPressed`).
+///
+/// Клавиатуру уже скрыла Kotlin (`hideSoftInputForIme`). Здесь лишь взводим флаг
+/// в `PlatformState.ime_back_hidden`; главный цикл (`loop.rs`) на следующем кадре
+/// снимает egui-фокус с активного поля, из-за чего TextEdit убирает владельца и
+/// `publish_editor_blur`. Тогда повторный тап на поле вызовет `gained_focus`
+/// и заново покажет клавиатуру.
+#[no_mangle]
+pub extern "system" fn Java_com_example_egui_1android_EguiActivity_nativeOnSystemBackPressed(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    log::info!("IME-JNI: системный Back скрыл IME — взводим флаг");
+    if let Some(state) = GLOBAL_PLATFORM_STATE.get() {
+        state.set_ime_back_hidden();
+    }
+}
+
 // ─── Что читают JNI-функции: слот состояния редактирования ────────────────
 //
 // ui-слой (`TextEdit`) пишет `ImeEditorState` (текст + курсор в UTF-16) в
@@ -167,14 +185,16 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnPrivat
 
 /// Текущее состояние редактирования активного поля (копия).
 fn current_editor_state() -> Option<egui_android_runtime::ImeEditorState> {
-    log::info!(
-        "IME-EDIT: current_editor_state enter (thread={})",
-        thread_name()
-    );
+    // // Спам-логи (по 4-10 за кадр от getText*/getSelection*) — закомментированы
+    // // для диагностики; вернуть при необходимости.
+    // log::info!(
+    //     "IME-EDIT: current_editor_state enter (thread={})",
+    //     thread_name()
+    // );
     let r = GLOBAL_PLATFORM_STATE
         .get()
         .and_then(|ps| ps.ime_editor_state());
-    log::info!("IME-EDIT: current_editor_state exit -> {}", r.is_some());
+    // log::info!("IME-EDIT: current_editor_state exit -> {}", r.is_some());
     r
 }
 
@@ -493,7 +513,8 @@ pub fn update_cursor_rect_jni(
     right: i32,
     bottom: i32,
 ) {
-    log::info!("LOOP-JNI: update_cursor_rect enter [{left},{top},{right},{bottom}]");
+    // // Спам-лог (каждый кадр с активной IME) — закомментирован.
+    // log::info!("LOOP-JNI: update_cursor_rect enter [{left},{top},{right},{bottom}]");
     if vm_ptr.is_null() || activity_ptr.is_null() {
         return;
     }
@@ -519,7 +540,7 @@ pub fn update_cursor_rect_jni(
             ],
         );
     }
-    log::info!("LOOP-JNI: update_cursor_rect exit");
+    // log::info!("LOOP-JNI: update_cursor_rect exit");
 }
 
 /// Вспомогательный вызов метода Activity без аргументов на главном Java-потоке.

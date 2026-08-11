@@ -10,12 +10,11 @@
 
 > **Важно:** Этот крейт помечен `publish = false` — он не предназначен для публикации.
 > Используйте его как шаблон для своего приложения, скопировав структуру из
-> [`examples/counter`](https://github.com/toffeantyri/egui-android-framework/tree/master/examples/counter)
-> или [`examples/showcase`](https://github.com/toffeantyri/egui-android-framework/tree/master/examples/showcase).
+> [`examples/showcase`](https://github.com/toffeantyri/egui-android-framework/tree/master/examples/showcase).
 
 ## Структура
 
-Каждое конкретное приложение (showcase, counter) должно определить свою реализацию
+Каждое конкретное приложение (например, showcase) должно определить свою реализацию
 `Application` и вызывать её из `android_main`. Этот крейт — только обёртка для
 экспорта символа `android_main`.
 

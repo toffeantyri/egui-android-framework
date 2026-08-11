@@ -351,7 +351,7 @@ impl EglState {
     }
 
     pub fn swap_buffers(&self) -> Result<(), String> {
-        log::info!("EglState: swap_buffers begin");
+        // log::info!("EglState: swap_buffers begin");
         if unsafe { egl::eglSwapBuffers(self.display, self.surface) } == egl::EGL_FALSE {
             let err = unsafe { egl::eglGetError() };
             log::warn!("EglState: swap_buffers failed: {}", egl::egl_error_str(err));
@@ -360,7 +360,7 @@ impl EglState {
                 egl::egl_error_str(err)
             ));
         }
-        log::info!("EglState: swap_buffers end");
+        // log::info!("EglState: swap_buffers end");
         Ok(())
     }
 }

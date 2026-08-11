@@ -57,6 +57,15 @@ struct PlatformStateInner {
     #[cfg(target_os = "android")]
     ime_cmds: Vec<crate::event::ImeCmd>,
 
+    /// Флаг: системный Back закрыл IME на Kotlin-стороне.
+    ///
+    /// Kotlin `EguiActivity.handleOnBackPressed()` закрывает клавиатуру и
+    /// уведомляет нас через JNI (`nativeOnSystemBackPressed`). Главный цикл
+    /// считывает флаг в начале кадра и снимает egui-фокус/владельца, чтобы
+    /// повторный тап на поле снова открыл клавиатуру.
+    #[cfg(target_os = "android")]
+    ime_back_hidden: bool,
+
     // ─── Двусторонний InputConnection (ui -> platform) ───────────────────
     /// Слот состояния редактирования активного TextEdit (текст + курсор в
     /// UTF-16), публикуемый ui-слой и читаемый JNI-функциями InputConnection.
@@ -81,6 +90,8 @@ impl Default for PlatformStateInner {
             saved_state_buffer: None,
             #[cfg(target_os = "android")]
             ime_cmds: Vec::new(),
+            #[cfg(target_os = "android")]
+            ime_back_hidden: false,
             #[cfg(target_os = "android")]
             ime_editor_state: None,
         }
@@ -263,6 +274,19 @@ impl PlatformState {
     #[cfg(target_os = "android")]
     pub fn has_ime_cmds(&self) -> bool {
         !self.inner.lock().unwrap().ime_cmds.is_empty()
+    }
+
+    /// Установить флаг «системный Back закрыл IME» (из JNI / Kotlin).
+    #[cfg(target_os = "android")]
+    pub fn set_ime_back_hidden(&self) {
+        self.inner.lock().unwrap().ime_back_hidden = true;
+    }
+
+    /// Забрать и сбросить флаг «системный Back закрыл IME». Возвращает `true`,
+    /// если Back действительно скрыл клавиатуру с прошлого кадра.
+    #[cfg(target_os = "android")]
+    pub fn take_ime_back_hidden(&self) -> bool {
+        std::mem::take(&mut self.inner.lock().unwrap().ime_back_hidden)
     }
 
     // ─── Двусторонний InputConnection (ui -> platform) ──────────────────

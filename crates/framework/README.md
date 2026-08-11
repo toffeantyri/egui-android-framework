@@ -64,9 +64,10 @@ egui — отличный immediate-mode GUI, но для создания по�
 cargo install xbuild
 
 # Клонируйте и запустите пример
+# Запуск showcase из корня репозитория:
 git clone https://github.com/toffeantyri/egui-android-framework
-cd egui-android-framework/examples/counter
-x run --device adb:XXXXXXXX
+cd egui-android-framework
+examples/showcase/run_android.sh --run
 ```
 
 ### Минимальный код приложения

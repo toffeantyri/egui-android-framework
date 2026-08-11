@@ -34,12 +34,6 @@ pub struct RunState {
     pub destroy_requested: bool,
     repaint_delay: Duration,
     last_theme: Option<egui_android_platform::SystemTheme>,
-    /// Открыта ли сейчас программная клавиатура.
-    ///
-    /// Синхронизируется с `full_output.platform_output.ime` (как в референсе
-    /// egui-android `handle_platform_output`): показываем/скрываем клавиатуру
-    /// только при переходе состояния, чтобы не спамить JNI-вызовы.
-    keyboard_visible: bool,
     /// Пользователь нажал Next (IME_ACTION_NEXT): после `frame()` перевести
     /// фокус на следующее поле из реестра.
     move_focus_next_pending: bool,
@@ -57,7 +51,6 @@ impl RunState {
             destroy_requested: false,
             repaint_delay: Duration::ZERO,
             last_theme: None,
-            keyboard_visible: false,
             move_focus_next_pending: false,
         }
     }
@@ -145,6 +138,27 @@ impl RunState {
         // в egui-события (`Event::Text`, `Event::Ime(ImeEvent::...)`).
         // Никакого `TextEvent`/`setTextInputState`/`textInputState()` больше нет.
         let ime_cmds = platform_state.take_ime_cmds();
+
+        // Системный Back закрыл IME на Kotlin-стороне: сбрасываем владельца
+        // клавиатуры и снимаем egui-фокус с активного поля. Иначе поле остаётся
+        // фокусным и владельцем, повторный тап не вызовет `gained_focus`, и
+        // клавиатура не откроется заново. После surrender_focus поле получит
+        // `lost_focus` на следующем кадре → TextEdit уберёт owner + publish_blur,
+        // а следующий тап полноценно пере-покажет клавиатуру.
+        if platform_state.take_ime_back_hidden() {
+            log::info!("LOOP: системный Back закрыл IME — снимаем фокус");
+            egui_ctx.data(|d| {
+                if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+                    *kb.owner_slot().write().unwrap() = None;
+                }
+            });
+            egui_ctx.memory_mut(|m: &mut egui::Memory| {
+                if let Some(focused_id) = m.focused() {
+                    m.surrender_focus(focused_id);
+                }
+            });
+        }
+
         if !ime_cmds.is_empty() {
             log::info!("LOOP: IME-команд на этом кадре: {}", ime_cmds.len());
             for cmd in ime_cmds {
@@ -157,7 +171,20 @@ impl RunState {
                             platform_state.vm_ptr(),
                             platform_state.activity_ptr(),
                         );
-                        self.keyboard_visible = false;
+
+                        // Снимаем egui-фокус с активного поля (аналог
+                        // LocalFocusManager.clearFocus() в Compose). Иначе поле
+                        // остаётся фокусным и "владельцем" клавиатуры: повторный
+                        // тап не вызовет gained_focus, `show` не повторится, и
+                        // клавиатура не откроется заново (см. owner-логику в
+                        // TextEdit). После surrender_focus поле получит lost_focus,
+                        // TextEdit сбросит owner + publish_blur, и следующий тап
+                        // заново покажет клавиатуру.
+                        egui_ctx.memory_mut(|m: &mut egui::Memory| {
+                            if let Some(focused_id) = m.focused() {
+                                m.surrender_focus(focused_id);
+                            }
+                        });
                     }
                     ImeOutcome::Next => {
                         // Next — перейти к следующему TextEdit по реестру полей.
@@ -279,34 +306,20 @@ impl RunState {
             };
 
             let full_output = app_instance.frame(egui_ctx, raw_input);
-            log::info!("LOOP: frame() вернулся");
-
-            // ── Обработка `platform_output.ime` (как в референсе egui-android) ──
+            // log::info!("LOOP: frame() вернулся"); // спам, закомментирован
             //
-            // egui выставляет `platform_output.ime` каждый кадр, пока фокусный
-            // виджет `owns_ime_events(id)` (текстовое поле редактируется).
-            // Показываем/скрываем клавиатуру через невидимый EguiImeView (JNI),
-            // только при переходе состояния.
-            // Показ клавиатуры НЕ управляется здесь: его делает `TextEdit`
-            // через `KeyboardController.show()` при `gained_focus` (см. run.rs
-            // регистрация callbacks). Это предотвращает конфликт: иначе после
-            // IME Done (когда поле в фокусе) auto-show открывал клавиатуру заново.
-            // Здесь только скрытие по потере фокуса (`!ime_active`).
-            let ime_active = full_output.platform_output.ime.is_some();
-            if !ime_active && self.keyboard_visible {
-                log::info!("LOOP: ime неактивна — скрыть клавиатуру (EguiImeView)");
-                crate::ime_jni::hide_soft_input_jni(
-                    platform_state.vm_ptr(),
-                    platform_state.activity_ptr(),
-                );
-                self.keyboard_visible = false;
-            }
-            // Если IME активна (поле в фокусе/редактируется) — считаем её видимой,
-            // чтобы hide-ветка не дёргала JNI при каждом кадре.
-            if ime_active {
-                self.keyboard_visible = true;
-            }
-
+            // ── Управление видимостью клавиатуры ──
+            // Показ/скрытие ЗДЕСЬ не выполняется. Источник истины — `TextEdit`
+            // (ui-слой): показ по `gained_focus`/становлению владельцем, скрытие
+            // по `lost_focus`, пока виджет был владельцем (`KeyboardController`).
+            // Раньше здесь была hide-ветка по `!platform_output.ime`, но она
+            // конфликтовала с показом: в первый кадр фокуса egui ещё не
+            // выставляет `platform_output.ime`, и loop.rs закрывал только что
+            // показанную клавиатуру (логи `ime неактивна — скрыть` сразу после
+            // `KeyboardController.show()`). Это ломало повторное открытие.
+            // Скрытие по системным событиям (IME Done, системный Back) и так
+            // сделано выше, в обработке `ime_cmds`/`ime_back_hidden`.
+            //
             // ── Cursor rect для candidate window IME ──
             // Пока клавиатура активна, каждый кадр передаём прямоугольник
             // курсора (экранные px) в Kotlin для позиционирования кандидатов.
@@ -363,13 +376,14 @@ impl RunState {
             // большим, и цикл заблокируется в poll до следующего реального события.
             self.repaint_delay = new_delay;
 
-            log::info!(
-                "LOOP: repaint_delay = {:?} (had_events={}, had_notify={}, событий в кадре={})",
-                self.repaint_delay,
-                had_events,
-                had_notify,
-                num_events,
-            );
+            // // Спам-лог (каждый кадр) — закомментирован.
+            // log::info!(
+            //     "LOOP: repaint_delay = {:?} (had_events={}, had_notify={}, событий в кадре={})",
+            //     self.repaint_delay,
+            //     had_events,
+            //     had_notify,
+            //     num_events,
+            // );
 
             // Синхронизируем clear color с темой Application
             // После frame() egui-стиль уже содержит panel_fill, установленный
@@ -394,7 +408,7 @@ impl RunState {
             }
 
             // Рендеринг через GraphicsPipeline
-            log::info!("LOOP: render_frame begin (w={} h={})", w, h);
+            // log::info!("LOOP: render_frame begin (w={} h={})", w, h); // спам
             if let Some(ref mut g) = self.graphics {
                 let clear_color = backend.platform_state().current_clear_color();
                 let success = g.render_frame(
@@ -406,7 +420,7 @@ impl RunState {
                     pp,
                     backend,
                 );
-                log::info!("LOOP: render_frame end success={}", success);
+                // log::info!("LOOP: render_frame end success={}", success); // спам
                 if !success {
                     // swap_buffers не удался — пересоздадим pipeline
                     let mut p = None;

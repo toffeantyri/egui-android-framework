@@ -152,13 +152,25 @@ pub fn process_back_pressed<A: Application>(
     log::info!("Back нажата — отправляем в Application");
     input_state.back_pressed = false;
 
-    // Системный Back на Android скрывает клавиатуру на уровне системы (если CTCH
+    // Системный Back на Android скрывает клавиатуру на уровне системы (если IME
     // открыта), но не сообщает нам. Сбрасываем владельца клавиатуры БЕЗУСЛОВНО:
     // чтобы повторный тап на то же поле снова открыл клавиатуру. Иначе
     // `keyboard_is_owner` остаётся true, и show не перезапускается.
     egui_ctx.data(|d| {
         if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
             *kb.owner_slot().write().unwrap() = None;
+        }
+    });
+
+    // Снимаем egui-фокус с активного поля. Иначе поле остаётся фокусным, и в
+    // следующем кадре `TextEdit::render` снова ставит себя владельцем и зовёт
+    // `keyboard_show`, но Android не открывает клавиатуру (система только что её
+    // закрыла Back). Снятие фокуса приводит к `lost_focus` на следующем кадре:
+    // `TextEdit` убирает owner + publish_blur, и следующий тап полноценно
+    // пере-показывает клавиатуру через `gained_focus`.
+    egui_ctx.memory_mut(|m: &mut egui::Memory| {
+        if let Some(focused_id) = m.focused() {
+            m.surrender_focus(focused_id);
         }
     });
 

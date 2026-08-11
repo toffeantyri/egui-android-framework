@@ -10,7 +10,6 @@ members = [
     "crates/navigation",
     "crates/macros",
     "crates/framework",
-    "examples/counter",
     "examples/showcase",
 ]
 

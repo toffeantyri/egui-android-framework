@@ -448,20 +448,20 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         if response.changed() {
             // write-lock уже снят (drop выше). Читаем изменённое значение через read.
             let new_text: String = buffer_arc.read().expect("TextEdit: буфер poisoned").clone();
-            log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_text);
-            log::info!("[TextEdit] buffer cloned: {:?}", &new_text);
+            // log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_text);
+            // log::info!("[TextEdit] buffer cloned: {:?}", &new_text);
             // Приоритет: сначала локальный on_changed, затем on_change_msg.
             if let Some(cb) = &self.on_changed {
-                log::info!("[TextEdit] calling on_changed");
+                // log::info!("[TextEdit] calling on_changed");
                 cb(&new_text);
-                log::info!("[TextEdit] on_changed done");
+                // log::info!("[TextEdit] on_changed done");
             }
             if let Some(cb) = &self.on_changed_msg {
-                log::info!("[TextEdit] calling on_change_msg/dispatch");
+                // log::info!("[TextEdit] calling on_change_msg/dispatch");
                 dispatch.dispatch(cb(new_text));
-                log::info!("[TextEdit] on_change_msg done");
+                // log::info!("[TextEdit] on_change_msg done");
             }
-            log::info!("[TextEdit] changed-block done");
+            // log::info!("[TextEdit] changed-block done");
         }
 
         // ─── Submit (Done / потеря фокуса) — использует text_guard, которого
@@ -472,7 +472,7 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 cb(&snapshot);
             }
         }
-        log::info!("[TextEdit] render end");
+        // log::info!("[TextEdit] render end"); // спам-лог, закомментирован
     }
 }
 
@@ -500,7 +500,7 @@ fn keyboard_hide(ui: &UiWrapper) {
 /// Передать `inputType` + `imeOptions` текущего поля в IME (EditorInfo),
 /// если `KeyboardController` поддерживает настройку (платформа-регистратор).
 fn keyboard_set_options(ui: &UiWrapper, keyboard_type: KeyboardType, ime_action: ImeAction) {
-    log::info!("[TextEdit] set_options enter");
+    // log::info!("[TextEdit] set_options enter"); // спам
     ui.ctx().data(|d| {
         if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
             let input_type = android_input_type(keyboard_type);
@@ -508,7 +508,7 @@ fn keyboard_set_options(ui: &UiWrapper, keyboard_type: KeyboardType, ime_action:
             kb.set_options(input_type, ime_options);
         }
     });
-    log::info!("[TextEdit] set_options exit");
+    // log::info!("[TextEdit] set_options exit"); // спам
 }
 
 /// Число UTF-16 code units в первых `n` символах строки.
@@ -531,13 +531,12 @@ fn utf16_char_index(text: &str, char_index: usize) -> usize {
 /// записываем позицию курсора/выделения в UTF-16 code units. Если поля
 /// не имеют egui-курсора (None) — помещаем курсор в конец текста.
 fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str) {
-    log::info!("[TextEdit] publish_editor_state enter {:?}", field_id);
+    // log::info!("[TextEdit] publish_editor_state enter {:?}", field_id); // спам
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
             .and_then(|kb| kb.editor_state().cloned())
     });
     let Some(slot) = slot else {
-        log::info!("[TextEdit] publish_editor_state: нет слота");
         return; // платформа не привязала двусторонний канал
     };
 
@@ -564,13 +563,13 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str)
         composing_end: None,
     };
     *slot.lock().unwrap() = Some(state);
-    log::info!("[TextEdit] publish_editor_state exit {:?}", field_id);
+    // log::info!("[TextEdit] publish_editor_state exit {:?}", field_id); // спам
 }
 
 /// Сбросить состояние редактора (поле потеряло фокус): IME/InputConnection
 /// больше не должен отдавать текст/курсор.
 fn keyboard_publish_editor_blur(ui: &UiWrapper) {
-    log::info!("[TextEdit] publish_editor_blur enter");
+    // log::info!("[TextEdit] publish_editor_blur enter"); // спам
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
             .and_then(|kb| kb.editor_state().cloned())
@@ -578,7 +577,7 @@ fn keyboard_publish_editor_blur(ui: &UiWrapper) {
     if let Some(slot) = slot {
         *slot.lock().unwrap() = None;
     }
-    log::info!("[TextEdit] publish_editor_blur exit");
+    // log::info!("[TextEdit] publish_editor_blur exit"); // спам
 }
 
 // ─── Реестр полей ввода (порядок отрисовки) для IME_ACTION_NEXT ──────────
@@ -666,24 +665,24 @@ fn keyboard_is_owner(ui: &UiWrapper, id: egui::Id) -> bool {
 /// Пишем в `owner_slot` внутри контроллера (Arc<RwLock>) — без `ctx.data_mut`
 /// в render (reentrant write-lock на Context -> deadlock).
 fn keyboard_set_owner(ui: &UiWrapper, id: egui::Id) {
-    log::info!("[TextEdit] set_owner enter {:?}", id);
+    // log::info!("[TextEdit] set_owner enter {:?}", id); // спам
     ui.ctx().data(|d| {
         if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
             *kb.owner_slot().write().unwrap() = Some(id);
         }
     });
-    log::info!("[TextEdit] set_owner exit {:?}", id);
+    // log::info!("[TextEdit] set_owner exit {:?}", id); // спам
 }
 
 /// Сбросить владельца клавиатуры.
 fn keyboard_clear_owner(ui: &UiWrapper) {
-    log::info!("[TextEdit] clear_owner enter");
+    // log::info!("[TextEdit] clear_owner enter"); // спам
     ui.ctx().data(|d| {
         if let Some(kb) = d.get_temp::<KeyboardController>(keyboard_controller_id()) {
             *kb.owner_slot().write().unwrap() = None;
         }
     });
-    log::info!("[TextEdit] clear_owner exit");
+    // log::info!("[TextEdit] clear_owner exit"); // спам
 }
 
 #[cfg(test)]

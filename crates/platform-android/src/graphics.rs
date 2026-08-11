@@ -127,15 +127,15 @@ impl GraphicsPipeline {
                 (h as f32 - inset_t * pixels_per_point - inset_b * pixels_per_point) as i32;
             gl_ptr.enable(glow::SCISSOR_TEST);
             gl_ptr.scissor(scissor_x, scissor_y, scissor_w.max(1), scissor_h.max(1));
-            log::info!("render_frame: GL setup done");
+            // log::info!("render_frame: GL setup done");
         }
 
         let primitives =
             egui_ctx.tessellate(full_output.shapes.clone(), full_output.pixels_per_point);
-        log::info!(
-            "render_frame: tessellate done, primitives={}",
-            primitives.len()
-        );
+        // log::info!(
+        //     "render_frame: tessellate done, primitives={}",
+        //     primitives.len()
+        // );
 
         self.painter.paint_and_update_textures(
             [w, h],
@@ -143,7 +143,7 @@ impl GraphicsPipeline {
             &primitives,
             &full_output.textures_delta,
         );
-        log::info!("render_frame: paint done");
+        // log::info!("render_frame: paint done");
 
         // Swap buffers через backend
         if let Err(e) = backend.swap_buffers() {

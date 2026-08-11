@@ -1,7 +1,9 @@
 package com.example.egui_android
 
+import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import androidx.activity.OnBackPressedCallback
@@ -33,12 +35,17 @@ class EguiActivity : GameActivity() {
 
     // Невидимый View для InputConnection (IME). Создаётся лениво при первом показе.
     private var imeView: EguiImeView? = null
+    // Была ли IME видна на прошлой доставке инсетов. Для детекции перехода
+    // «клавиатура была открыта → скрыта» при любом пути закрытия (системный Back,
+    // Done, тап мимо, системный жест).
+    private var imeVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Android 16: обязательный edge-to-edge режим
         enableEdgeToEdge()
+        setupImeVisibilityDetection()
 
         // Перехватываем системный Back — не даём GameActivity
         // завершить Activity. Rust-код сам решит, когда выйти.
@@ -46,9 +53,12 @@ class EguiActivity : GameActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    // Back будет обработан в Rust через input events
-                    // (AKEYCODE_BACK → InputStatus::Handled).
-                    // Главное — не вызывать super / finish() здесь.
+                    // Системный Back: сначала закрываем клавиатуру (IME), если она
+                    // открыта, и уведомляем Rust (nativeOnSystemBackPressed), чтобы тот
+                    // сбросил владельца/фокус поля — иначе повторный тап не откроет
+                    // клавиатуру заново. Навигацию оставляем на усмотрение Rust.
+                    hideSoftInputForIme()
+                    nativeOnSystemBackPressed()
                 }
             }
         )
@@ -61,6 +71,35 @@ class EguiActivity : GameActivity() {
         nativeSetSavedState(savedBytes)
 
         logSavedState("onCreate", savedBytes)
+    }
+
+    /**
+     * Отслеживаем видимость IME по WindowInsets и уведомляем Rust, когда
+     * клавиатура только что скрылась.
+     *
+     * Проблема: первый системный Back при открытой клавиатуре обрабатывает само
+     * IME-окно, и до `onBackPressedDispatcher`/Rust он НЕ доходит. Значит сброс
+     * владельца/фокуса поля нельзя вешать только на Back. Здесь ловим сам факт
+     * скрытия IME по инсетам — он срабатывает при любом пути закрытия.
+     */
+    private fun setupImeVisibilityDetection() {
+        val decor = window.decorView
+        decor.setOnApplyWindowInsetsListener { _, insets ->
+            val imeHeight = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.ime()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            val nowVisible = imeHeight > 0
+            if (imeVisible && !nowVisible) {
+                nativeOnSystemBackPressed()
+            }
+            imeVisible = nowVisible
+            insets
+        }
+        // Гарантируем доставку текущих insets после attach окна.
+        decor.requestApplyInsets()
     }
 
     /**
@@ -187,6 +226,9 @@ class EguiActivity : GameActivity() {
 
     private external fun nativeGetSavedState(): ByteArray?
     private external fun nativeSetSavedState(bytes: ByteArray?)
+
+    // Уведомляет Rust, что системный Back закрыл IME (сброс владельца/фокуса поля).
+    private external fun nativeOnSystemBackPressed()
 
     companion object {
         private const val SAVED_STATE_KEY = "egui_saved_state"
