@@ -175,7 +175,6 @@ impl DefaultImeService {
                 self.state.cursor
             );
             self.state.composition_range = None;
-            // last_composition_range НЕ сбрасываем — он нужен для Commit
             return;
         }
         let mode = self.compose_mode();
@@ -186,7 +185,6 @@ impl DefaultImeService {
                 let end = start.saturating_add(new_len);
                 self.state.cursor = end;
                 self.state.composition_range = Some(start..end);
-                self.last_composition_range = Some(start..end);
                 log::info!(
                     "IME-SVC: composing {:?} → Insert в cursor={} (end={}) → cursor=>{}",
                     text,
@@ -200,7 +198,6 @@ impl DefaultImeService {
                 let new_end = start.saturating_add(new_len);
                 self.state.cursor = new_end;
                 self.state.composition_range = Some(start..new_end);
-                self.last_composition_range = Some(start..new_end);
                 log::info!(
                     "IME-SVC: composing {:?} → Replace {}..{} (region=Some({}..{})) → cursor=>{}",
                     text,
@@ -233,7 +230,6 @@ impl DefaultImeService {
             self.batch_events.len()
         );
         self.state.composition_range = None;
-        self.last_composition_range = None;
         // self.batch_events.clear();  // <-- удалено: была причина потери букв
     }
 }
@@ -253,59 +249,17 @@ impl ImeService for DefaultImeService {
         match command {
             ImeCommand::Ime(cmd) => match cmd {
                 ImeCmd::Commit(text) => {
-                    // Commit заменяет активный composition_range (если он есть),
-                    // а не вставляется рядом с уже набранным preedit'ом.
-                    // Если `composition_range` уже сброшен (например,
-                    // `Composing("")` внутри batch), используем последний
-                    // зафиксированный `last_composition_range`.
-                    let eff_range = self
-                        .state
-                        .composition_range
-                        .take()
-                        .or_else(|| self.last_composition_range.take());
-                    self.batch_events.clear(); // batch не нужен — commit всегда сразу
-                    match eff_range {
-                        Some(range) if !range.is_empty() => {
-                            let new_len = text.chars().count();
-                            let new_end = range.start.saturating_add(new_len);
-                            self.state.cursor = new_end;
-                            self.state.composition_range = None;
-                            self.last_composition_range = None;
-                            log::info!(
-                                "IME-SVC: Commit {:?} → Replace {:?} (старый region)",
-                                text,
-                                range
-                            );
-                            self.push(
-                                &mut out,
-                                ImeEvent::Replace {
-                                    start: range.start,
-                                    end: range.end,
-                                    replacement: text.to_owned(),
-                                },
-                            );
-                        }
-                        _ => {
-                            // Нет активного preedit — обычная вставка.
-                            self.reset_composition();
-                            self.apply_composing(&text, &mut out);
-                        }
-                    }
+                    // Финал подтверждён — сбрасываем живую композицию и вставляем.
+                    self.reset_composition();
+                    self.apply_composing(&text, &mut out);
                 }
                 ImeCmd::Composing(text) => {
                     self.apply_composing(&text, &mut out);
                 }
                 ImeCmd::Region { start, end } => {
-                    // Gboard помечает диапазон (обычно первая буква слова или уже
-                    // введённый предикт) как active-composition: следующий
-                    // `setComposingText` ЗАМЕНИТ этот диапазон (а не вставит рядом).
-                    // Это семантика Android `setComposingRegion`.
-                    //
-                    // ВАЖНО: следующая правка достраивает preedit в конец текущего
-                    // состояния и решает проблему «в поле попадает только при» для
-                    // сценария достраивания слова.
+                    // Gboard помечает диапазон как active-composition.
+                    // НЕ двигаем cursor — он уже в правильной позиции.
                     self.state.composition_range = Some(start..end);
-                    self.state.cursor = end;
                 }
                 ImeCmd::DeleteSurrounding { before, after } => {
                     self.reset_composition();
@@ -428,18 +382,19 @@ pub fn poll_timeout(
     repaint_delay: std::time::Duration,
     has_ime_cmds: bool,
 ) -> Option<std::time::Duration> {
+    // Максимальный таймаут даже в режиме ожидания — чтобы IME-команды,
+    // пришедшие из JNI-потока, не зависали надолго. Android poll_events
+    // не прерывается по Wake (баг в нашем коде: Wake просто глотается).
+    const MAX_POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
     if no_graphics {
-        None
-    } else if repaint_delay == std::time::Duration::ZERO {
+        // Без graphics ждём InitWindow — но не бесконечно, чтобы не
+        // подвиснуть навсегда если что-то пошло не так.
+        Some(MAX_POLL_TIMEOUT)
+    } else if repaint_delay == std::time::Duration::ZERO || has_ime_cmds {
         Some(std::time::Duration::ZERO)
-    } else if has_ime_cmds {
-        // IME-команды ждут в очереди — не блокируемся, чтобы не
-        // задерживать ввод (баг «ввожу привет, буквы не попадают»).
-        Some(std::time::Duration::ZERO)
-    } else if repaint_delay >= std::time::Duration::from_secs(3600) {
-        None
     } else {
-        Some(repaint_delay)
+        Some(repaint_delay.min(MAX_POLL_TIMEOUT))
     }
 }
 
@@ -693,26 +648,24 @@ mod tests {
     }
 
     /// ЛОВУШКА ПОТЕРИ ПРИ COMMIT ВНУТРИ BATCH:
-    /// Commit заменяет активный preedit (не дублирует).
+    /// Commit НЕ заменяет preedit — он всегда Insert (подтверждение текста).
     #[test]
     fn batch_commit_inside_must_not_erase_previous_events() {
         let mut s = svc();
         s.apply(ImeCommand::Ime(ImeCmd::Batch(true)));
-        composing(&mut s, "при"); // накопим Replace("при") в batch (region 0..3)
+        composing(&mut s, "при"); // накопим Insert("при") в batch
         s.apply(ImeCommand::Ime(ImeCmd::Commit("вет".into()))); // commit внутри batch
         let evs = s.apply(ImeCommand::Ime(ImeCmd::Batch(false)));
 
-        // Commit должен заменить preedit «при» на «вет».
-        let has_vet = evs
-            .iter()
-            .any(|e| matches!(e, ImeEvent::Replace { replacement: ref t, .. } if t == "вет"));
-        // Replace("при") НЕ должен дойти — commit его заменяет.
         let has_pri = evs
             .iter()
-            .any(|e| matches!(e, ImeEvent::Replace { replacement: ref t, .. } if t == "при"));
+            .any(|e| matches!(e, ImeEvent::Insert(ref t) if t == "при"));
+        let has_vet = evs
+            .iter()
+            .any(|e| matches!(e, ImeEvent::Insert(ref t) if t == "вет"));
         assert!(
-            has_vet && !has_pri,
-            "Commit должен заменить preedit: ожидался только Replace(«вет»), получено {:?}",
+            has_pri && has_vet,
+            "Commit должен быть Insert, не Replace: {:?}",
             evs
         );
     }
@@ -1107,8 +1060,8 @@ mod tests {
     #[test]
     fn poll_timeout_no_ime_returns_repaint_delay() {
         assert_eq!(
-            super::poll_timeout(false, std::time::Duration::from_millis(100), false),
-            Some(std::time::Duration::from_millis(100))
+            super::poll_timeout(false, std::time::Duration::from_millis(16), false),
+            Some(std::time::Duration::from_millis(16))
         );
     }
 
@@ -1121,10 +1074,11 @@ mod tests {
     }
 
     #[test]
-    fn poll_timeout_large_delay_no_ime_waits_indefinitely() {
+    fn poll_timeout_large_delay_capped() {
+        // Большой repaint_delay обрезается до MAX_POLL_TIMEOUT (100ms).
         assert_eq!(
             super::poll_timeout(false, std::time::Duration::from_secs(4000), false),
-            None
+            Some(std::time::Duration::from_millis(100))
         );
     }
 
@@ -1137,10 +1091,11 @@ mod tests {
     }
 
     #[test]
-    fn poll_timeout_no_graphics_waits_indefinitely() {
+    fn poll_timeout_no_graphics_capped() {
+        // Даже без graphics — не None, а capped timeout.
         assert_eq!(
             super::poll_timeout(true, std::time::Duration::ZERO, true),
-            None
+            Some(std::time::Duration::from_millis(100))
         );
     }
 }

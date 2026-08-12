@@ -113,6 +113,8 @@ for arg in "$@"; do
         --run-tests)
             CARGO_FEATURES="${CARGO_FEATURES:-} --features run-tests"
             RUN_TESTS_ONLY=true
+            INSTALL=true
+            SHOW_LOGS=true
             ;;
         # Полная чистка gradle-Кэша перед сборкой: останавливает daemon и удаляет
         # .gradle + app/build (избавляет от повреждённых transforms-артефактов),

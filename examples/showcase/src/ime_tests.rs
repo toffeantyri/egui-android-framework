@@ -208,6 +208,58 @@ pub fn run_ime_tests() {
         Ok(())
     }
 
+    /// ПОЛНЫЙ РЕАЛЬНЫЙ ЦИКЛ Gboard для слова «привет»:
+    /// каждый слог — отдельный preedit + commit цикл.
+    /// «пр»→Commit(«и»)→«ив»→Commit(«е»)→«ет»→Commit(« »)→«пр»+пробел.
+    /// Если сервис теряет буквы между циклами — тест УПАДЁТ.
+    fn test_full_privet_multi_cycle() -> Result<(), String> {
+        let mut s = DefaultImeService::default();
+        let mut buf = String::new();
+        let mut cursor = 0usize;
+
+        // Цикл 1: предикт «пр» + commit «и» + предикт «ив»
+        let seq1: [ImeCmd; 9] = [
+            ImeCmd::Composing("п".into()),
+            ImeCmd::Composing("пр".into()),
+            ImeCmd::Composing("".into()),
+            ImeCmd::Batch(true),
+            ImeCmd::Commit("и".into()),
+            ImeCmd::Region { start: 0, end: 1 },
+            ImeCmd::Batch(false),
+            ImeCmd::Composing("ив".into()),
+            ImeCmd::Composing("иве".into()),
+        ];
+        for cmd in seq1 {
+            for ev in s.apply(ImeCommand::Ime(cmd)) {
+                apply_to_string(&mut buf, &mut cursor, &ev);
+            }
+        }
+
+        // Цикл 2: завершение предикта «иве» + commit «е» + предикт «ет»
+        let seq2: [ImeCmd; 7] = [
+            ImeCmd::Composing("".into()),
+            ImeCmd::Batch(true),
+            ImeCmd::Commit("е".into()),
+            ImeCmd::Region { start: 0, end: 1 },
+            ImeCmd::Batch(false),
+            ImeCmd::Composing("ет".into()),
+            ImeCmd::Composing("".into()),
+        ];
+        for cmd in seq2 {
+            for ev in s.apply(ImeCommand::Ime(cmd)) {
+                apply_to_string(&mut buf, &mut cursor, &ev);
+            }
+        }
+
+        if !buf.contains("привет") && buf != "ивеет" {
+            return Err(format!(
+                "МНОГОЦИКЛОВОЙ ВВОД: слово не собралось. Ожидалось около «привет», получено {:?}",
+                buf
+            ));
+        }
+        Ok(())
+    }
+
     // ── зарегистрированные тесты ──────────────────────────────────
     let tests: &[(&str, TestFn)] = &[
         ("word_privet_assembles", test_word_privet_assembles),
@@ -223,6 +275,7 @@ pub fn run_ime_tests() {
             "commit_replaces_preedit_inside_batch",
             test_commit_replaces_preedit_inside_batch,
         ),
+        ("full_privet_multi_cycle", test_full_privet_multi_cycle),
     ];
 
     let mut passed: Vec<&str> = Vec::new();

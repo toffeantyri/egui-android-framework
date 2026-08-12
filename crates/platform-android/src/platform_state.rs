@@ -291,7 +291,7 @@ impl PlatformState {
 
     /// Установить waker для пробуждения event loop при новом IME-команде.
     #[cfg(target_os = "android")]
-    pub fn set_waker(&self, w: crate::Waker) {
+    pub fn set_waker(&self, w: crate::waker::Waker) {
         let wake_fn: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || w.wake());
         self.inner.lock().unwrap().waker = Some(wake_fn);
     }
