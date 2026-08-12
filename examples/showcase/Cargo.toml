@@ -5,6 +5,9 @@ edition.workspace = true
 publish = false
 description = "Showcase-приложение на GameActivity"
 
+[features]
+run-tests = []
+
 [lib]
 crate-type = ["cdylib"]
 
@@ -18,3 +21,4 @@ bincode = { workspace = true }
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { workspace = true }
 android_logger = { workspace = true }
+egui-android-platform-android = { path = "../../crates/platform-android" }

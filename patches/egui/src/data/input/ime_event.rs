@@ -15,6 +15,12 @@ pub enum ImeEvent {
     Preedit {
         text: String,
         active_range_chars: Option<std::ops::Range<usize>>,
+        /// Диапазон (char-индексы) в существующем тексте, который этот preedit
+        /// должен ЗАМЕНИТЬ перед вставкой `text`. Используется Android-интеграцией:
+        /// Gboard шлёт `setComposingRegion(start, end)`, указывая, что композиция
+        /// перестраивает уже введённый фрагмент (а не добавляется в конец). Если
+        /// `None` — preedit вставляется в позицию курсора как обычно.
+        replace_range: Option<std::ops::Range<usize>>,
     },
 
     /// IME composition ended with this final result.

@@ -12,7 +12,6 @@
 use std::sync::{Arc, Mutex};
 
 /// Внутреннее состояние платформы.
-#[derive(Debug)]
 struct PlatformStateInner {
     // ─── Insets (WindowInsets) ──────────────────────────────────
     /// Системные отступы в пикселях.
@@ -66,6 +65,14 @@ struct PlatformStateInner {
     #[cfg(target_os = "android")]
     ime_back_hidden: bool,
 
+    /// Waker для пробуждения event loop (poll_events).
+    ///
+    /// JNI `push_cmd` дёргает его после пуша IME-команды в очередь,
+    /// чтобы команда была обработана немедленно, а не зависла до
+    /// следующего системного события (тап, lifecycle).
+    #[cfg(target_os = "android")]
+    waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+
     // ─── Двусторонний InputConnection (ui -> platform) ───────────────────
     /// Слот состояния редактирования активного TextEdit (текст + курсор в
     /// UTF-16), публикуемый ui-слой и читаемый JNI-функциями InputConnection.
@@ -92,6 +99,8 @@ impl Default for PlatformStateInner {
             ime_cmds: Vec::new(),
             #[cfg(target_os = "android")]
             ime_back_hidden: false,
+            #[cfg(target_os = "android")]
+            waker: None,
             #[cfg(target_os = "android")]
             ime_editor_state: None,
         }
@@ -259,7 +268,11 @@ impl PlatformState {
     /// Может вызываться из любого потока — очередь под `Mutex`.
     #[cfg(target_os = "android")]
     pub fn push_ime_cmd(&self, cmd: crate::event::ImeCmd) {
-        self.inner.lock().unwrap().ime_cmds.push(cmd);
+        let mut inner = self.inner.lock().unwrap();
+        inner.ime_cmds.push(cmd);
+        if let Some(ref w) = inner.waker {
+            w();
+        }
     }
 
     /// Забрать все накопившиеся IME-команды (очищает очередь).
@@ -274,6 +287,13 @@ impl PlatformState {
     #[cfg(target_os = "android")]
     pub fn has_ime_cmds(&self) -> bool {
         !self.inner.lock().unwrap().ime_cmds.is_empty()
+    }
+
+    /// Установить waker для пробуждения event loop при новом IME-команде.
+    #[cfg(target_os = "android")]
+    pub fn set_waker(&self, w: crate::Waker) {
+        let wake_fn: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || w.wake());
+        self.inner.lock().unwrap().waker = Some(wake_fn);
     }
 
     /// Установить флаг «системный Back закрыл IME» (из JNI / Kotlin).
@@ -325,6 +345,22 @@ impl PlatformState {
 
 unsafe impl Send for PlatformState {}
 unsafe impl Sync for PlatformState {}
+
+impl std::fmt::Debug for PlatformStateInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ds = f.debug_struct("PlatformStateInner");
+        ds.field("insets_px", &self.insets_px);
+        ds.field("insets_valid", &self.insets_valid);
+        ds.field("clear_color", &self.clear_color);
+        ds.field("saved_state_buffer", &self.saved_state_buffer);
+        #[cfg(target_os = "android")]
+        {
+            ds.field("waker", &self.waker.as_ref().map(|_| "<waker>"));
+            ds.field("ime_cmds", &self.ime_cmds.len());
+        }
+        ds.finish()
+    }
+}
 
 // ─── InsetsPx ──────────────────────────────────────────────────────
 

@@ -35,8 +35,14 @@ pub struct RunState {
     repaint_delay: Duration,
     last_theme: Option<egui_android_platform::SystemTheme>,
     /// Пользователь нажал Next (IME_ACTION_NEXT): после `frame()` перевести
-    /// фокус на следующее поле из реестра.
+    /// фокус на следующее поле из реестра. `_due` — флаг «пора применять»:
+    /// переключение откладывается на кадр после доставки preedit в текущее поле,
+    /// иначе ввод ушёл бы в новое поле (в старом текст не появился бы).
     move_focus_next_pending: bool,
+    move_focus_next_due: bool,
+    /// Изолированный редьюсер ввода (команды → буферные операции). Единственный
+    /// источник состояния композиции; см. [`crate::ime_service`].
+    ime_service: crate::ime_service::DefaultImeService,
 }
 
 impl RunState {
@@ -52,6 +58,8 @@ impl RunState {
             repaint_delay: Duration::ZERO,
             last_theme: None,
             move_focus_next_pending: false,
+            move_focus_next_due: false,
+            ime_service: crate::ime_service::DefaultImeService::default(),
         }
     }
 
@@ -80,16 +88,11 @@ impl RunState {
         platform_state: &PlatformState,
     ) -> bool {
         // --- Шаг 1: poll events (с timeout на основе repaint_delay) ---
-        // Пока нет GraphicsPipeline — блокируемся до события (InitWindow ещё не пришёл).
-        let timeout = if self.graphics.is_none() {
-            None
-        } else if self.repaint_delay == Duration::ZERO {
-            Some(Duration::ZERO) // первый кадр / срочный repaint
-        } else if self.repaint_delay >= Duration::from_secs(3600) {
-            None // блокировать до события
-        } else {
-            Some(self.repaint_delay) // ждать (анимации egui)
-        };
+        let timeout = crate::ime_service::poll_timeout(
+            self.graphics.is_none(),
+            self.repaint_delay,
+            platform_state.has_ime_cmds(),
+        );
 
         let poll_start = Instant::now();
         let backend_events = backend.poll_events(timeout);
@@ -161,41 +164,61 @@ impl RunState {
 
         if !ime_cmds.is_empty() {
             log::info!("LOOP: IME-команд на этом кадре: {}", ime_cmds.len());
+            use crate::ime_service::{translate_legacy, ImeActionEvent, ImeEvent, ImeService};
+            let mut svc_processed = 0usize;
+            let mut dropped = 0usize;
+            let mut total_egui_evs = 0usize;
             for cmd in ime_cmds {
-                use crate::input_processing::ImeOutcome;
-                match crate::input_processing::process_ime_cmd(&mut self.input_state, cmd) {
-                    ImeOutcome::Done => {
-                        // Done / Search / Go — завершить редактирование.
-                        log::info!("LOOP: IME Done — закрываем клавиатуру (EguiImeView)");
-                        crate::ime_jni::hide_soft_input_jni(
-                            platform_state.vm_ptr(),
-                            platform_state.activity_ptr(),
-                        );
-
-                        // Снимаем egui-фокус с активного поля (аналог
-                        // LocalFocusManager.clearFocus() в Compose). Иначе поле
-                        // остаётся фокусным и "владельцем" клавиатуры: повторный
-                        // тап не вызовет gained_focus, `show` не повторится, и
-                        // клавиатура не откроется заново (см. owner-логику в
-                        // TextEdit). После surrender_focus поле получит lost_focus,
-                        // TextEdit сбросит owner + publish_blur, и следующий тап
-                        // заново покажет клавиатуру.
-                        egui_ctx.memory_mut(|m: &mut egui::Memory| {
-                            if let Some(focused_id) = m.focused() {
-                                m.surrender_focus(focused_id);
-                            }
-                        });
+                let Some(svc_cmd) = translate_legacy(&cmd) else {
+                    dropped += 1;
+                    continue; // no-op команда (SetSelection/PrivateCommand и т.п.)
+                };
+                svc_processed += 1;
+                for ev in self.ime_service.apply(svc_cmd) {
+                    match ev {
+                        ImeEvent::Action(ImeActionEvent::Done) => {
+                            // Done / Search / Go — завершить редактирование.
+                            log::info!("LOOP: IME Done — закрываем клавиатуру");
+                            crate::ime_jni::hide_soft_input_jni(
+                                platform_state.vm_ptr(),
+                                platform_state.activity_ptr(),
+                            );
+                            // Снимаем egui-фокус с активного поля (как в прежнем пути).
+                            egui_ctx.memory_mut(|m: &mut egui::Memory| {
+                                if let Some(focused_id) = m.focused() {
+                                    m.surrender_focus(focused_id);
+                                }
+                            });
+                        }
+                        ImeEvent::Action(ImeActionEvent::Next) => {
+                            // Next — перейти к следующему TextEdit. Переключение
+                            // откладываем (см. `move_focus_next_due` ниже).
+                            log::info!("LOOP: IME Next — отложенное переключение фокуса");
+                            self.move_focus_next_pending = true;
+                            self.move_focus_next_due = false;
+                        }
+                        other => {
+                            // Текстовые операции доставляются в egui в этом кадре.
+                            let e = crate::ime_service::to_egui_event(&other);
+                            log::info!(
+                                "LOOP: IME-ev {:?} -> egui {:?} | focused={:?}",
+                                other,
+                                e,
+                                egui_ctx.memory(|m| m.focused())
+                            );
+                            total_egui_evs += 1;
+                            self.input_state.events.push(e);
+                        }
                     }
-                    ImeOutcome::Next => {
-                        // Next — перейти к следующему TextEdit по реестру полей.
-                        // Переход выполняем ПОСЛЕ frame() (вне прохода рендера),
-                        // чтобы не вызывать request_focus посреди активного кадра.
-                        log::info!("LOOP: IME Next — отложенное переключение фокуса");
-                        self.move_focus_next_pending = true;
-                    }
-                    ImeOutcome::None => {}
                 }
             }
+            log::info!(
+                "LOOP: и того за кадр: команд={} svc_processed={} dropped={} egui_evs={}",
+                svc_processed + dropped,
+                svc_processed,
+                dropped,
+                total_egui_evs
+            );
         }
 
         // --- Шаг 4: проверка завершения ---
@@ -266,21 +289,13 @@ impl RunState {
             // Получаем insets для этого кадра
             let insets = get_current_insets(backend, pp, w, h);
 
-            // ── Фомируем события кадра (двухкадровая доставка IME) ──
+            // ── Формируем события кадра ──
             //
-            // `events` — обычные события (touch, pointer) текущего кадра.
-            // IME-текст из `ime_pending` (накопленного в ПРОШЛОМ кадре через
-            // `process_ime_cmd`) лежит в `ime_deliver` и добавляется сюда.
-            // После доставки `ime_pending` текущего кадра переносится в
-            // `ime_deliver` для следующего кадра. Так IME-текст не попадает
-            // в кадр своего прихода и не вызывает реентерабельные
-            // `remember().set()` внутри активного прохода `run_ui`.
-            let mut events_for_frame = std::mem::take(&mut self.input_state.events);
-            events_for_frame.extend(std::mem::take(&mut self.input_state.ime_deliver));
-            std::mem::swap(
-                &mut self.input_state.ime_deliver,
-                &mut self.input_state.ime_pending,
-            );
+            // Обычные события (touch/pointer) и текстовые операции IME уже лежат
+            // в `input_state.events`: сервис ввода (шаг 2.5) применил команды и
+            // отдал буферные операции (Insert/Replace/Delete), которые переведены
+            // в egui-события здесь (см. `ime_service::to_egui_event`).
+            let events_for_frame = std::mem::take(&mut self.input_state.events);
             let num_events = events_for_frame.len();
 
             let screen_rect = egui::Rect::from_min_size(
@@ -337,22 +352,35 @@ impl RunState {
             }
 
             // ── Переключение фокуса по IME_ACTION_NEXT ──
-            // После frame() контекст свободен, безопасно звать memory_mut.
+            //
+            // Текстовые операции (Insert/Replace) применяются к полю в этом же
+            // кадре (сервис ввода отдал их в `events` синхронно, шаг 2.5). Чтобы
+            // накопленный текст гарантированно попал в ТЕКУЩЕЕ поле (а не в новое
+            // после переключения фокуса), Next откладывается на один кадр:
+            // `move_focus_next_due` на первом кадре после Next выставляется в true,
+            // и только на следующем переключаем фокус.
             if self.move_focus_next_pending {
-                self.move_focus_next_pending = false;
-                let current = egui_ctx.memory(|m| m.focused());
-                let next = egui_ctx.data(|d| {
-                    match d.get_temp::<KeyboardController>(keyboard_controller_id()) {
-                        Some(kb) => {
-                            let list = kb.registry_slot().read().unwrap().clone();
-                            current.and_then(|c| next_ime_field_after(&list, c))
+                if !self.move_focus_next_due {
+                    // Первый кадр после Next — preedit ещё доставится в этом кадре.
+                    self.move_focus_next_due = true;
+                } else {
+                    // preedit уже применён к текущему полю — можно переключать.
+                    self.move_focus_next_pending = false;
+                    self.move_focus_next_due = false;
+                    let current = egui_ctx.memory(|m| m.focused());
+                    let next = egui_ctx.data(|d| {
+                        match d.get_temp::<KeyboardController>(keyboard_controller_id()) {
+                            Some(kb) => {
+                                let list = kb.registry_slot().read().unwrap().clone();
+                                current.and_then(|c| next_ime_field_after(&list, c))
+                            }
+                            None => None,
                         }
-                        None => None,
+                    });
+                    if let Some(id) = next {
+                        egui_ctx.memory_mut(|m| m.request_focus(id));
+                        log::info!("LOOP: IME Next -> фокус на {:?}", id);
                     }
-                });
-                if let Some(id) = next {
-                    egui_ctx.memory_mut(|m| m.request_focus(id));
-                    log::info!("LOOP: IME Next -> фокус на {:?}", id);
                 }
             }
 

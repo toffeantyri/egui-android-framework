@@ -110,6 +110,10 @@ for arg in "$@"; do
             GRADLE_TASK="assembleRelease"
             ;;
         --clean) CLEAN=true ;;
+        --run-tests)
+            CARGO_FEATURES="${CARGO_FEATURES:-} --features run-tests"
+            RUN_TESTS_ONLY=true
+            ;;
         # Полная чистка gradle-Кэша перед сборкой: останавливает daemon и удаляет
         # .gradle + app/build (избавляет от повреждённых transforms-артефактов),
         # затем применяет ту же логику, что и --clean.
@@ -177,7 +181,7 @@ rm -rf "$JNI_DIR"
 mkdir -p "$JNI_DIR"
 
 ANDROID_NDK_HOME="$NDK_PATH" \
-    cargo ndk -t "$TARGET" -o "$JNI_DIR" build $([ "$CARGO_PROFILE" = "release" ] && echo "--release") -p "$CRATE"
+    cargo ndk -t "$TARGET" -o "$JNI_DIR" build $([ "$CARGO_PROFILE" = "release" ] && echo "--release") -p "$CRATE" ${CARGO_FEATURES:-}
 echo "  $JNI_DIR/$TARGET/$LIB_NAME"
 
 echo ""
@@ -206,7 +210,13 @@ if [ "$INSTALL" = true ]; then
     echo "=== 4/4: Установка и запуск ==="
     adb install -r "$APK_PATH"
     echo "  Установлено."
-    adb shell am start -n "$APP_PACKAGE/com.example.egui_android.EguiActivity"
+    if [ "${RUN_TESTS_ONLY:-}" = true ]; then
+        echo "  Режим только тесты — запускаем Activity для выполнения тестов..."
+        adb shell am start -n "$APP_PACKAGE/com.example.egui_android.EguiActivity"
+        echo "  Тесты запущены. После выполнения приложение само завершится."
+    else
+        adb shell am start -n "$APP_PACKAGE/com.example.egui_android.EguiActivity"
+    fi
 fi
 
 if [ "$SHOW_LOGS" = true ]; then

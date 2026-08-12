@@ -13,32 +13,11 @@ use crate::event::{BackendEvent, InputEvent, KeyAction, TouchPhase};
 use crate::input::InputState;
 use egui_android_runtime::{keyboard_controller_id, Application, KeyboardController};
 
-// Чистая IME-логика (ImeCmd → egui::Event, batch-буферизация) вынесена в
-// хост-совместимый модуль `ime_logic` и покрыта юнит-тестами (`cargo test`).
-// Здесь — только обвязка вокруг `InputState`.
+// Входной тип команд IME и утилита перевода UTF-16 в char-индексы живут в
+// `ime_logic` (без android-зависимостей). Сам редьюсер команд → egui-события
+// перенесён в `ime_service`; здесь только re-export для `ime_jni`.
 #[doc(inline)]
-pub use crate::ime_logic::{utf16_offset_to_char_index, ImeBuffer, ImeCmd, ImeOutcome};
-
-/// Преобразовать IME-команду в egui-события, записав их в `InputState`.
-///
-/// Делегирует в [`crate::ime_logic::process_ime_cmd`], соединяя чистую
-/// логику с полями `InputState` (`ime_pending`, `ime_batch_depth`,
-/// `ime_batch_buffer`).
-#[inline]
-pub fn process_ime_cmd(input_state: &mut InputState, cmd: crate::event::ImeCmd) -> ImeOutcome {
-    // Переносим batch-поля в чистый ImeBuffer (чтобы process_ime_cmd работал
-    // с той же моделью, что и юнит-тесты), затем возвращаем обратно.
-    let mut buf = ImeBuffer {
-        pending: std::mem::take(&mut input_state.ime_pending),
-        batch_depth: input_state.ime_batch_depth,
-        batch_buffer: std::mem::take(&mut input_state.ime_batch_buffer),
-    };
-    let outcome = crate::ime_logic::process_ime_cmd(&mut buf, cmd);
-    input_state.ime_pending = buf.pending;
-    input_state.ime_batch_depth = buf.batch_depth;
-    input_state.ime_batch_buffer = buf.batch_buffer;
-    outcome
-}
+pub use crate::ime_logic::{utf16_offset_to_char_index, ImeCmd};
 
 /// Обработать событие от backend'а (кроме Lifecycle).
 ///
@@ -49,8 +28,8 @@ pub fn process_ime_cmd(input_state: &mut InputState, cmd: crate::event::ImeCmd) 
 /// - `InsetsChanged` — логирование (применяется в screen_rect на следующем кадре)
 /// - `DpiChanged` — обновление pixels_per_point
 ///
-/// IME-текст НЕ обрабатывается здесь: он приходит через [`process_ime_cmd`]
-/// (InputConnection → JNI → `ImeCmd`), см. модуль `ime_jni`.
+/// IME-текст НЕ обрабатывается здесь: он приходит из InputConnection → JNI →
+/// `ImeCmd`, редьюсер — в `crate::ime_service` (см. модули `ime_jni`/`ime_service`).
 ///
 /// Lifecycle-события обрабатываются в `crate::lifecycle::handle_lifecycle_event`.
 pub fn process_backend_input(

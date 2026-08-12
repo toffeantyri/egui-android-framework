@@ -323,6 +323,7 @@ dependencies = [
  "bincode",
  "egui",
  "egui-android-framework",
+ "egui-android-platform-android",
  "log",
  "serde",
 ]

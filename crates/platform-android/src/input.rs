@@ -17,27 +17,6 @@ pub struct InputState {
     pub events: Vec<egui::Event>,
     pub pointer_pos: Option<egui::Pos2>,
     pub back_pressed: bool,
-    /// IME-события (`Event::Text`, preedit, Backspace/Delete), накопленные в
-    /// текущем кадре через `process_ime_cmd`.
-    ///
-    /// # Двухкадровая доставка IME
-    ///
-    /// IME-текст НЕ доставляется в кадр, в котором он пришёл. Это защищает
-    /// egui от повторной/многопроходной вставки текста и реентерабельных
-    /// вызовов `remember().set()` изнутри активного прохода кадра (deferred-
-    /// обработка, как в референсе egui-android). События из `ime_pending`
-    /// попадают в `events` (и в `RawInput`) только на СЛЕДУЮЩЕМ кадре — см.
-    /// `crate::loop::RunState::tick` (шаг 8 рендеринга).
-    pub ime_pending: Vec<egui::Event>,
-    /// Буфер доставки: содержит `ime_pending` из ПРОШЛОГО кадра, готовый к
-    /// вставке в `RawInput` в текущем кадре.
-    pub ime_deliver: Vec<egui::Event>,
-    /// Глубина вложенности batch-операций IME (`beginBatchEdit`/`endBatchEdit`).
-    /// Пока `batch_depth > 0`, текстовые события буферизуются в `ime_batch_buffer`.
-    pub ime_batch_depth: u32,
-    /// Буфер для накопления IME-событий внутри batch-операции. При `endBatchEdit`
-    /// (когда `batch_depth` становится 0) содержимое переносится в `ime_pending`.
-    pub ime_batch_buffer: Vec<egui::Event>,
 }
 
 impl InputState {
@@ -46,10 +25,6 @@ impl InputState {
             events: Vec::new(),
             pointer_pos: None,
             back_pressed: false,
-            ime_pending: Vec::new(),
-            ime_deliver: Vec::new(),
-            ime_batch_depth: 0,
-            ime_batch_buffer: Vec::new(),
         }
     }
 }

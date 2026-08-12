@@ -107,6 +107,11 @@ pub fn run_with_backend<A: Application>(app: AndroidApp, kind: AndroidBackendKin
     let platform_state = backend.platform_state().clone();
     crate::saved_state_jni::init_jni_platform_state(platform_state.clone());
 
+    // Передаём waker в PlatformState, чтобы JNI push_ime_cmd мог разбудить
+    // event loop (poll_events) при каждой новой IME-команде.
+    // Без этого команды зависают в очереди до следующего тапа/события.
+    platform_state.set_waker(waker.clone());
+
     // Регистрируем контроллер клавиатуры (IME) в egui Context data.
     //
     // Виджет TextEdit вызывает `KeyboardController.show()/hide()` по фокусу.

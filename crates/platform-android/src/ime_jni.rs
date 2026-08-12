@@ -15,6 +15,7 @@
 #![cfg(target_os = "android")]
 
 use crate::event::ImeCmd;
+use crate::input_processing::utf16_offset_to_char_index;
 use crate::saved_state_jni::GLOBAL_PLATFORM_STATE;
 use jni::objects::JClass;
 use jni::sys::jint;
@@ -137,14 +138,18 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeOnCompos
         "IME-JNI: setComposingText range {:?} ({start}..{end})",
         text
     );
-    push_cmd(ImeCmd::ComposingRange { text, start, end });
+    push_cmd(ImeCmd::ComposingRange {
+        text,
+        start_char: start as usize,
+        end_char: end as usize,
+    });
 }
 
 /// `performPrivateCommand(action, data)` — приватная команда IME (Gboard, Samsung и т.д.).
 ///
 /// Не обрабатывается функционально (egui не имеет API для private-команд), но
 /// передаётся в Rust через `ImeCmd::PrivateCommand`, где логируется для
-/// диагностики проблем с клавиатурой (см. ветку в `process_ime_cmd`).
+/// диагностики проблем с клавиатурой.
 /// При необходимости в будущем здесь можно добавить обработку конкретных
 /// команд (например, emoji-panel от Gboard).
 #[no_mangle]
@@ -395,7 +400,17 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeSetCompo
     if let Some(st) = state {
         let text = utf16_substr(&st.text, start as usize, end as usize);
         log::info!("IME-JNI: setComposingRegion text={:?}", text);
-        push_cmd(ImeCmd::ComposingRange { text, start, end });
+        // Перевод UTF-16 позиций в char-индексы (egui работает в chars):
+        // они нужны egui для `replace_range` (какой фрагмент буфера заменить).
+        let start_char = utf16_offset_to_char_index(&st.text, start as usize);
+        let end_char = utf16_offset_to_char_index(&st.text, end as usize);
+        if end_char > start_char {
+            push_cmd(ImeCmd::ComposingRange {
+                text,
+                start_char,
+                end_char,
+            });
+        }
     }
 }
 

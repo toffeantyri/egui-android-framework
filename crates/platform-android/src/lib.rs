@@ -110,6 +110,7 @@ pub mod event;
 pub mod graphics;
 pub mod ime_jni;
 pub mod ime_logic;
+pub mod ime_service;
 pub mod input;
 pub mod input_processing;
 pub mod insets;

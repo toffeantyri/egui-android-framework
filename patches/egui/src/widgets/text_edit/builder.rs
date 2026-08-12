@@ -1234,6 +1234,7 @@ fn events(
                     ImeEvent::Preedit {
                         text: preedit_text,
                         active_range_chars,
+                        replace_range,
                     } => {
                         state.cursor_purpose = if preedit_text.is_empty() {
                             TextEditCursorPurpose::Selection
@@ -1244,7 +1245,17 @@ fn events(
                                 }),
                             }
                         };
-                        let mut ccursor = clear_preedit_text(text, &cursor_range);
+                        let mut ccursor = if let Some(range) = replace_range {
+                            // Android: Gboard шлёт `setComposingRegion`, и preedit ЗАМЕНЯЕТ
+                            // существующий фрагмент буфера в char-диапазоне `range`. Удаляем
+                            // его перед вставкой (иначе добавление в конец даст дубль).
+                            let start = CCursor::new(range.start);
+                            let end = CCursor::new(range.end);
+                            text.delete_selected(&CCursorRange::two(start, end));
+                            start
+                        } else {
+                            clear_preedit_text(text, &cursor_range)
+                        };
 
                         let start_cursor = ccursor;
                         if !preedit_text.is_empty() {
