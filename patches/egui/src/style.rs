@@ -1657,9 +1657,12 @@ impl ImeComposition {
     }
 
     /// The default of [`Self::legacy_visuals`]: `true` on Windows (where `winit`
-    /// reports an incorrect cursor position for Korean IMEs), `false` elsewhere.
+    /// reports an incorrect cursor position for Korean IMEs) and on Android
+    /// (where the framework inжигает предикт в буфер и не полагается на
+    /// egui-подчёркивание IME-композиции; каретка/выделение должны оставаться
+    /// видимыми, как в обычном EditText), `false` elsewhere.
     const fn default_legacy_visuals() -> bool {
-        cfg!(windows)
+        cfg!(any(target_os = "windows", target_os = "android"))
     }
 }
 

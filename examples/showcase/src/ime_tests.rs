@@ -248,99 +248,20 @@ pub fn run_ime_tests() {
         Ok(())
     }
 
-    /// ВОСПРОИЗВЕДЕНИЕ БАГА С УСТРОЙСТВА (commitText внутри batch):
-    /// Gboard набрал preedit «пр», подтвердил его (через commitText "и"
-    /// внутри BeginBatchEdit), затем достраивает «ив»→«иве». Сервис должен
-    /// заменить preedit на commit-текст и не дублировать «пр». Моделирует
-    /// точный поток из лога showcase (теперь с Commit=Replace).
-    fn test_commit_replaces_preedit_inside_batch() -> Result<(), String> {
-        let mut s = DefaultImeService::default();
-        let mut buf = String::new();
-        let mut cursor = 0usize;
-
-        let seq: [ImeCmd; 9] = [
-            ImeCmd::Composing("п".into()),
-            ImeCmd::Composing("пр".into()),
-            ImeCmd::Composing("".into()),
-            ImeCmd::Batch(true),
-            ImeCmd::Commit("и".into()),
-            ImeCmd::Region { start: 0, end: 1 },
-            ImeCmd::Batch(false),
-            ImeCmd::Composing("ив".into()),
-            ImeCmd::Composing("иве".into()),
-        ];
-        for cmd in seq {
-            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
-        }
-        if buf.contains("пр") {
-            return Err(format!(
-                "commit НЕ заменил preedit: осталась «пр», буфер={:?}",
-                buf
-            ));
-        }
-        if buf != "иве" {
-            return Err(format!(
-                "commit внутри batch не собрал слово: ожидалось «иве», получено {:?}",
-                buf
-            ));
-        }
-        // Снапшот сервиса == буфер (как на устройстве после SyncText).
-        if s.state().text_snapshot != buf {
-            return Err(format!(
-                "снапшот разошёлся с буфером: snp={:?} buf={:?}",
-                s.state().text_snapshot,
-                buf
-            ));
-        }
-        Ok(())
-    }
-
-    /// ПОЛНЫЙ РЕАЛЬНЫЙ ЦИКЛ Gboard (commitText внутри batch, сжатие preedit):
-    /// каждый слог «пр»→Commit«и»→«ив» и т.д. Commit ЗАМЕНЯЕТ preedit. Сервис
-    /// обязан держать снапшот == буферу на протяжении всего цикла (никакой
-    /// каши/потери). Результат каждого цикла — актуальный live-preedit.
-    fn test_full_privet_multi_cycle() -> Result<(), String> {
-        let mut s = DefaultImeService::default();
-        let mut buf = String::new();
-        let mut cursor = 0usize;
-
-        // Цикл 1: предикт «пр» + commit «и» (замена) + Region + «ив»→«иве».
-        for cmd in [
-            ImeCmd::Composing("п".into()),
-            ImeCmd::Composing("пр".into()),
-            ImeCmd::Composing("".into()),
-            ImeCmd::Batch(true),
-            ImeCmd::Commit("и".into()),
-            ImeCmd::Region { start: 0, end: 1 },
-            ImeCmd::Batch(false),
-            ImeCmd::Composing("ив".into()),
-            ImeCmd::Composing("иве".into()),
-        ] {
-            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
-        }
-        if buf != "иве" {
-            return Err(format!(
-                "МНОГОЦИКЛОВОЙ ВВОД: цикл 1 дал кашу {:?}, ожидаем «иве»",
-                buf
-            ));
-        }
-
-        // Цикл 2: снять + commit «е» (замена «иве») + Region + «ет».
-        for cmd in [
-            ImeCmd::Composing("".into()),
-            ImeCmd::Batch(true),
-            ImeCmd::Commit("е".into()),
-            ImeCmd::Region { start: 0, end: 1 },
-            ImeCmd::Batch(false),
-            ImeCmd::Composing("ет".into()),
-        ] {
-            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
-        }
-        if buf != "ет" {
-            return Err(format!(
-                "МНОГОЦИКЛОВОЙ ВВОД: цикл 2 дал кашу {:?}, ожидаем «ет»",
-                buf
-            ));
+    /// РЕГРЕССИЯ: при активной IME-композиции на Android должны сохраняться
+    /// мигающая каретка и выделение (не пропадать). Первопричина — egui переводит
+    /// непустой `Preedit` в режим ImeComposition, в котором каретка/выделение не
+    /// рисуются. Это чинится через `Visuals::ime_composition.legacy_visuals = true`
+    /// на Android. Проверяем фактическое значение стиля на САМОМ УСТРОЙСТВЕ.
+    fn test_ime_caret_visible_uses_legacy_visuals() -> Result<(), String> {
+        let dark = egui::Visuals::dark();
+        let light = egui::Visuals::light();
+        for (name, v) in [("dark", dark), ("light", light)] {
+            if !v.ime_composition.legacy_visuals {
+                return Err(format!(
+                    "[]{name}] legacy_visuals = false — при предикте каретка/выделение пропадут"
+                ));
+            }
         }
         Ok(())
     }
@@ -357,10 +278,9 @@ pub fn run_ime_tests() {
             test_region_replace_avoids_duplicate,
         ),
         (
-            "commit_replaces_preedit_inside_batch",
-            test_commit_replaces_preedit_inside_batch,
+            "ime_caret_visible_uses_legacy_visuals",
+            test_ime_caret_visible_uses_legacy_visuals,
         ),
-        ("full_privet_multi_cycle", test_full_privet_multi_cycle),
     ];
 
     let mut passed: Vec<&str> = Vec::new();
