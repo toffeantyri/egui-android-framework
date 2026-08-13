@@ -520,6 +520,7 @@ fn utf16_len(text: &str) -> usize {
 }
 
 /// Позиция в UTF-16 code units для символьного индекса `char_index`.
+#[allow(dead_code)]
 fn utf16_char_index(text: &str, char_index: usize) -> usize {
     text.chars().take(char_index).map(|c| c.len_utf16()).sum()
 }
@@ -530,7 +531,7 @@ fn utf16_char_index(text: &str, char_index: usize) -> usize {
 /// Если `KeyboardController` привязал слот `ImeEditorStateSlot` (платформа),
 /// записываем позицию курсора/выделения в UTF-16 code units. Если поля
 /// не имеют egui-курсора (None) — помещаем курсор в конец текста.
-fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str) {
+fn keyboard_publish_editor_state(ui: &UiWrapper, _field_id: egui::Id, text: &str) {
     // log::info!("[TextEdit] publish_editor_state enter {:?}", field_id); // спам
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
@@ -541,17 +542,15 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str)
     };
 
     let text_len = utf16_len(text);
-    let char_range =
-        egui::TextEdit::load_state(ui.ctx(), field_id).and_then(|state| state.cursor.char_range());
-    let (selection_start, selection_end) = match char_range {
-        Some(range) => {
-            let sorted = range.as_sorted_char_range();
-            let start = utf16_char_index(text, sorted.start.0);
-            let end = utf16_char_index(text, sorted.end.0);
-            (start, end)
-        }
-        None => (text_len, text_len),
-    };
+    // Позиция курсора для InputConnection. Во время активного IME-ввода egui в
+    // `TextEditState.cursor.char_range()` хранит preedit-композицию как ВЫДЕЛЕНИЕ
+    // от начала (например `0..2` для предикта «пр»), а не каретку в конце. Если
+    // публиковать это выделение как `selection_start=0`, Gboard решает, что курсор
+    // в начале текста, шлёт setComposingRegion от начала и накатывает предикт ПОВЕРХ
+    // уже набранного — ввод заменяется (баг «привет → ет»). Поэтому для IME всегда
+    // публикуем каретку в КОНЦЕ текста (как обычный EditText).
+    let selection_end = text_len;
+    let selection_start = text_len;
 
     let state = ImeEditorState {
         focused: true,
@@ -562,6 +561,13 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str)
         composing_start: None,
         composing_end: None,
     };
+    log::info!(
+        "[TextEdit] publish_editor_state: text_len={} selection={}..{} text={:?}",
+        text_len,
+        selection_start,
+        selection_end,
+        text
+    );
     *slot.lock().unwrap() = Some(state);
     // log::info!("[TextEdit] publish_editor_state exit {:?}", field_id); // спам
 }
@@ -1559,5 +1565,48 @@ mod tests {
             "после Back повторный фокус должен снова вызвать show()"
         );
         let _ = dispatch;
+    }
+
+    /// Регрессия: во время активного IME-ввода `publish_editor_state` должен
+    /// публиковать КАРЕТКУ В КОНЦЕ текста (`selection_start == selection_end ==
+    /// text_len`), а не выделение от начала (`0..len`).
+    ///
+    /// Баг с устройства (лог вход «привет»): egui хранит active preedit как
+    /// выделение `0..2`, из-за чего `selection_start` становится 0, Gboard
+    /// считает, что курсор в начале, и слает setComposingRegion от начала,
+    /// затирая уже набранный текст (в поле остаётся только «ет» вместо «привет»).
+    #[test]
+    fn publish_editor_state_puts_caret_at_end_for_ime() {
+        use egui_android_runtime::{ImeEditorState, ImeEditorStateSlot};
+
+        let ctx = egui::Context::default();
+        let slot: ImeEditorStateSlot = Arc::new(Mutex::new(None));
+
+        // Регистрируем KeyboardController с привязанным слотом editor-state.
+        let mut kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        kb.bind_editor_state(Arc::clone(&slot));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+
+        // Публикуем состояние с непустым текстом (имитация активного предикта «пр»).
+        let id = egui::Id::new("te_publish_caret");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut uw = UiWrapper::new_unconstrained(ui);
+                keyboard_publish_editor_state(&mut uw, id, "пр");
+            });
+        });
+
+        let state: Option<ImeEditorState> = slot.lock().unwrap().clone();
+        let st = state.expect("состояние должно быть опубликовано");
+        assert_eq!(st.text, "пр", "текст опубликован");
+        assert_eq!(st.text_len, 2, "UTF-16 длина = 2");
+        assert_eq!(
+            st.selection_start, 2,
+            "selection_start должен быть в конце текста (2), а не 0"
+        );
+        assert_eq!(
+            st.selection_end, 2,
+            "selection_end должен быть в конце текста (2), а не выделение 0..2"
+        );
     }
 }

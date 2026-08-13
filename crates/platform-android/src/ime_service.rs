@@ -128,11 +128,11 @@ pub struct DefaultImeService {
     state: ImeServiceState,
     /// Операции, накопленные внутри batch, выгружаются при `Batch(false)`.
     batch_events: Vec<ImeEvent>,
-    /// Последний зафиксированный регион композиции (до сброса).
-    /// Нужен для `Commit`: даже если `composition_range` уже сброшен
-    /// (например, `Composing("")` внутри batch), Commit должен заменить
-    /// последний известный preedit, а не вставляться рядом.
-    last_composition_range: Option<std::ops::Range<usize>>,
+    /// Регион только что снятого предикта, ожидающий `Commit`.
+    /// Gboard шлёт `setComposingText("")` (снятие) ПЕРЕД `commitText`, поэтому на
+    /// момент Commit живого предикта уже нет, но Commit должен ЗАМЕНИТЬ снятый
+    /// предикт, а не вставить рядом (иначе набранное продублируется/окарошится).
+    hanging_release_range: Option<std::ops::Range<usize>>,
 }
 
 /// Способ применения `Composing` — вставка без предшествующего региона либо
@@ -165,7 +165,17 @@ impl DefaultImeService {
         }
     }
 
-    /// Применить preedit как вставку/замену, обновить курсор и регион.
+    /// Заменить char-диапазон `start..end` снапшота на `replacement`.
+    /// Диапазон клампится к длине строки; если start==end — это вставка.
+    fn replace_snapshot(&mut self, start: usize, end: usize, replacement: &str) {
+        let mut chars: Vec<char> = self.state.text_snapshot.chars().collect();
+        let s = start.min(chars.len());
+        let e = end.min(chars.len()).max(s);
+        chars.splice(s..e, replacement.chars());
+        self.state.text_snapshot = chars.into_iter().collect();
+    }
+
+    /// Применить preedit как вставку/замену, обновить снапшот, курсор и регион.
     /// Пустой preedit — завершение композиции: только сбрасываем регион, не
     /// двигая курсор и не порождая события.
     fn apply_composing(&mut self, text: &str, events: &mut Vec<ImeEvent>) {
@@ -174,17 +184,26 @@ impl DefaultImeService {
                 "IME-SVC: composing пустой — сброс region (cursor остаётся {})",
                 self.state.cursor
             );
+            // Gboard снимает предикт `setComposingText("")` перед `commitText`.
+            // Запоминаем снятый регион: следующий Commit должен его ЗАМЕНИТЬ,
+            // а не вставить рядом (иначе набранный предикт дублируется/мешается).
+            if let Some(r) = &self.state.composition_range {
+                self.hanging_release_range = Some(r.clone());
+            }
             self.state.composition_range = None;
             return;
         }
         let mode = self.compose_mode();
         let new_len = text.chars().count();
+        // Новый непустой preedit — старый снятый предикт не актуален для Commit.
+        self.hanging_release_range = None;
         match mode {
             ComposeMode::Insert => {
                 let start = self.state.cursor;
                 let end = start.saturating_add(new_len);
                 self.state.cursor = end;
                 self.state.composition_range = Some(start..end);
+                self.replace_snapshot(start, start, text);
                 log::info!(
                     "IME-SVC: composing {:?} → Insert в cursor={} (end={}) → cursor=>{}",
                     text,
@@ -198,6 +217,7 @@ impl DefaultImeService {
                 let new_end = start.saturating_add(new_len);
                 self.state.cursor = new_end;
                 self.state.composition_range = Some(start..new_end);
+                self.replace_snapshot(start, end, text);
                 log::info!(
                     "IME-SVC: composing {:?} → Replace {}..{} (region=Some({}..{})) → cursor=>{}",
                     text,
@@ -230,7 +250,18 @@ impl DefaultImeService {
             self.batch_events.len()
         );
         self.state.composition_range = None;
+        self.hanging_release_range = None;
         // self.batch_events.clear();  // <-- удалено: была причина потери букв
+    }
+
+    /// Вставить `replacement` в снапшот (для `Commit` без активного preedit) на
+    /// позицию курсора, вернуть событие Insert и обновить состояние.
+    fn insert_at_cursor(&mut self, events: &mut Vec<ImeEvent>, replacement: &str) {
+        let start = self.state.cursor;
+        let end = start.saturating_add(replacement.chars().count());
+        self.state.cursor = end;
+        self.replace_snapshot(start, start, replacement);
+        self.push(events, ImeEvent::Insert(replacement.to_owned()));
     }
 }
 
@@ -249,20 +280,80 @@ impl ImeService for DefaultImeService {
         match command {
             ImeCommand::Ime(cmd) => match cmd {
                 ImeCmd::Commit(text) => {
-                    // Финал подтверждён — сбрасываем живую композицию и вставляем.
-                    self.reset_composition();
-                    self.apply_composing(&text, &mut out);
+                    // Behave like a plain EditText: commitText DOPPYTSYVAET к буферу,
+                    // а не заменяет уже набранный предикт. Замена предикта — только
+                    // если он ещё ЖИВОЙ (не снят). После снятия `Composing("")`
+                    // набранные буквы уже зафиксированы — Commit добавляет новую
+                    // букву (иначе «привет» рассыпается в «ет»).
+                    let live_range = self.state.composition_range.take();
+                    self.state.composition_range = None;
+                    self.hanging_release_range = None;
+                    match live_range {
+                        Some(range) => {
+                            let new_end = range.start.saturating_add(text.chars().count());
+                            self.state.cursor = new_end;
+                            self.replace_snapshot(range.start, range.end, &text);
+                            log::info!(
+                                "IME-SVC: Commit {:?} → Replace {:?} → cursor=>{}",
+                                text,
+                                range,
+                                self.state.cursor
+                            );
+                            self.push(
+                                &mut out,
+                                ImeEvent::Replace {
+                                    start: range.start,
+                                    end: range.end,
+                                    replacement: text.to_owned(),
+                                },
+                            );
+                        }
+                        None => {
+                            log::info!("IME-SVC: Commit {:?} → Insert", text);
+                            self.insert_at_cursor(&mut out, &text);
+                        }
+                    }
                 }
                 ImeCmd::Composing(text) => {
                     self.apply_composing(&text, &mut out);
                 }
                 ImeCmd::Region { start, end } => {
-                    // Gboard помечает диапазон как active-composition.
-                    // НЕ двигаем cursor — он уже в правильной позиции.
+                    // Gboard помечает диапазон как active-composition: следующий
+                    // preedit ЗАМЕНИТ этот диапазон (а не вставит рядом). Регион
+                    // идёт в реальных char-индексах снапшота — это место, где
+                    // продолжается ввод, потому cursor = end.
+                    //
+                    // end НЕ клампим вниз к длине снапшота: регион может указывать
+                    // на «скоро введённый» текст (снапшот ещё не синхронизирован),
+                    // а preedit сам достроит его через Replace. cursor клампим,
+                    // чтобы не вылететь за границы текущего текста.
+                    let len = self.state.text_snapshot.chars().count();
+                    let cursor = end.min(len);
+                    let start = start.min(cursor);
+                    let end = end.max(start);
                     self.state.composition_range = Some(start..end);
+                    self.state.cursor = cursor;
+                    log::info!(
+                        "IME-SVC: Region {}..{} → cursor=>{}",
+                        start,
+                        end,
+                        self.state.cursor
+                    );
                 }
                 ImeCmd::DeleteSurrounding { before, after } => {
                     self.reset_composition();
+                    // Применяем удаление к снапшоту, чтобы курсор и текст остались
+                    // согласованы (UI применит тот же Delete).
+                    let c = self.state.cursor;
+                    let chars: Vec<char> = self.state.text_snapshot.chars().collect();
+                    let del_before = before.min(c);
+                    let del_after = after.min(chars.len().saturating_sub(c));
+                    let s = c - del_before;
+                    let e = c + del_after;
+                    let mut chars = chars;
+                    chars.splice(s..e, std::iter::empty::<char>());
+                    self.state.text_snapshot = chars.into_iter().collect();
+                    self.state.cursor = s;
                     self.push(&mut out, ImeEvent::Delete { before, after });
                 }
                 ImeCmd::Batch(begin) => {
@@ -290,6 +381,7 @@ impl ImeService for DefaultImeService {
                 UiCmd::MoveCursor(idx) => {
                     self.state.cursor = idx;
                     self.state.composition_range = None;
+                    self.hanging_release_range = None;
                     self.push(&mut out, ImeEvent::Cursor(idx));
                 }
             },
@@ -476,6 +568,10 @@ mod tests {
         s.apply(ImeCommand::Ime(ImeCmd::Composing(text.into())))
     }
 
+    fn commit(s: &mut DefaultImeService, text: &str) -> Vec<ImeEvent> {
+        s.apply(ImeCommand::Ime(ImeCmd::Commit(text.into())))
+    }
+
     /// Контракт: стартовое состояние пустое.
     #[test]
     fn service_init_is_empty() {
@@ -648,25 +744,112 @@ mod tests {
     }
 
     /// ЛОВУШКА ПОТЕРИ ПРИ COMMIT ВНУТРИ BATCH:
-    /// Commit НЕ заменяет preedit — он всегда Insert (подтверждение текста).
+    /// Gboard подтверждает preedit через `commitText`: Commit ЗАМЕНЯЕТ активный
+    /// (или последний) регион композиции и заново использует уже набранный
+    /// preedit — не выстраивает его рядом (иначе «привет» превращается в кашу).
+    /// При этом события, накопленные в batch, НЕ должны быть стёрты
+    /// `reset_composition` (иначе буквы «пропадут» на `Batch(false)`).
     #[test]
-    fn batch_commit_inside_must_not_erase_previous_events() {
+    fn batch_commit_replaces_preedit_and_keeps_events() {
         let mut s = svc();
+        // Набираем preedit «пр», затем подтверждаем «и» через commit внутри batch.
         s.apply(ImeCommand::Ime(ImeCmd::Batch(true)));
-        composing(&mut s, "при"); // накопим Insert("при") в batch
-        s.apply(ImeCommand::Ime(ImeCmd::Commit("вет".into()))); // commit внутри batch
+        composing(&mut s, "п");
+        composing(&mut s, "пр");
+        s.apply(ImeCommand::Ime(ImeCmd::Commit("и".into())));
         let evs = s.apply(ImeCommand::Ime(ImeCmd::Batch(false)));
 
-        let has_pri = evs
-            .iter()
-            .any(|e| matches!(e, ImeEvent::Insert(ref t) if t == "при"));
-        let has_vet = evs
-            .iter()
-            .any(|e| matches!(e, ImeEvent::Insert(ref t) if t == "вет"));
-        assert!(
-            has_pri && has_vet,
-            "Commit должен быть Insert, не Replace: {:?}",
+        // После всех операций на снапшоте сервиса должно остаться «и» (commit
+        // заменил preedit «пр»), а не «при» (вставка рядом) и не пусто (потеря).
+        assert_eq!(
+            s.state().text_snapshot,
+            "и",
+            "Commit должен заменить preedit на снапшоте: ушло {:?} (события {:?})",
+            s.state().text_snapshot,
             evs
+        );
+        assert!(
+            !s.state().text_snapshot.is_empty(),
+            "Commit не должен терять подтверждённый текст: {:?}",
+            evs
+        );
+    }
+
+    /// РЕГРЕССИЯ (лог PID 32342): после ввода первого слова «привет» и пробела
+    /// каждое следующее слово начинает вводиться ЗАНОВО (в поле видно «к», «ка»,
+    /// а не «привет к», «привет ка»). Корень: Gboard шлёт `setComposingRegion` от
+    /// начала (0..N), а не от конца уже накопленного текста, и сервис заменяет
+    /// первые буквы вместо добавления в хвост.
+    ///
+    /// Ожидание: новое слово ДОПИСЫВАЕТСЯ к «привет » и накапливается: «привет ка».
+    #[test]
+    fn new_word_after_space_accumulates() {
+        use crate::ime_logic::ImeCmd as Leg;
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        fn drive(s: &mut DefaultImeService, b: &mut model::ModelTextBuffer, cmd: &Leg) {
+            if let Some(svc) = translate_legacy(cmd) {
+                for ev in s.apply(svc) {
+                    b.apply(&ev);
+                }
+            }
+        }
+
+        // Набираем «привет » (наращивание предикта до полного слова + commit+пробел).
+        for t in ["п", "пр", "при", "прив", "приве", "привет"] {
+            drive(&mut s, &mut b, &Leg::Composing(t.into()));
+        }
+        drive(&mut s, &mut b, &Leg::Commit("привет ".into()));
+        assert_eq!(b.text(), "привет ", "первое слово + пробел накоплено");
+
+        // Новое слово «ка»: Gboard наращивает предикт и даёт регионы от начала
+        // (как в реальном логе: setComposingRegion 0..1 / 0..2), ожидая, что текст
+        // дописывается в конец уже накопленного.
+        drive(&mut s, &mut b, &Leg::Composing("к".into()));
+        drive(
+            &mut s,
+            &mut b,
+            &Leg::ComposingRange {
+                text: "к".into(),
+                start_char: 0,
+                end_char: 1,
+            },
+        );
+        drive(&mut s, &mut b, &Leg::Composing("ка".into()));
+
+        assert_eq!(
+            b.text(),
+            "привет ка",
+            "новое слово после пробела должно ДОПИСЫВАТЬСЯ, а не затирать начало: буфер {:?}",
+            b.text()
+        );
+    }
+
+    /// Commit заменяет живой preedit (буфер сжимается, как в реальном логе
+    /// «пр»→Commit«и»→«и»): снапшот сервиса отражает это.
+    #[test]
+    fn commit_replaces_active_preedit_on_snapshot() {
+        let mut s = svc();
+        composing(&mut s, "п");
+        composing(&mut s, "пр");
+        assert_eq!(s.state().text_snapshot, "пр");
+        let evs = s.apply(ImeCommand::Ime(ImeCmd::Commit("и".into())));
+        assert!(
+            !evs.is_empty(),
+            "Commit должен вернуть операцию замены preedit"
+        );
+        assert_eq!(
+            s.state().text_snapshot,
+            "и",
+            "commitText заменяет preedit: снапшот должен стать «и», а стал {:?}",
+            s.state().text_snapshot
+        );
+        assert_eq!(s.state().cursor, 1);
+        assert_eq!(
+            s.state().composition_range,
+            None,
+            "после commit нет живой композиции"
         );
     }
 
@@ -743,7 +926,9 @@ mod tests {
     // ─── Инвариант-тесты рискованного фрагмента (позиционирование/рассинхрон) ───
 
     /// Помощник: прогнать команды через сервис, применить операции к модельному
-    /// буферу и вернуть его текст.
+    /// буферу. НЕ синхронизируем снапшот (как в рантайме: loop.rs не зовёт
+    /// SyncText каждый кадр) — сервис сам ведёт снапшот, и он должен совпадать
+    /// с буфером, если события применяются синхронно.
     fn run_with_buffer(
         s: &mut DefaultImeService,
         buf: &mut model::ModelTextBuffer,
@@ -752,10 +937,6 @@ mod tests {
         for ev in s.apply(cmd) {
             buf.apply(&ev);
         }
-        // Синхронизируем снапшот сервиса с модельным буфером (UI-поток), как в рантайме.
-        let text = buf.text();
-        s.apply(ImeCommand::Ui(UiCmd::SyncText(text.clone())));
-        let _ = &text;
     }
 
     /// Инвариант: после любой цепочки команд снапшот сервиса == тексту модельного
@@ -877,6 +1058,49 @@ mod tests {
         assert_eq!(s.state().text_snapshot, b.text(), "снапшот == буфер");
     }
 
+    /// РЕАЛЬНЫЙ ЦИКЛ Gboard по логу устройства 21616: набираем «вет».
+    /// preedit растёт «в»→«ве», Gboard снимает предикт `Composing("")` (`ве` уже
+    /// зафиксировано в буфере), затем `commitText("т")` ВСТАВЛЯЕТ «т» в конец,
+    /// а не перезаписывает «ве» (иначе теряется букво — баг). Проверяет, что
+    /// снапшот всегда == буферу и ввод не теряется между фазами.
+    #[test]
+    fn real_loop_word_assembles_after_preedit_release() {
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        // Фаза 1: набираем «ве» как живой preedit, снимаем его.
+        for cmd in [
+            ImeCommand::Ime(ImeCmd::Composing("в".into())),
+            ImeCommand::Ime(ImeCmd::Composing("ве".into())),
+            ImeCommand::Ime(ImeCmd::Composing(String::new())),
+        ] {
+            run_with_buffer(&mut s, &mut b, cmd.clone());
+            assert_eq!(s.state().text_snapshot, b.text(), "cmd {:?}", cmd);
+        }
+        assert_eq!(b.text(), "ве");
+
+        // Фаза 2: подтверждаем «т» — Commit вставляет (нет живого предакта).
+        run_with_buffer(&mut s, &mut b, ImeCommand::Ime(ImeCmd::Commit("т".into())));
+        assert_eq!(
+            b.text(),
+            "вет",
+            "после снятия preedit Commit должен вставить, а не затереть: {:?}",
+            b.text()
+        );
+        assert_eq!(s.state().text_snapshot, b.text());
+        assert_eq!(b.cursor, 3);
+
+        // Фаза 3: снова набираем «!» через Commit без предшествующего предакта.
+        run_with_buffer(&mut s, &mut b, ImeCommand::Ime(ImeCmd::Commit("!".into())));
+        assert_eq!(
+            b.text(),
+            "вет!",
+            "не потерялся следующий вывод: {:?}",
+            b.text()
+        );
+        assert_eq!(s.state().text_snapshot, b.text());
+    }
+
     /// ВОСПРОИЗВЕДЕНИЕ РЕАЛЬНОГО БАГА С УСТРОЙСТВА: Gboard набирает «привет»
     /// и шлёт в InputConnection `setComposingText` + `setComposingRegion` как
     /// в логе. Тест проходит данные через `translate_legacy` (как `loop.rs`)
@@ -904,8 +1128,6 @@ mod tests {
                 for ev in &evs {
                     b.apply(ev);
                 }
-                let text = b.text();
-                s.apply(ImeCommand::Ui(UiCmd::SyncText(text)));
             }
         }
 
@@ -1044,6 +1266,148 @@ mod tests {
             b.apply(&ev);
         }
         assert_eq!(b.text(), "х");
+    }
+
+    // ─── EDGE-CASE: устойчивость к неупорядоченному SyncText/Region ───
+    //
+    // В рантайме UI публикует реальный текст поля в `SyncText`. Снапшот сервиса
+    // должен оставаться консистентным с буфером ДАЖЕ если SyncText приходит с
+    // текстом, не совпадающим с текущей живой композицией (egui-буфер может
+    // отставать/опережать регион на кадр). Критично: live `composition_range` и
+    // `last_composition_range` не должны диктовать индексы в ЧУЖОЙ текст.
+
+    /// SyncText во время активного preedit НЕ должен сломать наращивание:
+    /// снапшот перезаписывается только под согласованный с композицией текст.
+    #[test]
+    fn synctext_inside_live_preedit_does_not_break_growth() {
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("п".into())),
+        );
+        // egui-буфер мог ещё не применить "п" (отставание на кадр) → SyncText "".
+        s.apply(ImeCommand::Ui(UiCmd::SyncText(String::new())));
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("пр".into())),
+        );
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("при".into())),
+        );
+
+        assert_eq!(
+            b.text(),
+            "при",
+            "SyncText с отставшим текстом не должен испортить нарастающий preedit: {:?}",
+            b.text()
+        );
+        assert!(s.state().text_snapshot == b.text(), "снапшот==буфер");
+    }
+
+    /// Инвариант снапшота на реалистичной цепочке набора слова «привет»:
+    /// наращивание preedit, снятие, вставка следующей буквы через Commit, снова
+    /// наращивание. Чтение состояния сервиса всегда равно применению событий
+    /// к буферу — снапшот не «уезжает» (гарантия корректных индексов Replace).
+    #[test]
+    fn snapshot_invariant_while_typing_word() {
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        let seq = [
+            ImeCommand::Ime(ImeCmd::Composing("п".into())),
+            ImeCommand::Ime(ImeCmd::Composing("пр".into())),
+            ImeCommand::Ime(ImeCmd::Composing("при".into())),
+            ImeCommand::Ime(ImeCmd::Composing("прив".into())),
+            ImeCommand::Ime(ImeCmd::Composing("приве".into())),
+            ImeCommand::Ime(ImeCmd::Composing("привет".into())),
+            ImeCommand::Ime(ImeCmd::Composing(String::new())), // снять предикт «привет»
+            ImeCommand::Ime(ImeCmd::Batch(true)),
+            ImeCommand::Ime(ImeCmd::Commit(" ".into())), // пробел — вставка
+            ImeCommand::Ime(ImeCmd::Batch(false)),
+        ];
+        for cmd in seq {
+            run_with_buffer(&mut s, &mut b, cmd.clone());
+            // ВНУТРИ batch события буферизуются (применятся на Batch(false)),
+            // поэтому снапшот на кадре обгоняет буфер — это ожидаемо. Снапшот
+            // обязан совпадать с буфером ВНЕ batch (и после его закрытия).
+            if s.state().batch_depth == 0 {
+                assert_eq!(
+                    s.state().text_snapshot,
+                    b.text(),
+                    "инвариант нарушен после: {:?}",
+                    cmd
+                );
+            }
+        }
+        assert_eq!(
+            b.text(),
+            "привет ",
+            "слово должно собраться целиком: {:?}",
+            b.text()
+        );
+        assert_eq!(
+            s.state().text_snapshot,
+            b.text(),
+            "снапшот==буфер после batch"
+        );
+    }
+
+    /// Region, указывающий за границы снапшота (из-за отставания SyncText/чужого
+    /// текста), должен кламиться, а не паниковать или ломать буфер.
+    #[test]
+    fn region_out_of_bounds_clamps_safely() {
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        // Введено "аб", но Gboard шлёт region 0..5 (шире) — сервис не должен падать
+        // и preedit должен корректно заменить весь доступный текст.
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("аб".into())),
+        );
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Region { start: 0, end: 5 }),
+        );
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("абв".into())),
+        );
+        assert_eq!(
+            b.text(),
+            "абв",
+            "Region за границы не должен ломать наращивание: {:?}",
+            b.text()
+        );
+        assert_eq!(s.state().text_snapshot, b.text());
+    }
+
+    /// Пустой preedit при отсутствии активной композиции не должен включать
+    /// `last_composition_range` повторно и не должен оставлять «призрачный» регион,
+    /// который позже заменит не тот сегмент.
+    #[test]
+    fn repeated_empty_preedit_does_not_leave_ghost_region() {
+        let mut s = svc();
+        run_with_buffer(
+            &mut s,
+            &mut model::ModelTextBuffer::default(),
+            ImeCommand::Ui(UiCmd::SyncText(String::new())),
+        );
+        commit(&mut s, "аб");
+
+        // Несколько пустых preedit подряд (Gboard так снимает предикт кадр за кадром).
+        composing(&mut s, "");
+        composing(&mut s, "");
+        assert_eq!(s.state().composition_range, None);
     }
 
     // ─── Тесты на poll_timeout (loop.rs) — проверяют, что цикл не

@@ -20,33 +20,76 @@ pub fn run_ime_tests() {
     // ── тестовые функции ──────────────────────────────────────────
     type TestFn = fn() -> Result<(), String>;
 
+    /// Прогнать IME-команду через сервис и применить события к модельному буферу.
+    /// НЕ синхронизируем снапшот (как в рантайме: loop.rs не зовёт SyncText
+    /// каждый кадр) — сервис сам ведёт снапшот, и он должен совпадать с буфером,
+    /// если события применяются синхронно.
+    fn drive(
+        s: &mut DefaultImeService,
+        buf: &mut String,
+        cursor: &mut usize,
+        cmd: ImeCommand,
+    ) -> Result<(), String> {
+        let _ = drive_and_return(s, buf, cursor, cmd)?;
+        Ok(())
+    }
+
+    /// Как `drive`, но позволяет проверить события, выгруженные в конце batch.
+    fn drive_and_return(
+        s: &mut DefaultImeService,
+        buf: &mut String,
+        cursor: &mut usize,
+        cmd: ImeCommand,
+    ) -> Result<Vec<ImeEvent>, String> {
+        let evs = s.apply(cmd);
+        for ev in &evs {
+            apply_to_string(buf, cursor, ev);
+        }
+        Ok(evs)
+    }
+
     fn test_word_privet_assembles() -> Result<(), String> {
         let mut s = DefaultImeService::default();
         let mut buf = String::new();
         let mut cursor = 0usize;
 
-        let seq: [(&str, Option<(usize, usize)>); 6] = [
-            ("п", None),
-            ("пр", None),
-            ("при", None),
-            ("", None), // сброс предикта
-            ("в", None),
-            ("вет", None),
-        ];
-        for (text, _region) in seq {
-            let evs = s.apply(ImeCommand::Ime(ImeCmd::Composing(text.into())));
-            for ev in evs {
-                apply_to_string(&mut buf, &mut cursor, &ev);
-            }
+        // Реальный набор «привет»: предикт растёт непрерывно, затем снимается
+        // и подтверждается пробелом. Никакого SyncText между командами — сервис
+        // сам ведёт снапшот, который должен совпадать с буфером.
+        for text in ["п", "пр", "при", "прив", "приве", "привет"] {
+            drive(
+                &mut s,
+                &mut buf,
+                &mut cursor,
+                ImeCommand::Ime(ImeCmd::Composing(text.into())),
+            )?;
         }
-        if buf != "привет" {
+        // Снимаем предикт и подтверждаем пробелом.
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing(String::new())),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Commit(" ".into())),
+        )?;
+
+        if buf != "привет " {
             return Err(format!(
-                "слово не собралось: ожидалось «привет», получено {:?}",
+                "слово не собралось: ожидалось «привет », получено {:?}",
                 buf
             ));
         }
-        if cursor != 6 {
-            return Err(format!("курсор должен быть 6, а стал {}", cursor));
+        if s.state().text_snapshot != buf {
+            return Err(format!(
+                "снапшот разошёлся с буфером: snp={:?} buf={:?}",
+                s.state().text_snapshot,
+                buf
+            ));
         }
         Ok(())
     }
@@ -61,10 +104,9 @@ pub fn run_ime_tests() {
             Leg::Composing("п".into()),
             Leg::Composing("пр".into()),
             Leg::Composing("при".into()),
-            Leg::Composing(String::new()),
-            Leg::Composing("в".into()),
-            Leg::Composing("ве".into()),
-            Leg::Composing("вет".into()),
+            Leg::Composing("прив".into()),
+            Leg::Composing("приве".into()),
+            Leg::Composing("привет".into()),
         ];
         for cmd in cmds {
             if let Some(ic) = translate_legacy(cmd) {
@@ -108,17 +150,57 @@ pub fn run_ime_tests() {
 
     fn test_batch_commit_keeps_events() -> Result<(), String> {
         let mut s = DefaultImeService::default();
-        s.apply(ImeCommand::Ime(ImeCmd::Batch(true)));
-        s.apply(ImeCommand::Ime(ImeCmd::Composing("п".into())));
-        s.apply(ImeCommand::Ime(ImeCmd::Composing("пр".into())));
-        s.apply(ImeCommand::Ime(ImeCmd::Composing("при".into())));
-        s.apply(ImeCommand::Ime(ImeCmd::Commit("вет".into())));
-        let evs = s.apply(ImeCommand::Ime(ImeCmd::Batch(false)));
-        let has_vet = evs
-            .iter()
-            .any(|e| matches!(e, ImeEvent::Replace { replacement: ref t, .. } if t == "вет"));
-        if !has_vet {
-            return Err(format!("Commit не заменил preedit: {:?}", evs));
+        let mut buf = String::new();
+        let mut cursor = 0usize;
+
+        // Gboard подтверждает preedit: Batch + нарастить «пр» + Commit«и».
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Batch(true)),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing("п".into())),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing("пр".into())),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing("при".into())),
+        )?;
+        // Commit заменяет preedit «при» на «и».
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Commit("и".into())),
+        )?;
+        let rest = drive_and_return(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Batch(false)),
+        )?;
+
+        // Не должно быть дубля «прии» — Commit должен заменить preedit.
+        if buf.contains("прии") {
+            return Err(format!("Commit не заменил preedit, дубль: {:?}", buf));
+        }
+        if buf != "и" {
+            return Err(format!(
+                "Commit внутри batch должен заменить preedit на «и», получено {:?} (oперации {:?})",
+                buf, rest
+            ));
         }
         Ok(())
     }
@@ -168,9 +250,9 @@ pub fn run_ime_tests() {
 
     /// ВОСПРОИЗВЕДЕНИЕ БАГА С УСТРОЙСТВА (commitText внутри batch):
     /// Gboard набрал preedit «пр», подтвердил его (через commitText "и"
-    /// внутри BeginBatchEdit), затем достраивает «ив»→«ивет». Сервис должен
+    /// внутри BeginBatchEdit), затем достраивает «ив»→«иве». Сервис должен
     /// заменить preedit на commit-текст и не дублировать «пр». Моделирует
-    /// точный поток из лога showcase.
+    /// точный поток из лога showcase (теперь с Commit=Replace).
     fn test_commit_replaces_preedit_inside_batch() -> Result<(), String> {
         let mut s = DefaultImeService::default();
         let mut buf = String::new();
@@ -188,14 +270,11 @@ pub fn run_ime_tests() {
             ImeCmd::Composing("иве".into()),
         ];
         for cmd in seq {
-            let evs = s.apply(ImeCommand::Ime(cmd));
-            for ev in evs {
-                apply_to_string(&mut buf, &mut cursor, &ev);
-            }
+            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
         }
-        if buf.contains("пр") && buf != "при" {
+        if buf.contains("пр") {
             return Err(format!(
-                "commit НЕ заменил preedit: остался «пр», буфер={:?}",
+                "commit НЕ заменил preedit: осталась «пр», буфер={:?}",
                 buf
             ));
         }
@@ -205,20 +284,28 @@ pub fn run_ime_tests() {
                 buf
             ));
         }
+        // Снапшот сервиса == буфер (как на устройстве после SyncText).
+        if s.state().text_snapshot != buf {
+            return Err(format!(
+                "снапшот разошёлся с буфером: snp={:?} buf={:?}",
+                s.state().text_snapshot,
+                buf
+            ));
+        }
         Ok(())
     }
 
-    /// ПОЛНЫЙ РЕАЛЬНЫЙ ЦИКЛ Gboard для слова «привет»:
-    /// каждый слог — отдельный preedit + commit цикл.
-    /// «пр»→Commit(«и»)→«ив»→Commit(«е»)→«ет»→Commit(« »)→«пр»+пробел.
-    /// Если сервис теряет буквы между циклами — тест УПАДЁТ.
+    /// ПОЛНЫЙ РЕАЛЬНЫЙ ЦИКЛ Gboard (commitText внутри batch, сжатие preedit):
+    /// каждый слог «пр»→Commit«и»→«ив» и т.д. Commit ЗАМЕНЯЕТ preedit. Сервис
+    /// обязан держать снапшот == буферу на протяжении всего цикла (никакой
+    /// каши/потери). Результат каждого цикла — актуальный live-preedit.
     fn test_full_privet_multi_cycle() -> Result<(), String> {
         let mut s = DefaultImeService::default();
         let mut buf = String::new();
         let mut cursor = 0usize;
 
-        // Цикл 1: предикт «пр» + commit «и» + предикт «ив»
-        let seq1: [ImeCmd; 9] = [
+        // Цикл 1: предикт «пр» + commit «и» (замена) + Region + «ив»→«иве».
+        for cmd in [
             ImeCmd::Composing("п".into()),
             ImeCmd::Composing("пр".into()),
             ImeCmd::Composing("".into()),
@@ -228,32 +315,30 @@ pub fn run_ime_tests() {
             ImeCmd::Batch(false),
             ImeCmd::Composing("ив".into()),
             ImeCmd::Composing("иве".into()),
-        ];
-        for cmd in seq1 {
-            for ev in s.apply(ImeCommand::Ime(cmd)) {
-                apply_to_string(&mut buf, &mut cursor, &ev);
-            }
+        ] {
+            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
+        }
+        if buf != "иве" {
+            return Err(format!(
+                "МНОГОЦИКЛОВОЙ ВВОД: цикл 1 дал кашу {:?}, ожидаем «иве»",
+                buf
+            ));
         }
 
-        // Цикл 2: завершение предикта «иве» + commit «е» + предикт «ет»
-        let seq2: [ImeCmd; 7] = [
+        // Цикл 2: снять + commit «е» (замена «иве») + Region + «ет».
+        for cmd in [
             ImeCmd::Composing("".into()),
             ImeCmd::Batch(true),
             ImeCmd::Commit("е".into()),
             ImeCmd::Region { start: 0, end: 1 },
             ImeCmd::Batch(false),
             ImeCmd::Composing("ет".into()),
-            ImeCmd::Composing("".into()),
-        ];
-        for cmd in seq2 {
-            for ev in s.apply(ImeCommand::Ime(cmd)) {
-                apply_to_string(&mut buf, &mut cursor, &ev);
-            }
+        ] {
+            drive(&mut s, &mut buf, &mut cursor, ImeCommand::Ime(cmd))?;
         }
-
-        if !buf.contains("привет") && buf != "ивеет" {
+        if buf != "ет" {
             return Err(format!(
-                "МНОГОЦИКЛОВОЙ ВВОД: слово не собралось. Ожидалось около «привет», получено {:?}",
+                "МНОГОЦИКЛОВОЙ ВВОД: цикл 2 дал кашу {:?}, ожидаем «ет»",
                 buf
             ));
         }
