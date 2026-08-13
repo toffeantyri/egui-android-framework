@@ -1257,11 +1257,14 @@ fn events(
                             clear_preedit_text(text, &cursor_range)
                         };
 
-                        let start_cursor = ccursor;
                         if !preedit_text.is_empty() {
                             text.insert_text_at(&mut ccursor, preedit_text, char_limit);
                         }
-                        Some(CCursorRange::two(start_cursor, ccursor))
+                        // После замены/вставки предикта курсор должен стать КАРЕТКОЙ
+                        // В КОНЦЕ вставленного текста, а не выделением диапазона
+                        // `start..end`. Иначе следующая вставка (новое слово после
+                        // пробела) заменит всё поле (регрессия «привет как» → «как »).
+                        Some(CCursorRange::one(ccursor))
                     }
                     ImeEvent::Commit(commit_text) => {
                         state.cursor_purpose = TextEditCursorPurpose::Selection;

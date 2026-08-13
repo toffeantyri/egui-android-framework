@@ -561,13 +561,6 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, _field_id: egui::Id, text: &str
         composing_start: None,
         composing_end: None,
     };
-    log::info!(
-        "[TextEdit] publish_editor_state: text_len={} selection={}..{} text={:?}",
-        text_len,
-        selection_start,
-        selection_end,
-        text
-    );
     *slot.lock().unwrap() = Some(state);
     // log::info!("[TextEdit] publish_editor_state exit {:?}", field_id); // спам
 }
@@ -1607,6 +1600,94 @@ mod tests {
         assert_eq!(
             st.selection_end, 2,
             "selection_end должен быть в конце текста (2), а не выделение 0..2"
+        );
+    }
+
+    /// РЕГРЕССИЯ egui-слоя (лог PID 32342): после `ImeEvent::Preedit` с
+    /// `replace_range` (наш commitText «привет ») egui оставляет выделение
+    /// `0..7`, а НЕ каретку `7..7`. Поэтому следующая вставка (новое слово «к»)
+    /// заменяет всё поле, и текст начинает вводиться заново.
+    ///
+    /// Ожидание: после preedit каретка в конце, и следующий ввод ДОПИСЫВАЕТСЯ.
+    #[test]
+    fn preedit_replace_range_then_insert_appends_not_overwrites() {
+        let ctx = egui::Context::default();
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let dispatch2 = dispatch.clone();
+        let id = egui::Id::new("te_preedit_replace_caret");
+        let captured = Arc::new(Mutex::new(String::new()));
+
+        // Кадр 1: Preedit с replace_range — заменяет «привет» на «привет ».
+        let raw1 = egui::RawInput {
+            events: vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "привет ".into(),
+                active_range_chars: Some(0..7),
+                replace_range: Some(0..6),
+            })],
+            ..Default::default()
+        };
+        {
+            let cap = Arc::clone(&captured);
+            let f = std::cell::RefCell::new(Some(move |ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id));
+                let rem = crate::remember(ui, "te_preedit_remember", || "привет".to_owned());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                let cap = Arc::clone(&cap);
+                TextEdit::<()>::new(init)
+                    .id(id)
+                    .on_changed(move |v| {
+                        rem.set(v.to_owned());
+                        *cap.lock().unwrap() = v.to_owned();
+                    })
+                    .render(ui, &dispatch);
+            }));
+            let _ = ctx.run_ui(raw1, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+        assert_eq!(
+            &*captured.lock().unwrap(),
+            "привет ",
+            "после Preedit текст должен замениться"
+        );
+
+        // Кадр 2: вставляем новое слово «к» как обычный Text.
+        let raw2 = egui::RawInput {
+            events: vec![egui::Event::Text("к".into())],
+            ..Default::default()
+        };
+        {
+            let cap = Arc::clone(&captured);
+            let f = std::cell::RefCell::new(Some(move |ui: &mut UiWrapper| {
+                ui.ctx().memory_mut(|m| m.request_focus(id));
+                let rem = crate::remember(ui, "te_preedit_remember", || "привет".to_owned());
+                let init = rem.get().clone();
+                let rem = rem.clone();
+                let cap = Arc::clone(&cap);
+                TextEdit::<()>::new(init)
+                    .id(id)
+                    .on_changed(move |v| {
+                        rem.set(v.to_owned());
+                        *cap.lock().unwrap() = v.to_owned();
+                    })
+                    .render(ui, &dispatch2);
+            }));
+            let _ = ctx.run_ui(raw2, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut f = f.borrow_mut().take().unwrap();
+                    f(&mut UiWrapper::new_unconstrained(ui));
+                });
+            });
+        }
+
+        assert_eq!(
+            &*captured.lock().unwrap(),
+            "привет к",
+            "после preedit+replace_range следующая вставка ДОЛЖНА ДОПИСЫВАТЬ, а не затирать"
         );
     }
 }

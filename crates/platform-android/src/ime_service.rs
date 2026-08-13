@@ -128,11 +128,6 @@ pub struct DefaultImeService {
     state: ImeServiceState,
     /// Операции, накопленные внутри batch, выгружаются при `Batch(false)`.
     batch_events: Vec<ImeEvent>,
-    /// Регион только что снятого предикта, ожидающий `Commit`.
-    /// Gboard шлёт `setComposingText("")` (снятие) ПЕРЕД `commitText`, поэтому на
-    /// момент Commit живого предикта уже нет, но Commit должен ЗАМЕНИТЬ снятый
-    /// предикт, а не вставить рядом (иначе набранное продублируется/окарошится).
-    hanging_release_range: Option<std::ops::Range<usize>>,
 }
 
 /// Способ применения `Composing` — вставка без предшествующего региона либо
@@ -184,19 +179,11 @@ impl DefaultImeService {
                 "IME-SVC: composing пустой — сброс region (cursor остаётся {})",
                 self.state.cursor
             );
-            // Gboard снимает предикт `setComposingText("")` перед `commitText`.
-            // Запоминаем снятый регион: следующий Commit должен его ЗАМЕНИТЬ,
-            // а не вставить рядом (иначе набранный предикт дублируется/мешается).
-            if let Some(r) = &self.state.composition_range {
-                self.hanging_release_range = Some(r.clone());
-            }
             self.state.composition_range = None;
             return;
         }
         let mode = self.compose_mode();
         let new_len = text.chars().count();
-        // Новый непустой preedit — старый снятый предикт не актуален для Commit.
-        self.hanging_release_range = None;
         match mode {
             ComposeMode::Insert => {
                 let start = self.state.cursor;
@@ -250,7 +237,6 @@ impl DefaultImeService {
             self.batch_events.len()
         );
         self.state.composition_range = None;
-        self.hanging_release_range = None;
         // self.batch_events.clear();  // <-- удалено: была причина потери букв
     }
 
@@ -287,7 +273,6 @@ impl ImeService for DefaultImeService {
                     // букву (иначе «привет» рассыпается в «ет»).
                     let live_range = self.state.composition_range.take();
                     self.state.composition_range = None;
-                    self.hanging_release_range = None;
                     match live_range {
                         Some(range) => {
                             let new_end = range.start.saturating_add(text.chars().count());
@@ -381,7 +366,6 @@ impl ImeService for DefaultImeService {
                 UiCmd::MoveCursor(idx) => {
                     self.state.cursor = idx;
                     self.state.composition_range = None;
-                    self.hanging_release_range = None;
                     self.push(&mut out, ImeEvent::Cursor(idx));
                 }
             },
@@ -772,57 +756,6 @@ mod tests {
             !s.state().text_snapshot.is_empty(),
             "Commit не должен терять подтверждённый текст: {:?}",
             evs
-        );
-    }
-
-    /// РЕГРЕССИЯ (лог PID 32342): после ввода первого слова «привет» и пробела
-    /// каждое следующее слово начинает вводиться ЗАНОВО (в поле видно «к», «ка»,
-    /// а не «привет к», «привет ка»). Корень: Gboard шлёт `setComposingRegion` от
-    /// начала (0..N), а не от конца уже накопленного текста, и сервис заменяет
-    /// первые буквы вместо добавления в хвост.
-    ///
-    /// Ожидание: новое слово ДОПИСЫВАЕТСЯ к «привет » и накапливается: «привет ка».
-    #[test]
-    fn new_word_after_space_accumulates() {
-        use crate::ime_logic::ImeCmd as Leg;
-        let mut s = svc();
-        let mut b = model::ModelTextBuffer::default();
-
-        fn drive(s: &mut DefaultImeService, b: &mut model::ModelTextBuffer, cmd: &Leg) {
-            if let Some(svc) = translate_legacy(cmd) {
-                for ev in s.apply(svc) {
-                    b.apply(&ev);
-                }
-            }
-        }
-
-        // Набираем «привет » (наращивание предикта до полного слова + commit+пробел).
-        for t in ["п", "пр", "при", "прив", "приве", "привет"] {
-            drive(&mut s, &mut b, &Leg::Composing(t.into()));
-        }
-        drive(&mut s, &mut b, &Leg::Commit("привет ".into()));
-        assert_eq!(b.text(), "привет ", "первое слово + пробел накоплено");
-
-        // Новое слово «ка»: Gboard наращивает предикт и даёт регионы от начала
-        // (как в реальном логе: setComposingRegion 0..1 / 0..2), ожидая, что текст
-        // дописывается в конец уже накопленного.
-        drive(&mut s, &mut b, &Leg::Composing("к".into()));
-        drive(
-            &mut s,
-            &mut b,
-            &Leg::ComposingRange {
-                text: "к".into(),
-                start_char: 0,
-                end_char: 1,
-            },
-        );
-        drive(&mut s, &mut b, &Leg::Composing("ка".into()));
-
-        assert_eq!(
-            b.text(),
-            "привет ка",
-            "новое слово после пробела должно ДОПИСЫВАТЬСЯ, а не затирать начало: буфер {:?}",
-            b.text()
         );
     }
 

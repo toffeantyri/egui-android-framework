@@ -242,15 +242,6 @@ pub extern "system" fn Java_com_example_egui_1android_EguiImeView_nativeGetTextB
         }
         None => String::new(),
     };
-    log::info!(
-        "IME-JNI: getTextBeforeCursor(n={}) selection={} text_len={} -> {:?}",
-        length,
-        current_editor_state()
-            .map(|st| st.selection_start)
-            .unwrap_or(0),
-        current_editor_state().map(|st| st.text_len).unwrap_or(0),
-        out
-    );
     string_to_jstring(&mut env, &out)
 }
 
