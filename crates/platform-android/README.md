@@ -27,6 +27,51 @@ touch-ввод (с инерцией), системные панели (status ba
 - **Lifecycle** — InitWindow → Resume → Pause → Stop → Destroy с пробросом в Application
 - **GraphicsPipeline** — OpenGL рендеринг через `egui_glow`
 
+## Пайплайн IME-ввода и InputConnection
+
+Текстовый ввод идёт ТОЛЬКО через Kotlin `InputConnection` (не через `TextEvent`/`textInputState`).
+
+**Поток:**
+
+```text
+EguiImeView.EguiImeInputConnection (Kotlin)
+        │  commitText / setComposingText / setComposingRegion /
+        │  deleteSurroundingText / beginBatchEdit / endBatchEdit / …
+        ▼
+ime_jni.rs (JNI-функции nativeOn*)
+        │  кладут ImeCmd в PlatformState.ime_cmds (потокобезопасная очередь)
+        ▼
+loop.rs (шаг 2.5)
+        │  take_ime_cmds → translate_legacy → DefaultImeService.apply → ImeEvent
+        ▼
+to_egui_event
+        │  Insert→Event::Text, Replace→ImeEvent::Preedit{replace_range},
+        │  Delete→клавиша; события идут в egui в текущем кадре
+        ▼
+egui::TextEdit (патч)
+```
+
+**Ключевые компоненты:**
+- `ime_jni.rs` — JNI-мост: 
+  очередь команд + `getTextBeforeCursor`/`getTextAfterCursor`/`getSelectionStart`/
+  `getExtractedText` (читают `ImeEditorState`, публикуемый UI-слоем).
+- `ime_logic.rs` — типы `ImeCmd` и хост-утилиты.
+- `ime_service.rs` — редьюсер (`DefaultImeService`): единственный источник состояния
+  композиции (`text_snapshot`, `cursor`, `composition_range`) → буферные операции.
+- `loop.rs` — забирает очередь, применяет редьюсер, конвертирует в `egui::Event`.
+
+**Поведение (как обычный EditText / Unity / Godot):**
+- Предикт (`Composing`) наращивается через `Replace` региона; после снятия предикта
+  следующий `Commit` делает `Insert` (не перезаписывает) — слово накапливается.
+- Каретка в `ImeEditorState` публикуется в КОНЕЦ текста во время ввода, поэтому
+  Gboard через `getTextBeforeCursor`/`getSelection` получает корректный хвост, и
+  регионы не затирают набранное.
+- egui-patch: после `ImeEvent::Preedit{replace_range}` каретка встаёт в конец вставки
+  (`CCursorRange::one`), а не выделяет диапазон — следующее слово дописывается.
+- egui `Visuals::ime_composition.legacy_visuals = true` на Android: мигающая каретка
+  и выделение остаются видимыми даже при активной IME-композиции.
+
+
 ## Использование
 
 ```rust

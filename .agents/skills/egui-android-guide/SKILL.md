@@ -267,14 +267,35 @@ Message = и событие, и семантика
 - JNI-чтение (на Java-потоке) использует `try_lock` — неблокирующее, без deadlock'а с главным циклом.
 
 ### `ime_logic` — `egui-android-platform-android` (хост-совместимый модуль)
-- Чистая IME-логика: преобразование `ImeCmd` → `egui::Event`.
-- **Без `cfg(target_os = "android")`** — покрывается юнит-тестами на хосте (`cargo test`).
-- Содержит: `ImeCmd`, `ImeOutcome`, `ImeBuffer`, `process_ime_cmd`, `utf16_offset_to_char_index`.
-- `ImeCmd` — команда из Kotlin `InputConnection` (Commit/Composing/Next/Done/DeleteSurrounding/ComposingRange/SetSelection/BeginBatchEdit/EndBatchEdit).
-- `ImeBuffer` — накопитель egui-событий с batch-операциями (`batch_depth` + `batch_buffer`).
+- Типы команд ввода и хост-утилиты. **Без `cfg(target_os = "android")`** — покрывается юнит-тестами на хосте (`cargo test`).
+- Содержит: `ImeCmd` (команды из Kotlin `InputConnection`), `utf16_offset_to_char_index`.
+- `ImeCmd` — Commit/Composing/ComposingRange/Next/Done/DeleteSurrounding/BeginBatchEdit/EndBatchEdit/SetSelection/PrivateCommand.
 - `event.rs` реэкспортирует `ImeCmd` (`pub use crate::ime_logic::ImeCmd`).
-- `input_processing.rs` делегирует `process_ime_cmd`, соединяя `ImeBuffer` с полями `InputState`.
-- **Почему вынесено:** `event.rs`/`input.rs`/`input_processing.rs` под `cfg(target_os = "android")` — их тесты не запускались на хосте (dead code). Вынос позволил реально протестировать batch, UTF-16, actions.
+- Собственно редьюсер ввода вынесен в `ime_service` (см. ниже) — `ime_logic` остаётся только типами/утилитами.
+
+### `ime_service` — `egui-android-platform-android` (хост-совместимый)
+- Редьюсер команд → элементарные буферные операции. Единственный источник состояния композиции.
+- `DefaultImeService` (stateful) ведёт `text_snapshot` (модель реального текста поля), `cursor` (каретка),
+  `composition_range` (активный предикт). Все события (`Insert`/`Replace`/`Delete`/
+  `Cursor`/`Action`) возвращаются наружу, UI применяет их — тогда снапшот == реальному буферу.
+- Семантика по факту устройства (поведение как обычный EditText/Unity/Godot):
+  - `Composing` наращивает предикт через `Replace` региона (регион приходит от Gboard относительно
+    реального буфера); после снятия предикта следующий `Commit` делает `Insert` в каретку (не перезаписывает).
+  - Позиция каретки берётся из реального буфера (egui), поэтому регионы Gboard ложатся на хвост, а не на начало.
+- `translate_legacy` переводит `ImeCmd` из JNI-очереди в команду редьюсера (`ImeCommand`).
+- `to_egui_event` превращает `Insert`→`Event::Text`, `Replace`→`ImeEvent::Preedit{replace_range}`,
+  `Delete`→клавишу, `Cursor`/`Action`—управление.
+- Хост-тесты покрывают наращивание, Commit=Insert после снятия, инвариант «снапшот == буфер».
+
+### InputConnection (Kotlin `EguiImeView`) → пайплайн ввода
+1. `EguiImeView.EguiImeInputConnection` (Kotlin) ловит `commitText`/`setComposingText`/
+   `deleteSurroundingText`/`setComposingRegion` и др., вызывает JNI-функции `nativeOn*` (`ime_jni.rs`).
+2. JNI кладёт `ImeCmd` в потокобезопасную очередь `PlatformState.ime_cmds` (`push_cmd`).
+3. `loop.rs` забирает очередь, `translate_legacy` → `DefaultImeService.apply` → `ImeEvent`.
+4. `to_egui_event` превращает `ImeEvent` в `egui::Event`; события подаются в egui в текущем кадре.
+5. UI-слой (`TextEdit`) публикует реальный текст и каретку в конец в `ImeEditorState`
+   (`selection_start == selection_end == text_len` во время ввода), чтобы `getTextBeforeCursor`/
+   `getSelectionStart` возвращали корректный хвост — Gboard не затирает набранное.
 
 ### Управление показом/скрытием клавиатуры (важно)
 - **Показ** делает ТОЛЬКО `TextEdit` через `KeyboardController.show()` при `gained_focus`/становлении владельцем. `loop.rs` НЕ показывает по `platform_output.ime`.

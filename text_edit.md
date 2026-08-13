@@ -45,7 +45,10 @@
 
 - `crates/core/*` — не нужно
 - `crates/runtime/*` — не нужно
-- `patches/egui/*` — `egui::TextEdit` уже полностью функционален
+
+> Патч `patches/egui/*` УЖЕ настроен для IME-интеграции (replace_range каретка,
+> legacy_visuals на Android) — см. `patches/egui/PATCH_NOTES.md` и раздел 16.
+> Не переоткрывать эти настройки вручную.
 
 ---
 
@@ -650,6 +653,33 @@ TextEdit::new(email.get().clone())
 **Не** вызывайте `remember().set()`/`modify()`, пока жив read-guard от `get()` того же
 состояния в том же полном выражении (особенно через `on_changed`/`on_click_with`).
 Всегда разрывайте guard в отдельную локальную переменную.
+
+### Обновлённый пайплайн IME-ввода (InputConnection → egui)
+
+После рефакторинга ввод идёт строго через `InputConnection` (без `TextEvent`/`textInputState`):
+
+```text
+EguiImeView.EguiImeInputConnection (Kotlin)
+  → ime_jni (JNI nativeOn* / getText*) → PLATFORM_STATE.ime_cmds (очередь)
+  → loop.rs → translate_legacy → DefaultImeService.apply → ImeEvent
+  → to_egui_event → egui::Event → egui::TextEdit (патч)
+```
+
+Ключевые исправления (факты с устройства):
+- **Позиция каретки в `ImeEditorState` — в конец текста** при активном вводе
+  (`selection_start == selection_end == text_len`). Без этого Gboard через
+  `getTextBeforeCursor` получал пустой/начальный контекст, и регионы заменяли начало;
+- **egui-patch** — после `ImeEvent::Preedit{replace_range}` каретка встаёт в конец
+  (`CCursorRange::one`), а не выделяет диапазон — новое слово дописывается, а не
+  стирает набранное;
+- **egui `legacy_visuals = true` на Android** — мигающая каретка и выделение видны
+  даже при активной IME-композиции;
+- **`ime_service` (`DefaultImeService`)** — редьюсер команд → буферные операции:
+  предикт наращивается Replace-ом, после снятия `Commit` делает Insert (не перезаписывает).
+
+Тесты: device-тесты в `examples/showcase/src/ime_tests.rs` (в т.ч.
+`ime_caret_visible_uses_legacy_visuals`); хост-тесты `ime_service.rs` покрывают
+наращивание, Commit=Insert и инвариант «снапшот == буфер».
 
 ### Не сделано / следующий шаг
 

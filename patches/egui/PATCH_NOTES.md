@@ -50,3 +50,50 @@ PR: не создавался
 
 ## Проверка
 - [x] `cargo check --workspace` — без ошибок
+
+---
+
+# IME: каретка в конец после preedit (replace_range)
+
+## Проблема
+Пользователь вводил «привет как дела» — после пробела каждое новое слово
+заменяло предыдущее (в поле оставался только конец).
+
+## Корень
+После `ImeEvent::Preedit` с `replace_range` egui сохранял не каретку в конце
+вставки, а `CCursorRange::two(start, end)` (выделение диапазона 0..N).
+Следующая вставка (новое слово) заменяла выделение → набранное стиралось.
+
+## Исправление
+`patches/egui/src/widgets/text_edit/builder.rs` — в ветке `Preedit` с
+`replace_range` возвращаем `CCursorRange::one(ccursor)` (каретка в конце), а не
+`two(start, end)`. Следующая вставка теперь дописывает в конец.
+
+## Проверка
+- Регрессионный тест `preedit_replace_range_then_insert_appends_not_overwrites`
+  (crates/ui) — RED «к вместо привет к» → GREEN.
+- На устройстве «привет как дела» накапливается целиком.
+
+---
+
+# IME: мигающая каретка и выделение при активном предикте (legacy_visuals)
+
+## Проблема
+После ввода «р» каретка переставала мигать; текст не выделялся.
+
+## Корень
+Непустой `ImeEvent::Preedit` переводит `cursor_purpose` в `ImeComposition`: в
+`show()` мигающая каретка и выделение рисуются ТОЛЬКО при `Selection`; при
+`ImeComposition` рисуется подчёркивание предикта, которого на устройстве нет.
+`legacy_visuals` по умолчанию был `cfg!(windows)`, поэтому на Android поле
+оставалось без каретки/выделения при предикте.
+
+## Исправление
+`patches/egui/src/style.rs` — `default_legacy_visuals()` теперь `true` и на
+Android: `cfg!(any(target_os = "windows", target_os = "android"))`. В legacy-режиме
+предикт рисуется как обычное выделение, мигающая каретка всегда в конце.
+
+## Проверка
+- Device-тест `ime_caret_visible_uses_legacy_visuals` (на устройстве проверяет
+  `visuals.ime_composition.legacy_visuals == true`).
+- На устройстве каретка мигает при вводе.
