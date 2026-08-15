@@ -13,7 +13,8 @@
 #[cfg(target_os = "android")]
 pub fn run_ime_tests() {
     use egui_android_platform_android::ime_service::{
-        poll_timeout, translate_legacy, DefaultImeService, ImeCmd, ImeCommand, ImeEvent, ImeService,
+        poll_timeout, translate_legacy, DefaultImeService, ImeCmd, ImeCommand, ImeEvent,
+        ImeService, UiCmd,
     };
     use std::time::Duration;
 
@@ -266,6 +267,55 @@ pub fn run_ime_tests() {
         Ok(())
     }
 
+    /// РЕГРЕССИЯ с устройства (реальный лог «привет» → тап в середину → ввод):
+    /// после перемещения курсора в середину слова следующий ввод должен
+    /// ВСТАВИТЬСЯ в эту позицию (не затереть слово и не уйти в конец).
+    ///
+    /// Это reducer-половина бага: сервис должен нарастить слово С середины,
+    /// сохранив префикс. В рантайме Gboard шлёт `setComposingRegion` от места
+    /// каретки (см. лог: `setComposingRegion 10..16 text="ривет "`), сервис
+    /// получает `Region`/`Composing` — здесь эмулируем это через SyncText+MoveCursor.
+    fn test_insert_mid_word_preserves_prefix() -> Result<(), String> {
+        let mut s = DefaultImeService::default();
+        let mut buf = String::new();
+        let mut cursor = 0usize;
+
+        // Готовое слово «привет», каретка в середине (char 3).
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ui(UiCmd::SyncText("привет".into())),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ui(UiCmd::MoveCursor(3)),
+        )?;
+
+        // Вводим «X» в середину — должен получиться «приXвет».
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing("X".into())),
+        )?;
+
+        match buf.as_str() {
+            "приXвет" => Ok(()),
+            "приветX" => Err(format!(
+                "ввод ушёл в конец вместо середины: получено {:?}",
+                buf
+            )),
+            "X" => Err(format!("слово затёрто: получено {:?}", buf)),
+            other => Err(format!(
+                "неожиданный результат вставки в середину: {:?}",
+                other
+            )),
+        }
+    }
+
     // ── зарегистрированные тесты ──────────────────────────────────
     let tests: &[(&str, TestFn)] = &[
         ("word_privet_assembles", test_word_privet_assembles),
@@ -280,6 +330,10 @@ pub fn run_ime_tests() {
         (
             "ime_caret_visible_uses_legacy_visuals",
             test_ime_caret_visible_uses_legacy_visuals,
+        ),
+        (
+            "insert_mid_word_preserves_prefix",
+            test_insert_mid_word_preserves_prefix,
         ),
     ];
 

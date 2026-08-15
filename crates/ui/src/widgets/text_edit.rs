@@ -520,7 +520,6 @@ fn utf16_len(text: &str) -> usize {
 }
 
 /// Позиция в UTF-16 code units для символьного индекса `char_index`.
-#[allow(dead_code)]
 fn utf16_char_index(text: &str, char_index: usize) -> usize {
     text.chars().take(char_index).map(|c| c.len_utf16()).sum()
 }
@@ -531,7 +530,7 @@ fn utf16_char_index(text: &str, char_index: usize) -> usize {
 /// Если `KeyboardController` привязал слот `ImeEditorStateSlot` (платформа),
 /// записываем позицию курсора/выделения в UTF-16 code units. Если поля
 /// не имеют egui-курсора (None) — помещаем курсор в конец текста.
-fn keyboard_publish_editor_state(ui: &UiWrapper, _field_id: egui::Id, text: &str) {
+fn keyboard_publish_editor_state(ui: &UiWrapper, field_id: egui::Id, text: &str) {
     // log::info!("[TextEdit] publish_editor_state enter {:?}", field_id); // спам
     let slot = ui.ctx().data(|d| {
         d.get_temp::<KeyboardController>(keyboard_controller_id())
@@ -542,15 +541,35 @@ fn keyboard_publish_editor_state(ui: &UiWrapper, _field_id: egui::Id, text: &str
     };
 
     let text_len = utf16_len(text);
-    // Позиция курсора для InputConnection. Во время активного IME-ввода egui в
-    // `TextEditState.cursor.char_range()` хранит preedit-композицию как ВЫДЕЛЕНИЕ
-    // от начала (например `0..2` для предикта «пр»), а не каретку в конце. Если
-    // публиковать это выделение как `selection_start=0`, Gboard решает, что курсор
-    // в начале текста, шлёт setComposingRegion от начала и накатывает предикт ПОВЕРХ
-    // уже набранного — ввод заменяется (баг «привет → ет»). Поэтому для IME всегда
-    // публикуем каретку в КОНЦЕ текста (как обычный EditText).
-    let selection_end = text_len;
-    let selection_start = text_len;
+    let txt_char_len = text.chars().count();
+
+    // Позиция курсора для InputConnection.
+    //
+    // Берём РЕАЛЬНУЮ egui-каретку из `TextEditState` (если это каретка
+    // start==end). Тогда после тапа в середину слова мы публикуем середину,
+    // и Gboard (`getTextBeforeCursor`/`getSelectionStart`) начинает ввод с
+    // этой позиции, а не растит слово с конца (баг «привет → приветпривет»).
+    //
+    // Если поле ВЫДЕЛяет диапазон (start != end) — это либо активный preedit
+    // (`TextEditState` хранит композицию как выделение от 0), либо пользова-
+    // тельское выделение. В обоих случаях для IME приравниваем каретку к концу
+    // (как раньше): публиковать `0` заставило бы Gboard «накатывать» предикт
+    // с начала и затирать набранное (старый баг «привет → ет»).
+    let caret_char = egui::TextEdit::load_state(ui.ctx(), field_id)
+        .and_then(|st| st.cursor.char_range())
+        .map(|range| {
+            let r = range.as_sorted_char_range();
+            if r.start == r.end {
+                r.start.0 // каретка в середине/где-либо
+            } else {
+                txt_char_len // выделение/предикт → конец
+            }
+        })
+        .unwrap_or(txt_char_len);
+
+    // UTF-16 offset (Android InputConnection индексирует в UTF-16 code units).
+    let selection_end = utf16_char_index(text, caret_char);
+    let selection_start = selection_end;
 
     let state = ImeEditorState {
         focused: true,
@@ -1688,6 +1707,60 @@ mod tests {
             &*captured.lock().unwrap(),
             "привет к",
             "после preedit+replace_range следующая вставка ДОЛЖНА ДОПИСЫВАТЬ, а не затирать"
+        );
+    }
+
+    /// РЕГРЕССИЯ бага с устройства (лог «привет» → тап в середину → «приветпривет»):
+    /// `keyboard_publish_editor_state` публикует каретку всегда В КОНЦЕ (`text_len`),
+    /// даже если egui-каретка стоит в середине слова. Из-за этого `getTextBeforeCursor`/
+    /// `getSelectionStart` возвращают «конец», Gboard продолжает строить слово с конца,
+    /// а тап в середину теряется.
+    ///
+    /// Ожидание: при каретке в середине текста опубликованный `selection_start` ==
+    /// позиции середины (в UTF-16), а не длине текста.
+    #[test]
+    fn publish_editor_state_reflects_mid_word_caret() {
+        use egui::text::{CCursor, CCursorRange};
+        use egui_android_runtime::{ImeEditorState, ImeEditorStateSlot};
+
+        let ctx = egui::Context::default();
+        let slot: ImeEditorStateSlot = Arc::new(Mutex::new(None));
+
+        let mut kb = KeyboardController::new(Arc::new(|| {}), Arc::new(|| {}));
+        kb.bind_editor_state(Arc::clone(&slot));
+        ctx.data_mut(|d| d.insert_temp(keyboard_controller_id(), kb));
+
+        let id = egui::Id::new("te_publish_midword");
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        let dispatch = dispatch.clone();
+
+        // Рендер поля «привет», ставим каретку в середину (char 3), затем публикуем.
+        let f = std::cell::RefCell::new(Some(move |ui: &mut UiWrapper| {
+            ui.ctx().memory_mut(|m| m.request_focus(id));
+            TextEdit::<()>::new("привет").id(id).render(ui, &dispatch);
+            // Пользователь тапнул в середину — egui хранит каретку в `TextEditState`.
+            if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), id) {
+                st.cursor
+                    .set_char_range(Some(CCursorRange::two(CCursor::new(3), CCursor::new(3))));
+                egui::TextEdit::store_state(ui.ctx(), id, st);
+            }
+            // Публикуем в платформу (то же, что делает render каждый кадр).
+            keyboard_publish_editor_state(ui, id, "привет");
+        }));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut f = f.borrow_mut().take().unwrap();
+                f(&mut UiWrapper::new_unconstrained(ui));
+            });
+        });
+
+        let state: Option<ImeEditorState> = slot.lock().unwrap().clone();
+        let st = state.expect("состояние должно быть опубликовано");
+        assert_eq!(st.text, "привет");
+        assert_eq!(
+            st.selection_start,
+            utf16_len("при"),
+            "при каретке в середине selection_start должен быть 3 (UTF-16), а не длина текста 6"
         );
     }
 }

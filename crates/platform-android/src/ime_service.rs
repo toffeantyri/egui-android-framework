@@ -685,6 +685,37 @@ mod tests {
         assert_eq!(s.state().cursor, 5);
     }
 
+    /// РЕГРЕССИЯ «ввод в середину» (реальный лог устройства): после
+    /// перемещения курсора в середину слова следующий `Composing` должен
+    /// ВСТАВИТЬСЯ в эту позицию, сохранив префикс (не затирать слово и не
+    /// уходить в конец). Зеркало device-теста `insert_mid_word_preserves_prefix`
+    /// (examples/showcase) — держим reducer-логику в хосте.
+    #[test]
+    fn insert_mid_word_preserves_prefix_via_sync_and_move() {
+        let mut s = svc();
+        let mut buf = model::ModelTextBuffer::default();
+        buf.chars = "привет".chars().collect();
+        buf.cursor = 0;
+
+        // Готовое слово + каретка в середине (char 3), как после тапа.
+        s.apply(ImeCommand::Ui(UiCmd::SyncText("привет".into())));
+        for ev in s.apply(ImeCommand::Ui(UiCmd::MoveCursor(3))) {
+            buf.apply(&ev);
+        }
+
+        // Вводим «X» в середину.
+        for ev in s.apply(ImeCommand::Ime(ImeCmd::Composing("X".into()))) {
+            buf.apply(&ev);
+        }
+
+        assert_eq!(
+            buf.text(),
+            "приXвет",
+            "ввод в середину должен сохранить префикс: {:?}",
+            buf.text()
+        );
+    }
+
     /// ЛОВУШКА ПОТЕРИ НАКОПЛЕННОГО: внутри активного batch (`Batch(true)..
     /// Batch(false)`) команда `DeleteSurrounding` (или `Commit`) вызывает
     /// `reset_composition()`, который делает `batch_events.clear()`. Если это
