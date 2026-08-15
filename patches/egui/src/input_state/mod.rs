@@ -1701,3 +1701,64 @@ impl PointerState {
         ui.label(format!("pointer_events: {pointer_events:?}"));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(events: Vec<Event>) -> RawInput {
+        RawInput {
+            events,
+            ..Default::default()
+        }
+    }
+
+    fn pass(state: InputState, events: Vec<Event>) -> InputState {
+        state.begin_pass(frame(events), false, 1.0, InputOptions::default())
+    }
+
+    /// РЕГРЕССИЯ «scroll-jump» (см. patches/egui/MAINTENANCE.md #1).
+    ///
+    /// После fling повторный тап/драг в новом месте в ПЕРВЫЙ кадр давал
+    /// ложный `pointer.delta()` (разница от позиции предыдущего жеста), из-за
+    /// чего `ScrollArea` проскакивал на 100–200pt. Фикс: на кадре нового
+    /// нажатия `old_pos` приравнивается к текущей позиции (`delta == 0`).
+    #[test]
+    fn scroll_jump_no_firstframe_jump() {
+        let mut s = InputState::default();
+
+        let press = |pos: Pos2| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::default(),
+        };
+        let release = |pos: Pos2| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::default(),
+        };
+
+        // Fling: жмём в A, тащим в B, отпускаем.
+        s = pass(s, vec![press(Pos2::new(100.0, 500.0))]);
+        assert_eq!(s.pointer.delta(), Vec2::ZERO, "кадр нажатия без движения");
+
+        s = pass(s, vec![Event::PointerMoved(Pos2::new(120.0, 560.0))]);
+        assert!(
+            s.pointer.delta() != Vec2::ZERO,
+            "во время драга delta ненулевой"
+        );
+
+        s = pass(s, vec![release(Pos2::new(120.0, 560.0))]);
+
+        // Свежий тап ПОСЛЕ fling, в другой точке (как повторный лист).
+        s = pass(s, vec![press(Pos2::new(100.0, 300.0))]);
+
+        assert_eq!(
+            s.pointer.delta(),
+            Vec2::ZERO,
+            "первый кадр нового нажатия не должен скакать (scroll-jump)"
+        );
+    }
+}
