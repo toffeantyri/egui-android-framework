@@ -45,6 +45,7 @@ impl Component for HomeScreen {
             Route::Animations,
             Route::ModifierValue,
             Route::TextEdit,
+            Route::TextSelection,
             Route::Nested,
             Route::BackCustom,
         ];

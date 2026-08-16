@@ -25,6 +25,8 @@ pub enum Route {
     BackCustom,
     /// Текстовый ввод (TextEdit) в разных режимах.
     TextEdit,
+    /// Android-подобное выделение статичного текста (long-press → слово → ручки → тулбар).
+    TextSelection,
 }
 
 impl Route {
@@ -41,6 +43,7 @@ impl Route {
             Route::Nested => "Вложенная навигация",
             Route::BackCustom => "Кастомный Back",
             Route::TextEdit => "TextEdit",
+            Route::TextSelection => "Выделение текста",
         }
     }
 
@@ -57,6 +60,7 @@ impl Route {
             Route::Nested => "Демо вложенной навигации с BackPressed",
             Route::BackCustom => "Back переключает цвет фона",
             Route::TextEdit => "Однострочный, пароль, многострочный, read-only, hint",
+            Route::TextSelection => "Долгое нажатие → слово → ручки → тулбар",
         }
     }
 }

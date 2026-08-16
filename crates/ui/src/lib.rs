@@ -12,6 +12,7 @@ pub mod containers;
 pub(crate) mod debug_log;
 pub mod modifier;
 pub mod remember;
+pub mod text_selection;
 pub mod theme;
 pub mod widgets;
 

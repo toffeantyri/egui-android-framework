@@ -7,5 +7,6 @@ pub mod modifier_value;
 pub mod nested;
 pub mod state_screen;
 pub mod text_edit_screen;
+pub mod text_selection_screen;
 pub mod themes;
 pub mod widgets;

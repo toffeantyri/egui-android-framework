@@ -312,6 +312,7 @@ dependencies = [
  "egui-android-core",
  "egui-android-runtime",
  "log",
+ "unicode-segmentation",
 ]
 
 [[package]]

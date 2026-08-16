@@ -134,6 +134,9 @@ mod value {
         // Interaction
         Clickable(M),
         ClickableWith(ClickableCallback<M>),
+        /// Android-подобное выделение текста (true — включено, false — выключено).
+        /// Работает с виджетом, опубликовавшим `TextSurface` (см. crate::text_selection).
+        Selectable(bool),
     }
 
     // Реализуем Debug вручную из-за ClickableWith
@@ -196,6 +199,7 @@ mod value {
                 ModifierNode::Shadow(v) => f.debug_tuple("Shadow").field(v).finish(),
                 ModifierNode::Clickable(m) => f.debug_tuple("Clickable").field(m).finish(),
                 ModifierNode::ClickableWith(_) => f.debug_tuple("ClickableWith").finish(),
+                ModifierNode::Selectable(v) => f.debug_tuple("Selectable").field(v).finish(),
                 ModifierNode::Fade(opacity) => f.debug_tuple("Fade").field(opacity).finish(),
                 ModifierNode::Slide(direction, offset) => f
                     .debug_tuple("Slide")
@@ -406,6 +410,22 @@ mod value {
             M: 'static,
         {
             self.nodes.push(ModifierNode::ClickableWith(Box::new(f)));
+            self
+        }
+
+        /// Включить/выключить Android-подобное выделение текста.
+        ///
+        /// `true` — контент (текстовый виджет, опубликовавший `TextSurface`)
+        /// выделяется долгим нажатием → слово → ручки → тулбар. `false` — без
+        /// выделения.
+        ///
+        /// ```ignore
+        /// Text::new("копируемый текст")
+        ///     .modifier(Modifier::new().selectable(true))
+        ///     .render(ui, dispatch);
+        /// ```
+        pub fn selectable(mut self, selectable: bool) -> Self {
+            self.nodes.push(ModifierNode::Selectable(selectable));
             self
         }
     }
@@ -791,6 +811,25 @@ mod value {
 
                     if response.clicked() {
                         handler(&response, ui, dispatch);
+                    }
+                }
+                ModifierNode::Selectable(enabled) => {
+                    if !*enabled {
+                        // Выделение выключено — контент без изменений.
+                        rest(ui, dispatch);
+                        return;
+                    }
+                    // Рендерим контент напрямую: текстовый виджет отрисует себя и
+                    // опубликует `TextSurface` (с абсолютными экранными координатами
+                    // `galley_pos` и размером galley). Затем накладываем selection-слой
+                    // поверх. Определение клика/удержания идёт через глобальный pointer
+                    // (`ui.input(|i| i.pointer...)`) внутри `show_selection_layer`.
+                    rest(ui, dispatch);
+
+                    let surface =
+                        crate::text_selection::surface::take_last_published_surface(ui.ctx());
+                    if let Some(surface) = surface {
+                        crate::text_selection::selection_layer::show_selection_layer(ui, &surface);
                     }
                 }
 
