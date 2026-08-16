@@ -381,8 +381,9 @@ impl ImeService for DefaultImeService {
 /// Перевести существующую команду из входного типа (`ime_logic::ImeCmd`, который
 /// кладёт JNI-мост в очередь `PlatformState.ime_cmds`) в команду сервиса.
 ///
-/// `None` — команда не попадает в сервис (например, `SetSelection`/`PrivateCommand`
-/// не меняют состояние композиции в этой модели).
+/// `None` — команда не попадает в сервис (например, `PrivateCommand` — служебная,
+/// не влияет на композицию). `SetSelection` транслируется в `UiCmd::MoveCursor`
+/// (подстраховка для IME, шлющих его при тапе; Gboard — не шлёт).
 pub fn translate_legacy(cmd: &crate::ime_logic::ImeCmd) -> Option<ImeCommand> {
     use crate::ime_logic::ImeCmd as Leg;
     let inner = match cmd {
@@ -404,8 +405,16 @@ pub fn translate_legacy(cmd: &crate::ime_logic::ImeCmd) -> Option<ImeCommand> {
         Leg::EndBatchEdit => ImeCmd::Batch(false),
         Leg::Next => ImeCmd::Next,
         Leg::Done => ImeCmd::Done,
-        // Эти команды не меняют композицию — пропускаем.
-        Leg::SetSelection { .. } | Leg::PrivateCommand(_) => return None,
+        Leg::SetSelection { start, .. } => {
+            // Подстраховка для IME, которые шлют `setSelection` при тапе
+            // (Gboard — нет, но другие клавиатуры могут). start трактуется как
+            // char-индекс (после конвертации UTF-16→char в JNI-слое). Подаём
+            // `UiCmd::MoveCursor`: это сбрасывает живую композицию и ставит
+            // курсор в сервисе, чтобы следующий ввод шёл с места каретки.
+            return Some(ImeCommand::Ui(UiCmd::MoveCursor((*start).max(0) as usize)));
+        }
+        // Служебная команда — на композицию не влияет, пропускаем.
+        Leg::PrivateCommand(_) => return None,
     };
     Some(ImeCommand::Ime(inner))
 }
@@ -441,6 +450,45 @@ pub fn to_egui_event(ev: &ImeEvent) -> egui::Event {
             }
         }
         ImeEvent::Cursor(_) | ImeEvent::Action(_) => egui::Event::Text(String::new()),
+    }
+}
+
+/// Синхронизировать внутреннее состояние сервиса с реальным текстом и
+/// кареткой поля, которые UI публикует в `ImeEditorState`.
+///
+/// Вызывается главным циклом (`loop.rs`) ПОСЛЕ `frame()`, чтобы к следующему
+/// `setComposingText`/`Region` сервис считал позиции по актуальному буферу,
+/// а не по фантомному снапшоту. Это устраняет рассинхрон, из-за которого
+/// регионы/удаления/коммиты опирались на устаревшие позиции (баг «ввод
+/// уходит в конец / затирает слово при тапе в середину»).
+///
+/// `selection_start_utf16` — позиция каретки в UTF-16 units (как в
+/// `ImeEditorState.selection_start`). Конвертируется в char-индекс.
+/// Однокадровая задержка синхронизации приемлема: IME асинхронен, и к
+/// следующему вводу сервис уже синхронизирован.
+///
+/// `MoveCursor` подаётся ТОЛЬКО при отсутствии живой композиции
+/// (`composition_range == None`): при активном preedit (Gboard наращивает
+/// слово, `setComposingRegion` отметил регион) безусловное `MoveCursor`
+/// сбросило бы `composition_range`, и следующий `Composing` пошёл бы как
+/// `Insert` вместо `Replace` → слово дублируется (лог «ппривет» →
+/// «пприветппривет»). Синхронизация каретки важна при СТАТИЧЕСКОМ тексте
+/// (тап в середину, ввод не идёт), а сама каретка при живой композиции уже
+/// обновляется командой `Region`/`Composing`.
+pub fn sync_from_editor_state(
+    service: &mut dyn ImeService,
+    text: &str,
+    selection_start_utf16: usize,
+) {
+    // 1. Снапшот — синхронизируем всегда: он должен отражать реальный буфер,
+    //    чтобы следующие `Region`/`Commit`/`DeleteSurrounding` считали позиции
+    //    по актуальному тексту.
+    service.apply(ImeCommand::Ui(UiCmd::SyncText(text.to_owned())));
+
+    // 2. Каретка — только вне живой композиции, чтобы не разорвать наращивание.
+    if service.state().composition_range.is_none() {
+        let cursor = crate::ime_logic::utf16_offset_to_char_index(text, selection_start_utf16);
+        service.apply(ImeCommand::Ui(UiCmd::MoveCursor(cursor)));
     }
 }
 
@@ -685,6 +733,26 @@ mod tests {
         assert_eq!(s.state().cursor, 5);
     }
 
+    /// Синхронизация видимого снапшота сервиса с реальным текстом/кареткой поле:
+    /// `sync_from_editor_state(text, selection_start_utf16)` должен обновить и
+    /// `text_snapshot`, и `cursor` (после UTF-16→char), и сбросить живую композицию.
+    /// Это драйвер синхронизации, который `loop.rs` зовёт после `frame()`.
+    #[test]
+    fn sync_from_editor_state_updates_snapshot_and_cursor() {
+        let mut s = svc();
+
+        // «привет» с кареткой после 3 UTF-16 units (char 3).
+        sync_from_editor_state(&mut s, "привет", 3);
+
+        assert_eq!(s.state().text_snapshot, "привет");
+        assert_eq!(s.state().cursor, 3);
+        assert_eq!(
+            s.state().composition_range,
+            None,
+            "синхронизация каретки должна сбрасывать живую композицию"
+        );
+    }
+
     /// РЕГРЕССИЯ «ввод в середину» (реальный лог устройства): после
     /// перемещения курсора в середину слова следующий `Composing` должен
     /// ВСТАВИТЬСЯ в эту позицию, сохранив префикс (не затирать слово и не
@@ -712,6 +780,34 @@ mod tests {
             buf.text(),
             "приXвет",
             "ввод в середину должен сохранить префикс: {:?}",
+            buf.text()
+        );
+    }
+
+    /// МНОГОСИМВОЛЬНАЯ вставка в середину: `SyncText("привет") + MoveCursor(3)`
+    /// затем `Composing("XL")` → должно стать «приXLвет». Зеркало device-теста
+    /// `insert_multi_char_mid_word` (по fix бага теста: буфер инициализируется
+    /// словом, а не пустой строкой).
+    #[test]
+    fn insert_multi_char_mid_word_via_sync_and_move() {
+        let mut s = svc();
+        let mut buf = model::ModelTextBuffer::default();
+        buf.chars = "привет".chars().collect();
+        buf.cursor = 0;
+
+        s.apply(ImeCommand::Ui(UiCmd::SyncText("привет".into())));
+        for ev in s.apply(ImeCommand::Ui(UiCmd::MoveCursor(3))) {
+            buf.apply(&ev);
+        }
+
+        for ev in s.apply(ImeCommand::Ime(ImeCmd::Composing("XL".into()))) {
+            buf.apply(&ev);
+        }
+
+        assert_eq!(
+            buf.text(),
+            "приXLвет",
+            "много-символ в середину должен сохранить префикс: {:?}",
             buf.text()
         );
     }
@@ -845,10 +941,18 @@ mod tests {
             translate_legacy(&Leg::Done),
             Some(ImeCommand::Ime(ImeCmd::Done))
         );
+        // SetSelection → MoveCursor (подстраховка для не-Gboard IME).
         assert_eq!(
-            translate_legacy(&Leg::SetSelection { start: 1, end: 2 }),
-            None
+            translate_legacy(&Leg::SetSelection { start: 3, end: 3 }),
+            Some(ImeCommand::Ui(UiCmd::MoveCursor(3))),
         );
+        // Отрицательные → 0.
+        assert_eq!(
+            translate_legacy(&Leg::SetSelection { start: -1, end: -1 }),
+            Some(ImeCommand::Ui(UiCmd::MoveCursor(0))),
+        );
+        // PrivateCommand по-прежнему игнорируется.
+        assert_eq!(translate_legacy(&Leg::PrivateCommand("voice".into())), None,);
     }
 
     /// Контракт: Insert → egui::Event::Text одного символа, Delete → клавиша.
@@ -957,6 +1061,53 @@ mod tests {
         assert_eq!(b.text(), "при", "наращивание не должно дублировать буквы");
         assert_eq!(b.cursor, 3);
         assert_eq!(s.state().text_snapshot, b.text());
+    }
+
+    /// РЕГРЕССИЯ ВАРИАНТА B (реальный лог устройства 8784): непрерывное
+    /// наращивание слова при АКТИВНОЙ ЖИВОЙ КОМПОЗИЦИИ с периодической
+    /// синхронизацией каретки. Главный цикл (`loop.rs`) вызывает
+    /// `sync_from_editor_state` после каждого `frame()`; он подаёт `SyncText` +
+    /// `MoveCursor`, а `MoveCursor` безусловно сбрасывает `composition_range` →
+    /// следующий `Composing` идёт как `Insert` вместо `Replace` → слово
+    /// дублируется («ппр»/«ппри»). Синхронизация каретки нужна при СТАТИЧЕСКОМ
+    /// тексте (тап в середину), но НЕ должна трогать живую композицию.
+    #[test]
+    fn sync_between_growth_does_not_duplicate() {
+        let mut s = svc();
+        let mut b = model::ModelTextBuffer::default();
+
+        // «п» → синхронизация (текст «п», каретка 1 UTF-16 = char 1).
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("п".into())),
+        );
+        sync_from_editor_state(&mut s, "п", 1);
+
+        // «пр» → синхронизация. Живой region (0..1) жив — наращивание Replace.
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("пр".into())),
+        );
+        sync_from_editor_state(&mut s, "пр", 2);
+
+        // «при» — продолжение наращивания, должно ЗАМЕНИТЬ регион, не дублировать.
+        run_with_buffer(
+            &mut s,
+            &mut b,
+            ImeCommand::Ime(ImeCmd::Composing("при".into())),
+        );
+        sync_from_editor_state(&mut s, "при", 3);
+
+        assert_eq!(
+            b.text(),
+            "при",
+            "синхронизация каретки не должна ломать наращивание (дубль): {:?}",
+            b.text()
+        );
+        assert_eq!(s.state().text_snapshot, b.text(), "снапшот==буфер");
+        assert_eq!(b.cursor, 3);
     }
 
     /// Сквозной сценарий Gboard для слова «привет» (по реальному логу):

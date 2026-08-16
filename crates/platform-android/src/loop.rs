@@ -323,6 +323,24 @@ impl RunState {
             let full_output = app_instance.frame(egui_ctx, raw_input);
             // log::info!("LOOP: frame() вернулся"); // спам, закомментирован
             //
+            // ── Синхронизация состояния IME-сервиса с реальным буфером поля ──
+            //
+            // UI-слой (`TextEdit`) публикует актуальный текст + каретку в
+            // `PlatformState.ime_editor_state` каждый кадр. Здесь, ПОСЛЕ `frame()`
+            // (когда egui уже применил события и обновил каретку), синхронизируем
+            // `ime_service` (его `text_snapshot`/`cursor`) с этим состоянием через
+            // `SyncText` + `MoveCursor`. Это устраняет рассинхрон, из-за которого
+            // `Region`/`DeleteSurrounding`/commit считали позиции по фантомному
+            // снапшоту (баг «ввод уходит в конец/затирает слово при тапе в середину»).
+            // Однокадровая задержка приемлема: IME асинхронен.
+            if let Some(editor_state) = platform_state.ime_editor_state() {
+                crate::ime_service::sync_from_editor_state(
+                    &mut self.ime_service,
+                    &editor_state.text,
+                    editor_state.selection_start,
+                );
+            }
+            //
             // ── Управление видимостью клавиатуры ──
             // Показ/скрытие ЗДЕСЬ не выполняется. Источник истины — `TextEdit`
             // (ui-слой): показ по `gained_focus`/становлению владельцем, скрытие

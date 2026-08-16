@@ -277,7 +277,10 @@ pub fn run_ime_tests() {
     /// получает `Region`/`Composing` — здесь эмулируем это через SyncText+MoveCursor.
     fn test_insert_mid_word_preserves_prefix() -> Result<(), String> {
         let mut s = DefaultImeService::default();
-        let mut buf = String::new();
+        // Буфер уже содержит «привет» (реальное поле). `apply_to_string` не
+        // заполняет его из `SyncText` — `SyncText`/`MoveCursor` лишь синхронизируют
+        // внутреннее состояние сервиса, а буфер инициализируем явно.
+        let mut buf = String::from("привет");
         let mut cursor = 0usize;
 
         // Готовое слово «привет», каретка в середине (char 3).
@@ -316,6 +319,55 @@ pub fn run_ime_tests() {
         }
     }
 
+    /// РЕГРЕССИЯ с устройства: МНОГОСИМВОЛЬНЫЙ набор из середины слова.
+    ///
+    /// Одиночный `commitText` после тапа в середину уже вставляется в каретку
+    /// egui через `Event::Text`. Но если Gboard шлёт `setComposingText` с
+    /// несколькими символами (предсказание), сервис должен нарастить слово
+    /// ИМЕННО с позиции каретки (после `sync_from_editor_state`), а не с конца
+    /// и не затирать префикс. Это главный кейс, где раньше проявлялся рассинхрон
+    /// `text_snapshot`.
+    fn test_insert_multi_char_mid_word() -> Result<(), String> {
+        // Буфер уже содержит «привет» (реальное поле). Далее через `drive`
+        // подаём `SyncText`+`MoveCursor(3)`, как это делает `loop.rs` — это
+        // синхронизирует и сервис, и курсор буфера с позицией середины.
+        let mut s = DefaultImeService::default();
+        let mut buf = String::from("привет");
+        let mut cursor = 0usize;
+
+        // Каретка в середине (char 3) — эмуляция тапа.
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ui(UiCmd::SyncText("привет".into())),
+        )?;
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ui(UiCmd::MoveCursor(3)),
+        )?;
+
+        // Gboard начинает предсказание с середины двумя символами.
+        drive(
+            &mut s,
+            &mut buf,
+            &mut cursor,
+            ImeCommand::Ime(ImeCmd::Composing("XL".into())),
+        )?;
+
+        match buf.as_str() {
+            "приXLвет" => Ok(()),
+            "приветXL" => Err(format!("много-символ ушёл в конец: {:?}", buf)),
+            "XL" => Err(format!("много-символ затёр слово: {:?}", buf)),
+            other => Err(format!(
+                "неожиданный результат много-символьной вставки в середину: {:?}",
+                other
+            )),
+        }
+    }
+
     // ── зарегистрированные тесты ──────────────────────────────────
     let tests: &[(&str, TestFn)] = &[
         ("word_privet_assembles", test_word_privet_assembles),
@@ -334,6 +386,10 @@ pub fn run_ime_tests() {
         (
             "insert_mid_word_preserves_prefix",
             test_insert_mid_word_preserves_prefix,
+        ),
+        (
+            "insert_multi_char_mid_word",
+            test_insert_multi_char_mid_word,
         ),
     ];
 
