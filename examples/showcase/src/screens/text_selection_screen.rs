@@ -77,6 +77,7 @@ impl Component for TextSelectionScreen {
                     "Сегодня я впервые использовал эту библиотеку на своём Android-устройстве.",
                 )
                 .selectable(true)
+                .text_color(c.on_secondary)
                 .modifier(Modifier::new().padding(8.0).background(c.secondary))
                 .render(ui, dispatch);
                 Text::new("Выделите любое слово и скопируйте его.")
@@ -91,6 +92,7 @@ impl Component for TextSelectionScreen {
                 Text::new("Здесь тоже можно выделить слово долгим нажатием.")
                     .align(egui::Align::Center)
                     .selectable(true)
+                    .text_color(c.on_secondary)
                     .modifier(
                         Modifier::new()
                             .fill_max_width()
@@ -105,6 +107,7 @@ impl Component for TextSelectionScreen {
                     .text_color(c.primary)
                     .render(ui, dispatch);
                 Text::new("Долгое нажатие здесь не создаёт выделения — просто текст.")
+                    .text_color(c.on_secondary)
                     .modifier(Modifier::new().padding(8.0).background(c.secondary))
                     .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);

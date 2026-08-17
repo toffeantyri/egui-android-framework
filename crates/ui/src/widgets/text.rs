@@ -211,7 +211,8 @@ impl<M: Send> Widget<M> for Text {
 
                     // 2. Ручки (Area, Foreground) — рисуются до тулбара.
                     let (sp, ep) = handle_positions(&galley, text_pos, &range);
-                    let accent = ui.visuals().selection.stroke.color;
+                    // Цвет ручек — из темы (primary), контрастный к фону в обеих темах.
+                    let accent = crate::theme::Theme::current_from_ui(ui).colors.primary;
                     let (s_resp, e_resp) =
                         draw_handles_in_area(ui.ctx(), widget_id, sp, ep, accent);
 

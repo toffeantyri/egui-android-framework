@@ -77,27 +77,45 @@ pub(crate) fn show_toolbar(
                     color: Color32::from_black_alpha(80),
                 })
                 .show(ui, |ui| {
+                    // Кнопки попапа — явно прозрачная подложка, чтобы на них не было
+                    // тёмной плашки поверх светлого фона попапа. Текст берётся из темы
+                    // (on_surface через visuals).
+                    ui.visuals_mut().widgets.inactive.fg_stroke =
+                        egui::Stroke::new(1.0, theme.colors.on_surface);
+
                     // Горизонтальная компоновка (исправление этапа 4: было vertical).
                     ui.horizontal(|ui| {
-                        if ui.button("Копировать").clicked() {
+                        if ui
+                            .add(egui::Button::new("Копировать").fill(Color32::TRANSPARENT))
+                            .clicked()
+                        {
                             result = Some(ToolbarAction::Copy);
                         }
                         if is_editable {
                             ui.separator();
-                            if ui.button("Вырезать").clicked() {
+                            if ui
+                                .add(egui::Button::new("Вырезать").fill(Color32::TRANSPARENT))
+                                .clicked()
+                            {
                                 result = Some(ToolbarAction::Cut);
                             }
                             ui.separator();
                             // Paste через JNI clipboard — P1; пока disabled.
                             if ui
-                                .add_enabled(false, egui::Button::new("Вставить"))
+                                .add_enabled(
+                                    false,
+                                    egui::Button::new("Вставить").fill(Color32::TRANSPARENT),
+                                )
                                 .clicked()
                             {
                                 result = Some(ToolbarAction::Paste);
                             }
                         }
                         ui.separator();
-                        if ui.button("Всё").clicked() {
+                        if ui
+                            .add(egui::Button::new("Всё").fill(Color32::TRANSPARENT))
+                            .clicked()
+                        {
                             result = Some(ToolbarAction::SelectAll);
                         }
                     });

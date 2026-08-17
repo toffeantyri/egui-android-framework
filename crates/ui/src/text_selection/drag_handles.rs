@@ -73,14 +73,25 @@ pub(crate) fn draw_handle(ui: &mut Ui, id: Id, anchor_pos: Pos2, color: Color32)
 
     // Стебель.
     painter.line_segment([anchor_pos, stem_bottom], (STEM_WIDTH, color));
-    // Капелька.
+    // Капелька: заливка цветом темы + контрастная светлая каёмка, чтобы ручка
+    // была видна и на светлом, и на тёмном фоне (не сливалась с фоном).
     painter.circle_filled(drop_center, HANDLE_RADIUS * 0.7, color);
+    painter.circle_stroke(
+        drop_center,
+        HANDLE_RADIUS * 0.7,
+        Stroke::new(2.0, Color32::WHITE),
+    );
     // Обводка при перетаскивании.
     if response.dragged() {
         painter.circle_stroke(
             drop_center,
             HANDLE_RADIUS * 0.7 + 2.0,
             Stroke::new(1.5, color),
+        );
+        painter.circle_stroke(
+            drop_center,
+            HANDLE_RADIUS * 0.7 + 2.0,
+            Stroke::new(0.5, Color32::WHITE),
         );
     }
 

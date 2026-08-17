@@ -521,9 +521,9 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                     ui.visuals().text_color(),
                 );
 
-                // 2. Ручки (Area, Foreground) — до тулбара.
+                // 2. Ручки (Area, Foreground) — до тулбара. Цвет — из темы (primary).
                 let (sp, ep) = handle_positions(&output.galley, output.galley_pos, &range);
-                let accent = ui.visuals().selection.stroke.color;
+                let accent = crate::theme::Theme::current_from_ui(ui).colors.primary;
                 let (s_resp, e_resp) = draw_handles_in_area(ui.ctx(), field_id, sp, ep, accent);
 
                 if let (Some(sr), Some(er)) = (&s_resp, &e_resp) {
