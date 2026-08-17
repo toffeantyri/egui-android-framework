@@ -187,10 +187,9 @@ impl<M: Send> Widget<M> for Text {
 
                 let mut core = sel.get().clone();
 
-                // Тап вне выделения → сброс.
-                if !any_down && core.active && !in_text {
-                    log::info!("SEL-PIPE [Text:{:?}] tap outside -> reset", widget_id);
-                    core.reset();
+                // Новое нажатие — сняли подавление (следующий реальный клик вне снова сбросит).
+                if core.suppress_tap_outside && any_down {
+                    core.suppress_tap_outside = false;
                 }
 
                 // Долгое нажатие → выделить слово под пальцем.
@@ -252,6 +251,8 @@ impl<M: Send> Widget<M> for Text {
                                 }
                                 ToolbarAction::SelectAll => {
                                     core.select_all(&galley, text_pos, &self.text);
+                                    // Не сбрасывать выделение, пока палец отпускается над попапом.
+                                    core.suppress_tap_outside = true;
                                     log::info!(
                                         "SEL-PIPE [Text:{:?}] SelectAll -> {:?}",
                                         widget_id,
@@ -267,6 +268,15 @@ impl<M: Send> Widget<M> for Text {
                     // Нет активного выделения → обычный рендер (единый путь).
                     ui.painter_at(rect)
                         .galley(text_pos, galley.clone(), text_color);
+                }
+
+                // Тап вне выделения → сброс. Выполняется В КОНЦЕ кадра (после обработки
+                // клика тулбара), чтобы кадр отпускания над попапом не стёр выделение
+                // до того, как «Всё»/копирование успеет сработать.
+                // Подавляется после клика по тулбару (SelectAll), пока палец отпускается.
+                if !any_down && core.active && !in_text && !core.suppress_tap_outside {
+                    log::info!("SEL-PIPE [Text:{:?}] tap outside -> reset", widget_id);
+                    core.reset();
                 }
 
                 // commit состояния в remember (иначе выделение «не живёт» между кадрами).

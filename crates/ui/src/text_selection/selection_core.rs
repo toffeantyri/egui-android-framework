@@ -66,6 +66,11 @@ pub struct SelectionCore {
     pub selected_text: String,
     /// Bounding-box выделения (для позиционирования тулбара).
     pub selection_rect: Option<egui::Rect>,
+    /// Подавать ли сброс по «тап вне» в текущих кадрах.
+    /// Выставляется виджетом сразу после клика по кнопке SelectAll, чтобы
+    /// отпускание пальца над тулбаром (вне текста) не сбрасывало выделение.
+    /// Снимается при новом нажатии (`any_down`).
+    pub suppress_tap_outside: bool,
 }
 
 impl SelectionCore {
@@ -143,6 +148,7 @@ impl SelectionCore {
         self.selection = None;
         self.selected_text.clear();
         self.selection_rect = None;
+        self.suppress_tap_outside = false;
     }
 }
 

@@ -2,11 +2,18 @@
 //!
 //! Рисуется через `egui::Area` поверх текста (`Order::Foreground`).
 //!
-//! Исправление (этап 4): тулбар по умолчанию НАД выделением (`top() - 8`), а не под;
-//! компоновка кнопок — горизонтальная. Для редактируемого виджета (`is_editable`)
-//! показываются Cut/Paste; для read-only — только Copy/SelectAll (Paste остаётся disabled).
+//! Исправление (этап 4): тулбар по умолчанию НАД выделением, а не под; компоновка
+//! кнопок — горизонтальная. Позиция через `Area::fixed_pos` с подъёмом на `TOOLBAR_LIFT`
+//! (без `pivot`/`anchor` — они ломали клики по кнопкам на устройстве). Для
+//! редактируемого виджета (`is_editable`) показываются Cut/Paste; для read-only —
+//! только Copy/SelectAll (Paste остаётся disabled).
 
 use egui::{Area, Color32, CornerRadius, Frame, Id, Order, Pos2, Rect};
+
+/// Насколько поднять попап выше верхней границы выделенного текста.
+/// Включает высоту самих кнопок (~32px) + отступ, чтобы весь попап был ВЫШЕ текста
+/// и не перекрывал его, но без `pivot` (который ломал клик по кнопкам).
+const TOOLBAR_LIFT: f32 = 48.0;
 
 /// Действия тулбара.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,9 +24,14 @@ pub enum ToolbarAction {
     SelectAll,
 }
 
-/// Опорная позиция тулбара: НАД прямоугольником выделения, по центру x.
-pub(crate) fn toolbar_anchor(selection_rect: Rect) -> Pos2 {
-    egui::pos2(selection_rect.center().x, selection_rect.top() - 8.0)
+/// Позиция тулбара (его ВЕРХ) — выше верха выделения на `TOOLBAR_LIFT`.
+///
+/// `Area::fixed_pos(pos)` ставит ВЕРХ попапа в `pos`, поэтому поднимаем `y` на
+/// высоту попапа + отступ — середина попапа оказывается выше текста. Используем
+/// `fixed_pos` без `pivot`/`anchor` (они ломали клики по кнопкам на устройстве).
+pub(crate) fn compute_toolbar_pos(selection_rect: Rect, content_rect: Rect) -> Pos2 {
+    let y = (selection_rect.top() - TOOLBAR_LIFT).max(content_rect.top());
+    egui::pos2(selection_rect.center().x, y)
 }
 
 /// Показать тулбар над выделением.
@@ -37,14 +49,16 @@ pub(crate) fn show_toolbar(
     let theme = crate::theme::Theme::current(ctx);
     let surface = theme.colors.surface_container_highest;
 
-    // Тулбар над выделением; если уйдёт за верхний край — показываем под ним.
+    // Позиционируем попап через `Area::fixed_pos` (клик по кнопкам стабильно работает),
+    // поднимая ВЕРХ попапа выше выделения на TOOLBAR_LIFT — попап не перекрывает текст.
+    // Верх попапа = pos.y; середина попапа — выше верха выделенного текста.
     let content_rect = ctx.content_rect();
-    let anchor = toolbar_anchor(selection_rect);
-    let pos = if anchor.y < content_rect.top() + 40.0 {
-        egui::pos2(selection_rect.center().x, selection_rect.bottom() + 8.0)
-    } else {
-        anchor
-    };
+    let pos = compute_toolbar_pos(selection_rect, content_rect);
+    log::info!(
+        "SEL-PIPE [toolbar] selection_rect={:?} popup_top={:?} lift={TOOLBAR_LIFT}",
+        selection_rect,
+        pos,
+    );
 
     Area::new(id)
         .order(Order::Foreground)
@@ -98,19 +112,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn toolbar_anchor_above_selection() {
-        let sel = Rect::from_min_max(egui::pos2(10.0, 100.0), egui::pos2(110.0, 120.0));
-        let anchor = toolbar_anchor(sel);
-        // НАД выделением (y меньше верхней границы), по центру x
-        assert!(anchor.y < sel.top(), "тулбар над выделением");
-        assert!((anchor.x - sel.center().x).abs() < 0.01, "по центру по x");
+    fn toolbar_pos_above_selection_never_below_top() {
+        let sel = Rect::from_min_max(egui::pos2(10.0, 200.0), egui::pos2(110.0, 220.0));
+        let content = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 800.0));
+        let pos = compute_toolbar_pos(sel, content);
+        // Верх попапа ВЫШЕ верха выделения (не на уровне текста).
+        assert!(pos.y < sel.top(), "попап выше верхней границы выделения");
+        assert!((pos.x - sel.center().x).abs() < 0.01, "по центру x");
     }
 
     #[test]
-    fn toolbar_anchor_with_zero_height_rect() {
-        // выделение нулевой высоты — не паникуем, якорь валиден
+    fn toolbar_pos_near_top_edge_clamps_to_top_not_below() {
+        // Выделение у самого верха: не опускаем под текст, прижимаем вверх.
+        let sel = Rect::from_min_max(egui::pos2(10.0, 2.0), egui::pos2(110.0, 20.0));
+        let content = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 800.0));
+        let pos = compute_toolbar_pos(sel, content);
+        // y не ниже top() и не выше верхней границы области.
+        assert!(
+            pos.y <= sel.top(),
+            "попап не ниже верхней границы выделения"
+        );
+        assert!(pos.y >= content.top(), "попап не выше области видимости");
+    }
+
+    #[test]
+    fn toolbar_pos_with_zero_height_rect() {
+        // выделение нулевой высоты — не паникуем, позиция валидна
         let sel = Rect::from_min_max(egui::pos2(5.0, 5.0), egui::pos2(5.0, 5.0));
-        let _ = toolbar_anchor(sel);
+        let content = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 800.0));
+        let _ = compute_toolbar_pos(sel, content);
     }
 
     #[test]

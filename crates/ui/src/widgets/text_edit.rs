@@ -493,10 +493,9 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
             let mut core = sel.get().clone();
 
-            // Тап вне выделения → сброс.
-            if !any_down && core.active && !in_text {
-                log::info!("SEL-PIPE [TextEdit:{:?}] tap outside -> reset", field_id);
-                core.reset();
+            // Новое нажатие — сняли подавление (следующий реальный клик вне снова сбросит).
+            if core.suppress_tap_outside && any_down {
+                core.suppress_tap_outside = false;
             }
 
             // Долгое нажатие → выделить слово (только вне IME-ввода).
@@ -574,6 +573,8 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                             ToolbarAction::Paste => {}
                             ToolbarAction::SelectAll => {
                                 core.select_all(&output.galley, output.galley_pos, &*text_guard);
+                                // Не сбрасывать выделение, пока палец отпускается над попапом.
+                                core.suppress_tap_outside = true;
                                 log::info!(
                                     "SEL-PIPE [TextEdit:{:?}] SelectAll -> {:?}",
                                     field_id,
@@ -583,6 +584,15 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                         }
                     }
                 }
+            }
+
+            // Тап вне выделения → сброс. Выполняется В КОНЦЕ кадра (после обработки
+            // клика тулбара), чтобы кадр отпускания над попапом не стёр выделение
+            // до того, как «Всё»/копирование успеет сработать.
+            // Подавляется после клика по тулбару (SelectAll), пока палец отпускается.
+            if !any_down && core.active && !in_text && !core.suppress_tap_outside {
+                log::info!("SEL-PIPE [TextEdit:{:?}] tap outside -> reset", field_id);
+                core.reset();
             }
 
             sel.set(core);
