@@ -4,7 +4,7 @@
 //! в `handle_positions`; визуал — `draw_handle`.
 
 use egui::text::CCursorRange;
-use egui::{Color32, Id, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Id, Order, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 /// Радиус капельки (точек).
 const HANDLE_RADIUS: f32 = 12.0;
@@ -56,6 +56,10 @@ pub(crate) fn dragged_handle(
 }
 
 /// Нарисовать одну ручку выделения. Возвращает Response для drag.
+///
+/// ИСПРАВЛЕНИЕ (этап 5): убрана проверка `ui.is_rect_visible(hit_rect)`, которая
+/// прятала ручки вне clip-области текста. Ручки рисуются всегда; ограничение
+/// видимости обеспечивается через `Area` на уровне вызывающего кода.
 pub(crate) fn draw_handle(ui: &mut Ui, id: Id, anchor_pos: Pos2, color: Color32) -> Response {
     // Стебель висит под строкой текста.
     let stem_bottom = anchor_pos + Vec2::new(0.0, STEM_HEIGHT);
@@ -65,24 +69,48 @@ pub(crate) fn draw_handle(ui: &mut Ui, id: Id, anchor_pos: Pos2, color: Color32)
     let hit_rect = Rect::from_center_size(drop_center, Vec2::splat(HIT_AREA));
     let response = ui.interact(hit_rect, id, Sense::drag());
 
-    if ui.is_rect_visible(hit_rect) {
-        let painter = ui.painter();
+    let painter = ui.painter();
 
-        // Стебель.
-        painter.line_segment([anchor_pos, stem_bottom], (STEM_WIDTH, color));
-        // Капелька.
-        painter.circle_filled(drop_center, HANDLE_RADIUS * 0.7, color);
-        // Обводка при перетаскивании.
-        if response.dragged() {
-            painter.circle_stroke(
-                drop_center,
-                HANDLE_RADIUS * 0.7 + 2.0,
-                Stroke::new(1.5, color),
-            );
-        }
+    // Стебель.
+    painter.line_segment([anchor_pos, stem_bottom], (STEM_WIDTH, color));
+    // Капелька.
+    painter.circle_filled(drop_center, HANDLE_RADIUS * 0.7, color);
+    // Обводка при перетаскивании.
+    if response.dragged() {
+        painter.circle_stroke(
+            drop_center,
+            HANDLE_RADIUS * 0.7 + 2.0,
+            Stroke::new(1.5, color),
+        );
     }
 
     response
+}
+
+/// Нарисовать обе ручки через `Area` в `Order::Foreground`.
+///
+/// Обходит ограничение clip-зоны текста: даже за пределами `clip_rect` ручки
+/// остаются видимыми. Возвращает `(Response для start, Response для end)`.
+pub(crate) fn draw_handles_in_area(
+    ctx: &egui::Context,
+    id: Id,
+    start_pos: Pos2,
+    end_pos: Pos2,
+    color: Color32,
+) -> (Option<Response>, Option<Response>) {
+    let mut s_resp: Option<Response> = None;
+    let mut e_resp: Option<Response> = None;
+
+    egui::Area::new(id.with("sel_handles_area"))
+        .order(Order::Foreground)
+        .fixed_pos(egui::Pos2::ZERO)
+        .constrain_to(egui::Rect::EVERYTHING)
+        .show(ctx, |area_ui| {
+            s_resp = Some(draw_handle(area_ui, id.with("h_s"), start_pos, color));
+            e_resp = Some(draw_handle(area_ui, id.with("h_e"), end_pos, color));
+        });
+
+    (s_resp, e_resp)
 }
 
 #[cfg(test)]
@@ -186,5 +214,24 @@ mod tests {
                 start_b.y
             );
         });
+    }
+
+    /// `draw_handles_in_area` рисует ручки поверх (Area, Foreground) без паники,
+    /// даже если позиция вне обычного clip-прямоугольника (исправление этапа 5).
+    #[test]
+    fn draw_handles_in_area_renders_without_panic() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |_ui| {});
+        });
+        // Координаты могут быть глубоко под/влево от области — ручки всё равно рисуются.
+        let (s, e) = draw_handles_in_area(
+            &ctx,
+            egui::Id::new("handles_test"),
+            egui::pos2(-40.0, 500.0),
+            egui::pos2(300.0, 500.0),
+            egui::Color32::RED,
+        );
+        assert!(s.is_some() && e.is_some(), "Area возвращает обе ручки");
     }
 }

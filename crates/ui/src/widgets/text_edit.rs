@@ -34,6 +34,8 @@ use egui_android_runtime::{
     keyboard_controller_id, Dispatcher, ImeEditorState, KeyboardController,
 };
 
+use crate::text_selection::BufferCommand;
+
 /// Тип клавиатуры для IME.
 ///
 /// В P0 тип хранится в виджете и доступен для проверки/тестов. Накопление
@@ -384,7 +386,11 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             te = te.desired_width(min_w);
         }
 
-        let response = ui.add(te);
+        // `te.show` (вместо `ui.add(te)`) даёт `TextEditOutput` с galley/galley_pos
+        // для Android-выделения. `output.response` — это `AtomLayoutResponse`;
+        // сам `Response` лежит в `output.response.response` (двойная вложенность, N2).
+        let output = te.show(&mut *ui);
+        let response = &output.response.response;
 
         // Логирование для локализации проблемы ввода/фокуса (временная диагностика).
         if response.gained_focus() || response.lost_focus() || response.changed() {
@@ -441,11 +447,194 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             }
         }
 
+        // ─── Android-подобное выделение (этап 7) ───
+        // Для read-only TextEdit `interactive(false)` → Sense::hover, фокус не берётся,
+        // но `te.show` всё равно раскладывает текст и возвращает корректный galley.
+        // Распознавание long-press — по глобальному pointer (R3), не через `response`.
+        let is_editable = !self.read_only;
+        let mut deferred_cut: Option<BufferCommand> = None;
+        {
+            use crate::remember::remember;
+            use crate::text_selection::android_behavior::LongPressState;
+            use crate::text_selection::drag_handles::{
+                dragged_handle, draw_handles_in_area, handle_positions,
+            };
+            use crate::text_selection::render::paint_galley_with_selection;
+            use crate::text_selection::toolbar::{show_toolbar, ToolbarAction};
+            use crate::text_selection::SelectionCore;
+
+            let lp = remember(ui, ("sel_lp", field_id), LongPressState::default);
+            let sel = remember(ui, ("sel_core", field_id), SelectionCore::default);
+
+            let text_rect = egui::Rect::from_min_size(output.galley_pos, output.galley.size());
+            let hit_rect = text_rect.expand(16.0);
+
+            let (now, any_down, latest) =
+                ui.input(|i| (i.time, i.pointer.any_down(), i.pointer.latest_pos()));
+
+            let mut lp_state = lp.get().clone();
+            let in_text = latest.map_or(false, |p| hit_rect.contains(p));
+
+            // Не активируем выделение слова, если поле в режиме ввода (фокус/IME),
+            // иначе перехват конфликтует с печатью.
+            let is_editing = response.has_focus();
+            let start_in_text = lp_state.press_pos.is_none() && any_down && in_text && !is_editing;
+            let active_press = lp_state.press_pos.is_some() || start_in_text;
+            let down = any_down && active_press;
+            let recognized = lp_state.update_raw(now, down, latest);
+            if recognized {
+                log::info!(
+                    "SEL-PIPE [TextEdit:{:?}] long-press recognized at {:?}",
+                    field_id,
+                    latest
+                );
+            }
+            lp.set(lp_state);
+
+            let mut core = sel.get().clone();
+
+            // Тап вне выделения → сброс.
+            if !any_down && core.active && !in_text {
+                log::info!("SEL-PIPE [TextEdit:{:?}] tap outside -> reset", field_id);
+                core.reset();
+            }
+
+            // Долгое нажатие → выделить слово (только вне IME-ввода).
+            if recognized && !is_editing {
+                if let Some(pos) = latest {
+                    core.select_word_at(pos, &output.galley, output.galley_pos, &*text_guard);
+                    log::info!(
+                        "SEL-PIPE [TextEdit:{:?}] word selected {:?} range={:?}",
+                        field_id,
+                        core.selected_text,
+                        core.selection.as_ref().map(|r| r.as_sorted_char_range())
+                    );
+                }
+            }
+
+            if let Some(range) = core.selection.filter(|r| !r.is_empty()) {
+                // 1. Фон выделения ПОД глифами.
+                paint_galley_with_selection(
+                    ui,
+                    &output.galley,
+                    output.galley_pos,
+                    &range,
+                    ui.visuals().text_color(),
+                );
+
+                // 2. Ручки (Area, Foreground) — до тулбара.
+                let (sp, ep) = handle_positions(&output.galley, output.galley_pos, &range);
+                let accent = ui.visuals().selection.stroke.color;
+                let (s_resp, e_resp) = draw_handles_in_area(ui.ctx(), field_id, sp, ep, accent);
+
+                if let (Some(sr), Some(er)) = (&s_resp, &e_resp) {
+                    if let Some(handle) = dragged_handle(sr, er) {
+                        if let Some(pos) = latest {
+                            core.drag_handle(handle, pos, &output.galley, output.galley_pos);
+                            log::info!(
+                                "SEL-PIPE [TextEdit:{:?}] drag {:?} pos={:?} -> selected={:?}",
+                                field_id,
+                                handle,
+                                pos,
+                                core.selected_text
+                            );
+                        }
+                    }
+                }
+
+                // 3. Тулбар НАД выделением (поверх ручек).
+                if let Some(bbox) = core.selection_rect {
+                    if let Some(action) =
+                        show_toolbar(ui.ctx(), field_id.with("sel_tb"), bbox, is_editable)
+                    {
+                        match action {
+                            ToolbarAction::Copy => {
+                                log::info!(
+                                    "SEL-PIPE [TextEdit:{:?}] Copy -> {:?}",
+                                    field_id,
+                                    core.selected_text
+                                );
+                                ui.copy_text(core.selected_text.clone());
+                                core.reset();
+                            }
+                            ToolbarAction::Cut => {
+                                if is_editable {
+                                    log::info!(
+                                        "SEL-PIPE [TextEdit:{:?}] Cut -> {:?}",
+                                        field_id,
+                                        core.selected_text
+                                    );
+                                    ui.copy_text(core.selected_text.clone());
+                                    deferred_cut =
+                                        Some(core.handle_toolbar_action(ToolbarAction::Cut));
+                                    core.reset();
+                                }
+                            }
+                            // Paste disabled (нет JNI clipboard read).
+                            ToolbarAction::Paste => {}
+                            ToolbarAction::SelectAll => {
+                                core.select_all(&output.galley, output.galley_pos, &*text_guard);
+                                log::info!(
+                                    "SEL-PIPE [TextEdit:{:?}] SelectAll -> {:?}",
+                                    field_id,
+                                    core.selected_text
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            sel.set(core);
+        }
+
         // Снимаем write-lock с буфера — теперь он только читается в changed/submit.
         drop(text_guard);
 
+        // ─── Deferred BufferCommand (фикс Б1): мутация буфера ПОСЛЕ drop guard. ───
+        // `Cut` здесь не совпадает с кадром, где IME мог изменить текст (`response.changed()`),
+        // поэтому при применении команды пропускаем стандартный changed-блок (З5).
+        let mut applied_cut = false;
+        if let Some(BufferCommand::DeleteRange {
+            start_char,
+            end_char,
+        }) = deferred_cut
+        {
+            let mut guard = buffer_arc.write().expect("TextEdit: буфер poisoned");
+            let (byte_s, byte_e) = crate::text_selection::selection_core::char_range_to_byte_range(
+                &*guard, start_char, end_char,
+            );
+            log::info!(
+                "SEL-PIPE [TextEdit:{:?}] DELETE bytes {}..{} (chars {}..{}) buf_before={:?}",
+                field_id,
+                byte_s,
+                byte_e,
+                start_char,
+                end_char,
+                &*guard
+            );
+            guard.replace_range(byte_s..byte_e, "");
+            drop(guard);
+
+            let new_text: String = buffer_arc.read().expect("TextEdit: буфер poisoned").clone();
+            log::info!(
+                "SEL-PIPE [TextEdit:{:?}] Cut applied -> buf_after={:?}",
+                field_id,
+                new_text
+            );
+            if let Some(cb) = &self.on_changed {
+                cb(&new_text);
+            }
+            if let Some(cb) = &self.on_changed_msg {
+                dispatch.dispatch(cb(new_text));
+            }
+            // З2: перерисовать поле, т.к. вырезанный текст не исчез бы до след. события.
+            ui.ctx().request_repaint();
+            applied_cut = true;
+        }
+
         // ─── Изменение текста → callback ───
-        if response.changed() {
+        if !applied_cut && response.changed() {
             // write-lock уже снят (drop выше). Читаем изменённое значение через read.
             let new_text: String = buffer_arc.read().expect("TextEdit: буфер poisoned").clone();
             // log::info!("[TextEdit] enter changed-block, buffer={:?}", &new_text);

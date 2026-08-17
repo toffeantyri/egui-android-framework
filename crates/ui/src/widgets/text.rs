@@ -2,16 +2,6 @@
 //!
 //! Не диспатчит сообщения. Используется как замена `ui.label(...)`.
 //!
-//! Всегда отрисовывается как обычный виджет фреймворка (единый путь рендера) и
-//! публикует свою «текстовую поверхность» ([`crate::text_selection::TextSurface`]),
-//! которую может потребить `Modifier::selectable()`:
-//!
-//! ```ignore
-//! Text::new("Выделяемый текст")
-//!     .modifier(Modifier::new().selectable(true))
-//!     .render(ui, dispatch);
-//! ```
-//!
 //! # Выравнивание
 //!
 //! По умолчанию текст выровнен по левому краю. `align` влияет на позицию текста
@@ -19,15 +9,13 @@
 //!
 //! # Выделение (touch)
 //!
-//! Само выделение — это **модификатор** `Modifier::selectable(true)` (см.
-//! `crates/ui/src/text_selection`). Он работает с любым виджетом, опубликовавшим
-//! `TextSurface`, поэтому переиспользуем.
+//! Включить Android-подобное выделение длинным нажатием у виджета `Text` можно
+//! через `.selectable(true)` (см. `crates/ui/src/text_selection` и
+//! `docs/text-selection-refactor.md`).
 
 use egui::Align;
 use egui_android_core::{widget::Widget, UiWrapper};
 use egui_android_runtime::Dispatcher;
-
-use crate::text_selection::{publish_text_surface, TextSurface};
 
 /// Виджет текста.
 pub struct Text {
@@ -39,6 +27,8 @@ pub struct Text {
     align: Option<Align>,
     /// Стабильный id виджета (для `Modifier::selectable`). `None` — авто (`ui.next_auto_id()`).
     id_salt: Option<egui::Id>,
+    /// Android-подобное выделение текста (заглушка — этап 1; логика — этап 6).
+    selectable: bool,
 }
 
 impl Text {
@@ -49,7 +39,17 @@ impl Text {
             text_color: None,
             align: None,
             id_salt: None,
+            selectable: false,
         }
+    }
+
+    /// Включить Android-подобное выделение текста (long-press → слово → ручки → тулбар).
+    ///
+    /// Заглушка на этапе 1: рендер пока как обычный текст; реальная логика выделения
+    /// подключается на этапе 6 (см. `docs/text-selection-refactor.md`).
+    pub fn selectable(mut self, selectable: bool) -> Self {
+        self.selectable = selectable;
+        self
     }
 
     /// Установить размер шрифта.
@@ -147,19 +147,135 @@ impl<M: Send> Widget<M> for Text {
                 }
             }
 
-            ui.painter_at(rect)
-                .galley(text_pos, galley.clone(), text_color);
+            if self.selectable {
+                // ── Android-подобное выделение (этап 6) ──
+                // Единая точка вывода текста: либо galley с фоновым выделением
+                // (ПОД глифами), либо обычный рендер — никогда оба.
+                use crate::remember::remember;
+                use crate::text_selection::android_behavior::LongPressState;
+                use crate::text_selection::drag_handles::{
+                    dragged_handle, draw_handles_in_area, handle_positions,
+                };
+                use crate::text_selection::render::paint_galley_with_selection;
+                use crate::text_selection::toolbar::{show_toolbar, ToolbarAction};
+                use crate::text_selection::SelectionCore;
 
-            // Публикуем текстовую поверхность для `Modifier::selectable`.
-            publish_text_surface(
-                ui,
-                TextSurface {
-                    id: widget_id,
-                    galley: galley.clone(),
-                    galley_pos: text_pos,
-                    text: self.text.clone(),
-                },
-            );
+                let lp = remember(ui, ("sel_lp", widget_id), LongPressState::default);
+                let sel = remember(ui, ("sel_core", widget_id), SelectionCore::default);
+
+                let text_rect = egui::Rect::from_min_size(text_pos, galley.size());
+                // Небольшой запас для касания по краю строки.
+                let hit_rect = text_rect.expand(16.0);
+
+                let (now, any_down, latest) =
+                    ui.input(|i| (i.time, i.pointer.any_down(), i.pointer.latest_pos()));
+
+                let mut lp_state = lp.get().clone();
+                let in_text = latest.map_or(false, |p| hit_rect.contains(p));
+                let start_in_text = lp_state.press_pos.is_none() && any_down && in_text;
+                let active_press = lp_state.press_pos.is_some() || start_in_text;
+                let down = any_down && active_press;
+                let recognized = lp_state.update_raw(now, down, latest);
+                if recognized {
+                    log::info!(
+                        "SEL-PIPE [Text:{:?}] long-press recognized at {:?}",
+                        widget_id,
+                        latest
+                    );
+                }
+                lp.set(lp_state);
+
+                let mut core = sel.get().clone();
+
+                // Тап вне выделения → сброс.
+                if !any_down && core.active && !in_text {
+                    log::info!("SEL-PIPE [Text:{:?}] tap outside -> reset", widget_id);
+                    core.reset();
+                }
+
+                // Долгое нажатие → выделить слово под пальцем.
+                if recognized {
+                    if let Some(pos) = latest {
+                        core.select_word_at(pos, &galley, text_pos, &self.text);
+                        log::info!(
+                            "SEL-PIPE [Text:{:?}] word selected {:?} range={:?}",
+                            widget_id,
+                            core.selected_text,
+                            core.selection.as_ref().map(|r| r.as_sorted_char_range())
+                        );
+                    }
+                }
+
+                if let Some(range) = core.selection.filter(|r| !r.is_empty()) {
+                    // 1. Фон выделения ПОД глифами.
+                    paint_galley_with_selection(ui, &galley, text_pos, &range, text_color);
+
+                    // 2. Ручки (Area, Foreground) — рисуются до тулбара.
+                    let (sp, ep) = handle_positions(&galley, text_pos, &range);
+                    let accent = ui.visuals().selection.stroke.color;
+                    let (s_resp, e_resp) =
+                        draw_handles_in_area(ui.ctx(), widget_id, sp, ep, accent);
+
+                    // Перетаскивание ручки → расширение/сужение диапазона.
+                    if let (Some(sr), Some(er)) = (&s_resp, &e_resp) {
+                        if let Some(handle) = dragged_handle(sr, er) {
+                            if let Some(pos) = latest {
+                                core.drag_handle(handle, pos, &galley, text_pos);
+                                log::info!(
+                                    "SEL-PIPE [Text:{:?}] drag {:?} pos={:?} -> selected={:?}",
+                                    widget_id,
+                                    handle,
+                                    pos,
+                                    core.selected_text
+                                );
+                            }
+                        }
+                    }
+
+                    // 3. Тулбар НАД выделением (поверх ручек).
+                    if let Some(bbox) = core.selection_rect {
+                        if let Some(action) = show_toolbar(
+                            ui.ctx(),
+                            widget_id.with("sel_tb"),
+                            bbox,
+                            false, // read-only: без Cut/Paste
+                        ) {
+                            match action {
+                                ToolbarAction::Copy => {
+                                    log::info!(
+                                        "SEL-PIPE [Text:{:?}] Copy -> {:?}",
+                                        widget_id,
+                                        core.selected_text
+                                    );
+                                    ui.copy_text(core.selected_text.clone());
+                                    core.reset();
+                                }
+                                ToolbarAction::SelectAll => {
+                                    core.select_all(&galley, text_pos, &self.text);
+                                    log::info!(
+                                        "SEL-PIPE [Text:{:?}] SelectAll -> {:?}",
+                                        widget_id,
+                                        core.selected_text
+                                    );
+                                }
+                                // Cut/Paste недоступны для read-only Text.
+                                _ => {}
+                            }
+                        }
+                    }
+                } else {
+                    // Нет активного выделения → обычный рендер (единый путь).
+                    ui.painter_at(rect)
+                        .galley(text_pos, galley.clone(), text_color);
+                }
+
+                // commit состояния в remember (иначе выделение «не живёт» между кадрами).
+                sel.set(core);
+            } else {
+                // ── Обычный рендер без выделения ──
+                ui.painter_at(rect)
+                    .galley(text_pos, galley.clone(), text_color);
+            }
         } else {
             ui.allocate_space(egui::vec2(0.0, 0.0));
         }
