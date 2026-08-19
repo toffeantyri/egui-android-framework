@@ -70,6 +70,7 @@ impl Component for TextEditScreen {
                 let email_init = email.get().clone();
                 let email = email.clone();
                 TextEdit::new(email_init)
+                    .selectable(true)
                     .hint("example@mail.com")
                     .single_line()
                     .keyboard_type(KeyboardType::Email)

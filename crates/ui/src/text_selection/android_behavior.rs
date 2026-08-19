@@ -95,6 +95,24 @@ impl LongPressState {
     }
 }
 
+/// Разрешено ли в этом кадре начать распознавание long-press выделения.
+///
+/// При `is_press_start` (первый кадр удержания: ещё не запомнена позиция), палец
+/// опущен (`any_down`) и находится над текстом (`is_over_text`) — да.
+///
+/// ⚠️ Инвариант: `focused` (поле `TextEdit` в фокусе / IME активен) НЕ блокирует
+/// выделение — в фокусе long-press должен работает так же, как вне него (это
+/// regression против `&& !is_editing`). Параметр оставлен для ясности контракта,
+/// но сознательно не участвует в решении.
+pub fn may_start_long_press(
+    is_press_start: bool,
+    any_down: bool,
+    is_over_text: bool,
+    _focused: bool,
+) -> bool {
+    is_press_start && any_down && is_over_text
+}
+
 /// Выделить слово под позицией курсора в тексте.
 ///
 /// Логика повторяет `select_word_at` из `text_cursor_state.rs` (патчи egui), но
@@ -322,6 +340,26 @@ mod tests {
         // новое удержание → снова распознаёт
         s.update_raw(0.5, true, Some(pos));
         assert!(s.update_raw(0.9, true, Some(pos)));
+    }
+
+    // ── may_start_long_press ──
+
+    /// Regression: long-press должен стартовать и когда `TextEdit` в фокусе (IME).
+    #[test]
+    fn may_start_long_press_allows_focused_editable() {
+        // `focused = true` НЕ должен блокировать старт (было `&& !is_editing`).
+        assert!(may_start_long_press(true, true, true, true));
+        assert!(may_start_long_press(true, true, true, false));
+    }
+
+    #[test]
+    fn may_start_long_press_requires_press_down_and_text() {
+        // press уже начат (не первый кадр) — не старт
+        assert!(!may_start_long_press(false, true, true, true));
+        // палец не нажат
+        assert!(!may_start_long_press(true, false, true, true));
+        // палец вне текста
+        assert!(!may_start_long_press(true, true, false, true));
     }
 
     // ── select_word_at ──

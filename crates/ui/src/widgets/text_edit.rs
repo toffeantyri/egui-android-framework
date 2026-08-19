@@ -130,6 +130,11 @@ pub struct TextEdit<M> {
     /// Только чтение (без возможности редактирования).
     read_only: bool,
 
+    /// Включает ли Android-подобное выделение (long-press → слово, ручки, тулбар)
+    /// — как у `Text::selectable(true)`. По умолчанию ВКЛЮЧЕНО (`true`), отключить
+    /// можно через `.selectable(false)`.
+    selectable: bool,
+
     /// Замыкание, вызываемое при каждом изменении текста.
     /// Пользователь сам решает: dispatch, remember, ничего.
     on_changed: Option<Arc<dyn Fn(&str) + Send + Sync>>,
@@ -171,6 +176,7 @@ impl<M: 'static> TextEdit<M> {
             max_lines: None,
             char_limit: None,
             read_only: false,
+            selectable: true,
             on_changed: None,
             on_changed_msg: None,
             on_submit: None,
@@ -221,6 +227,23 @@ impl<M: 'static> TextEdit<M> {
     pub fn read_only(mut self) -> Self {
         self.read_only = true;
         self
+    }
+
+    /// Включить/выключить Android-подобное выделение текста (long-press → слово,
+    /// ручки, тулбар) — как у `Text::selectable(true)`. По умолчанию включено;
+    /// отключить — `.selectable(false)`.
+    ///
+    /// В отличие от `Text` (у которого выделение по умолчанию выключено), у
+    /// редактируемого поля оно активно с самого начала — включая состояние, когда
+    /// поле в фокусе (IME).
+    pub fn selectable(mut self, selectable: bool) -> Self {
+        self.selectable = selectable;
+        self
+    }
+
+    /// Включено ли Android-подобное выделение текста (по умолчанию `true`).
+    pub fn is_selectable(&self) -> bool {
+        self.selectable
     }
 
     /// Замыкание при изменении (локальная логика).
@@ -451,11 +474,12 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
         // Для read-only TextEdit `interactive(false)` → Sense::hover, фокус не берётся,
         // но `te.show` всё равно раскладывает текст и возвращает корректный galley.
         // Распознавание long-press — по глобальному pointer (R3), не через `response`.
+        // Выделение включается так же, как у `Text` — через `.selectable(true)`.
         let is_editable = !self.read_only;
         let mut deferred_cut: Option<BufferCommand> = None;
-        {
+        if self.selectable {
             use crate::remember::remember;
-            use crate::text_selection::android_behavior::LongPressState;
+            use crate::text_selection::android_behavior::{may_start_long_press, LongPressState};
             use crate::text_selection::drag_handles::{
                 dragged_handle, draw_handles_in_area, handle_positions,
             };
@@ -500,10 +524,12 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
             let in_text = latest.map_or(false, |p| hit_rect.contains(p));
 
-            // Не активируем выделение слова, если поле в режиме ввода (фокус/IME),
-            // иначе перехват конфликтует с печатью.
+            // Поле в фокусе (IME) НЕ блокирует выделение: long-press работает и там
+            // (инвариант, см. `may_start_long_press`). `focused` передаётся для
+            // ясности контракта, но не влияет на старт.
             let is_editing = response.has_focus();
-            let start_in_text = lp_state.press_pos.is_none() && any_down && in_text && !is_editing;
+            let start_in_text =
+                may_start_long_press(lp_state.press_pos.is_none(), any_down, in_text, is_editing);
             let active_press = lp_state.press_pos.is_some() || start_in_text;
             // Не запускаем long-press при активном выделении (иначе касание ручки
             // перезапустит таймер и перевыберет слово).
@@ -523,8 +549,8 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 core.suppress_tap_outside = false;
             }
 
-            // Долгое нажатие → выделить слово (только вне IME-ввода).
-            if recognized && !is_editing {
+            // Долгое нажатие → выделить слово (в т.ч. когда поле в фокусе / IME).
+            if recognized {
                 if let Some(pos) = latest {
                     core.select_word_at(pos, &output.galley, output.galley_pos, &*text_guard);
                     log::info!(
@@ -977,6 +1003,24 @@ mod tests {
                 f(&mut UiWrapper::new_unconstrained(ui));
             });
         });
+    }
+
+    /// `TextEdit` включает выделение по умолчанию (в отличие от `Text`);
+    /// явный `.selectable(false)` — выключает.
+    #[test]
+    fn selectable_default_on_and_can_turn_off() {
+        assert!(
+            TextEdit::<()>::new("по умолчанию").is_selectable(),
+            "TextEdit должен выделять текст по умолчанию"
+        );
+        assert!(
+            TextEdit::<()>::new("х").selectable(false).is_selectable() == false,
+            "selectable(false) должен отключать выделение"
+        );
+        assert!(
+            TextEdit::<()>::new("х").selectable(true).is_selectable(),
+            "selectable(true) включает выделение"
+        );
     }
 
     /// Регистрация KeyboardController и подсчёт вызовов show/hide.

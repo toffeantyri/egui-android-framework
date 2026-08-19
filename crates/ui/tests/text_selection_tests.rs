@@ -97,6 +97,7 @@ fn textedit_selectable_renders_without_panic() {
         let (dispatch, _rx) = Dispatcher::<()>::new();
         TextEdit::<()>::new("редактируемый текст")
             .single_line()
+            .selectable(true)
             .render(ui, &dispatch);
     });
 }
@@ -109,6 +110,20 @@ fn textedit_readonly_renders_without_panic() {
         TextEdit::<()>::new("read-only текст")
             .single_line()
             .read_only()
+            .selectable(true)
+            .render(ui, &dispatch);
+    });
+}
+
+/// `selectable(false)` (по умолчанию) — `TextEdit` рендерится без selection-пути
+/// (как у `Text::selectable(false)`), не паникует.
+#[test]
+fn textedit_non_selectable_renders_without_panic() {
+    with_ui(|ui| {
+        let (dispatch, _rx) = Dispatcher::<()>::new();
+        TextEdit::<()>::new("обычное поле без выделения")
+            .single_line()
+            .selectable(false)
             .render(ui, &dispatch);
     });
 }

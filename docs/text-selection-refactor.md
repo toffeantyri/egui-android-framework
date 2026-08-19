@@ -546,6 +546,22 @@ Android/текстовых редакторов: если тянущаяся к�
 `drag_handle_start_overtakes_end_keeps_selection` (обгон сохраняет выделение), прочие
 `drag_handle_*` не затрагивают пересечение и не ломаются.
 
+### Симметрия `Text` / `TextEdit`: выделение через `selectable(bool)`
+
+Задумка — оба виджета выделяют текст одинаковым способом (общая реализация
+`crates/ui/src/text_selection`). API: полe и builder `selectable(bool)` у обоих,
+но **дефолты разные**: `Text` — по умолчанию выключено (`false`, включается
+`.selectable(true)`), `TextEdit` — по умолчанию **включено** (`true`, отключается
+`.selectable(false)`). У `TextEdit` выделение работает и когда полe в фокусе
+(IME активен): убран прежний гейт `&& !is_editing` из `start_in_text` и из условия
+выделения `recognized`; добавлен чистый предикат
+`may_start_long_press(is_press_start, any_down, is_over_text, focused)`, который
+сознательно не учитывает `focused` (RED-regression юнит-тест
+`may_start_long_press_allows_focused_editable`). `TextEdit` также получил геттер
+`is_selectable()` (юнит-тест `selectable_default_on_and_can_turn_off`).
+
+`read_only` — Copy/SelectAll; `is_editable` — дополнительно `Cut` в тулбаре.
+
 ---
 
 ## Диагностическое логирование pipeline'а (для device-теста)

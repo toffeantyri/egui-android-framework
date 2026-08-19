@@ -1,10 +1,11 @@
 //! TextSelectionScreen — демонстрация Android-подобного выделения текста.
 //!
-//! Показывает виджет `Text` в режиме `selectable(true)`:
+//! Показывает виджет `Text` с `selectable(true)` и `TextEdit` (поле ввода) с
+//! `selectable(true)` — оба выделяют текст одинаково:
 //! - **Долгое нажатие** (~400мс, палец не смещается) выделяет слово под пальцем.
 //! - **Ручки-капельки** на границах выделения расширяют/сужают диапазон.
 //! - **Тулбар** над выделением позволяет скопировать текст (`Copy`) или
-//!   выделить всё (`Всё`).
+//!   выделить всё (`Всё`) — у редактируемого `TextEdit` также `Cut`.
 //! - Тап вне выделенной области снимает выделение.
 //!
 //! Ограничение P0: выделение НЕ работает внутри скролла (`LazyColumn`, `Column.scrollable`).
@@ -17,7 +18,7 @@ use egui_android_framework::ui::{
     containers::Column,
     modifier::{Modifier, ModifierDsl},
     theme::Theme,
-    widgets::{Button, Spacer, Text, Widget},
+    widgets::{Button, Spacer, Text, TextEdit, Widget},
 };
 use egui_android_framework::ComponentNode;
 
@@ -102,7 +103,24 @@ impl Component for TextSelectionScreen {
                     .render(ui, dispatch);
                 Spacer::new(8.0).render(ui, dispatch);
 
-                // ─── Пример 3: невыделяемый (сравнение) ─────────────────────
+                // ─── Пример 3: TextEdit (поле ввода) ──────────────────────
+                Text::new("TextEdit (read-only) с выделением (selectable=true):")
+                    .text_color(c.primary)
+                    .render(ui, dispatch);
+                TextEdit::<RootMsg>::new(
+                    "В поле ввода текст выделяется так же, как в Text — long-press, ручки, тулбар.",
+                )
+                .single_line()
+                .read_only()
+                .selectable(true)
+                .modifier(Modifier::new().padding(8.0).background(c.secondary))
+                .render(ui, dispatch);
+                Text::new("Выделите слово и скопируйте его (Copy) или выберите «Всё».")
+                    .text_color(c.on_secondary)
+                    .render(ui, dispatch);
+                Spacer::new(8.0).render(ui, dispatch);
+
+                // ─── Пример 4: невыделяемый (сравнение) ─────────────────────
                 Text::new("Невыделяемый текст (selectable=false, по умолчанию):")
                     .text_color(c.primary)
                     .render(ui, dispatch);

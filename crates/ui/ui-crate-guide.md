@@ -316,9 +316,11 @@ TextEdit::new(&state.email)
 
 **Приоритет callback при изменении текста:** сначала вызывается `on_changed`, затем `on_changed_msg` (оба — если заданы).
 
-**Структура (`TextEdit<M>`):** `value`, `hint_text`, `single_line` (по умолч. `true`), `password`, `max_lines`, `char_limit`, `read_only`, `keyboard_type`, `ime_action`, `on_changed`, `on_changed_msg`, `on_submit`.
+**Структура (`TextEdit<M>`):** `value`, `hint_text`, `single_line` (по умолч. `true`), `password`, `max_lines`, `char_limit`, `read_only`, `selectable` (по умолч. `true`), `keyboard_type`, `ime_action`, `on_changed`, `on_changed_msg`, `on_submit`.
 
-**Builder-методы:** `single_line()`, `multiline()`, `password()`, `max_lines(n)`, `char_limit(n)`, `read_only()`, `hint(text)`, `keyboard_type(kt)`, `ime_action(a)`, `on_changed(f)`, `on_change_msg(f)`, `on_submit(f)`.
+**Builder-методы:** `single_line()`, `multiline()`, `password()`, `max_lines(n)`, `char_limit(n)`, `read_only()`, `selectable(bool)`, `hint(text)`, `keyboard_type(kt)`, `ime_action(a)`, `on_changed(f)`, `on_change_msg(f)`, `on_submit(f)`.
+
+**Выделение текста** — по умолчанию **включено** (`selectable=true`), в отличие от `Text` (у того по умолчанию выключено). Общая реализация — в `crates/ui/src/text_selection`: долгое нажатие → слово, ручки-капельки для расширения, тулбар Copy/SelectAll (Cut — если `is_editable`). Выделение работает и когда поле в фокусе (IME активен). Отключить — `.selectable(false)` (поле ведёт себя как обычный `egui::TextEdit` без Android-выделения).
 
 #### Контракт для TextEdit
 
