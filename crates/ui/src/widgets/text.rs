@@ -231,11 +231,21 @@ impl<M: Send> Widget<M> for Text {
                     }
                 }
 
-                if let Some(range) = core.selection.filter(|r| !r.is_empty()) {
-                    // 1. Фон выделения ПОД глифами.
-                    paint_galley_with_selection(ui, &galley, text_pos, &range, text_color);
+                if let Some(range) = core.selection {
+                    if !range.is_empty() {
+                        // 1. Фон выделения ПОД глифами (при непустом выделении).
+                        paint_galley_with_selection(ui, &galley, text_pos, &range, text_color);
+                    } else {
+                        // Пустое (нулевое) выделение — обычный текст без фона (во время
+                        // «переворота» капелек при обгоне). Капельки рисуются ниже.
+                        ui.painter_at(rect)
+                            .galley(text_pos, galley.clone(), text_color);
+                    }
 
-                    // 2. Ручки (Area, Foreground) — рисуются до тулбара.
+                    // 2. Ручки (Area, Foreground) — рисуются ДО тулбара и даже при
+                    // пустом (нулевом) диапазоне, чтобы драг капельки продолжался,
+                    // когда она достигла пассивной границы и вот-вот «перейдёт» на
+                    // другую сторону (обгон). При пустом обе границы совпадают.
                     let (sp, ep) = handle_positions(&galley, text_pos, &range);
                     // Цвет ручек — из темы (primary), контрастный к фону в обеих темах.
                     let accent = crate::theme::Theme::current_from_ui(ui).colors.primary;
@@ -258,36 +268,38 @@ impl<M: Send> Widget<M> for Text {
                         }
                     }
 
-                    // 3. Тулбар НАД выделением (поверх ручек).
-                    if let Some(bbox) = core.selection_rect {
-                        if let Some(action) = show_toolbar(
-                            ui.ctx(),
-                            widget_id.with("sel_tb"),
-                            bbox,
-                            false, // read-only: без Cut/Paste
-                        ) {
-                            match action {
-                                ToolbarAction::Copy => {
-                                    log::info!(
-                                        "SEL-PIPE [Text:{:?}] Copy -> {:?}",
-                                        widget_id,
-                                        core.selected_text
-                                    );
-                                    ui.copy_text(core.selected_text.clone());
-                                    core.reset();
+                    // 3. Тулбар НАД выделением (поверх ручек) — только при непустом.
+                    if !range.is_empty() {
+                        if let Some(bbox) = core.selection_rect {
+                            if let Some(action) = show_toolbar(
+                                ui.ctx(),
+                                widget_id.with("sel_tb"),
+                                bbox,
+                                false, // read-only: без Cut/Paste
+                            ) {
+                                match action {
+                                    ToolbarAction::Copy => {
+                                        log::info!(
+                                            "SEL-PIPE [Text:{:?}] Copy -> {:?}",
+                                            widget_id,
+                                            core.selected_text
+                                        );
+                                        ui.copy_text(core.selected_text.clone());
+                                        core.reset();
+                                    }
+                                    ToolbarAction::SelectAll => {
+                                        core.select_all(&galley, text_pos, &self.text);
+                                        // Не сбрасывать выделение, пока палец отпускается над попапом.
+                                        core.suppress_tap_outside = true;
+                                        log::info!(
+                                            "SEL-PIPE [Text:{:?}] SelectAll -> {:?}",
+                                            widget_id,
+                                            core.selected_text
+                                        );
+                                    }
+                                    // Cut/Paste недоступны для read-only Text.
+                                    _ => {}
                                 }
-                                ToolbarAction::SelectAll => {
-                                    core.select_all(&galley, text_pos, &self.text);
-                                    // Не сбрасывать выделение, пока палец отпускается над попапом.
-                                    core.suppress_tap_outside = true;
-                                    log::info!(
-                                        "SEL-PIPE [Text:{:?}] SelectAll -> {:?}",
-                                        widget_id,
-                                        core.selected_text
-                                    );
-                                }
-                                // Cut/Paste недоступны для read-only Text.
-                                _ => {}
                             }
                         }
                     }
@@ -321,6 +333,12 @@ impl<M: Send> Widget<M> for Text {
                     && !core.drag_started
                 {
                     log::info!("SEL-PIPE [Text:{:?}] tap outside -> reset", widget_id);
+                    core.reset();
+                }
+
+                // Палец отпущен в нулевой точке («перевёртыш» не доведён до обгона):
+                // пустой диапазон без пальца — это схлопывание, снимаем выделение.
+                if !any_down && core.active && core.selection.map_or(false, |r| r.is_empty()) {
                     core.reset();
                 }
 

@@ -74,6 +74,10 @@ pub struct SelectionCore {
     /// Пропущен ли первый кадр касания ручки (чтобы не двигать курсор в точку
     /// на самой ручке сразу при нажатии). Сбрасывается при отпускании пальца.
     pub drag_started: bool,
+    /// Какую капельку физически перетаскивают (совпадает с текущей ролью
+    /// primary/secondary). Нужна, чтобы при «обгоне» границы выделение не
+    /// схлопывалось в ноль, а пересчитывалось с другой стороны (см. `drag_handle`).
+    drag_side: Option<HandleSide>,
 }
 
 impl SelectionCore {
@@ -104,6 +108,7 @@ impl SelectionCore {
         // Пропускаем первый кадр касания (точка попадания — на самой ручке).
         if !self.drag_started {
             self.drag_started = true;
+            self.drag_side = Some(side);
             return;
         }
 
@@ -118,15 +123,45 @@ impl SelectionCore {
         let cursor = galley.cursor_from_pos(local.to_vec2());
 
         if let Some(range) = self.selection.as_mut() {
+            // Тянем ту же физическую капельку, что и в начале драга (primary/secondary
+            // относятся к ролям, а не к лево/право). Свежий `side` из `dragged_handle`
+            // берём только на первом кадре (когда drag_side ещё не выставлен).
+            let side = self.drag_side.unwrap_or(side);
+
             match side {
                 HandleSide::Start => range.secondary = cursor,
                 HandleSide::End => range.primary = cursor,
             }
-            // Диапазон схлопнулся в ноль (например, End-ручку перетащили левее Start):
-            // честно сбрасываем выделение, иначе состояние «зависает» — ручки/тулбар не
-            // рисуются, но `active` и `drag_started` остаются true, блокируя тап-вне.
+
+            // Активная (тянущаяся) капелька сохраняет свою роль по отношению к
+            // пассивной на протяжении всего жеста: End остаётся справа, Start — слева.
+            // Если тянущаяся граница «обогнала» пассивную (перexодила на другую
+            // сторону), меняем primary/secondary местами и продолжаем тянуть ту же
+            // физическую капельку — выделение не схлопывается в ноль, а фиксирует
+            // другую границу и расширяется в противоположную сторону.
+            let crossed = match side {
+                // End (primary) остаётся правее (>=) Start (secondary).
+                HandleSide::End => range.primary.index <= range.secondary.index,
+                // Start (secondary) остаётся левее (<=) End (primary).
+                HandleSide::Start => range.secondary.index >= range.primary.index,
+            };
+            if crossed {
+                std::mem::swap(&mut range.primary, &mut range.secondary);
+                self.drag_side = Some(match side {
+                    HandleSide::Start => HandleSide::End,
+                    HandleSide::End => HandleSide::Start,
+                });
+            }
+
             if range.is_empty() {
-                self.reset();
+                // Точное совпадение границ (End дошла до Start). НЕ схлопываем:
+                // это точка «переворота» — как только активная капелька уйдёт за
+                // пассивную, диапазон оживёт с другой стороны. Пустой кадр рисует
+                // только капельку (фон/тулбар скрыты), а состояние
+                // (active / drag_started / drag_side) сохраняется, чтобы жесть
+                // продолжился после пересечения.
+                self.selected_text.clear();
+                self.selection_rect = None;
                 return;
             }
             self.selected_text = range.slice_str(galley).to_owned();
@@ -178,6 +213,7 @@ impl SelectionCore {
         self.selection_rect = None;
         self.suppress_tap_outside = false;
         self.drag_started = false;
+        self.drag_side = None;
     }
 }
 
@@ -365,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn drag_handle_collapse_to_empty_resets_state() {
+    fn drag_handle_end_meets_start_turns_handle_for_overtake() {
         with_real_ui(|ui| {
             let galley = make_galley(ui, "hello world");
             let mut core = SelectionCore::default();
@@ -374,17 +410,32 @@ mod tests {
             core.selection = Some(CCursorRange::two(CCursor::new(2), CCursor::new(5)));
             core.selected_text = "llo".to_owned();
 
-            // End-handle (primary) тянем с индекса 2 в индекс 5 — до secondary (Start):
-            // диапазон схлопывается в ноль. Это НЕ должно «зависить» состояние:
-            // активность и drag сбрасываются, чтобы сразу можно было выделить заново.
-            let at_secondary = galley.pos_from_cursor(CCursor::new(5)).center();
+            // End-handle (primary=5) тянем до secondary (Start=2): это точка «переворота».
+            // Диапазон становится нулевым на этот кадр, но состояer НЕ сбрасывается —
+            // активность и drag сохранены, чтобы жесть продолжился после обгона.
+            let at_secondary = galley.pos_from_cursor(CCursor::new(2)).center();
             core.drag_handle(HandleSide::End, at_secondary, &galley, egui::Pos2::ZERO);
 
-            assert!(!core.active, "надо сбросить active");
-            assert!(!core.drag_started, "надо сбросить drag_started");
-            assert!(core.selection.is_none());
-            assert!(core.selected_text.is_empty());
-            assert!(core.selection_rect.is_none());
+            assert!(core.active, "переворот не сбрасывает активность");
+            assert!(core.drag_started, "переворот не сбрасывает drag");
+            let r = core.selection.as_ref().unwrap();
+            assert!(
+                r.is_empty(),
+                "в точке совпадения диапазон пуст на один кадр"
+            );
+
+            // Палец продолжает влево (обгон): диапазон оживает от новой границы.
+            let further_left = galley.pos_from_cursor(CCursor::new(0)).center();
+            // После переворота капелька ведётся как Start (см. drag_side).
+            core.drag_side = Some(HandleSide::Start);
+            core.drag_handle(HandleSide::Start, further_left, &galley, egui::Pos2::ZERO);
+            let r = core.selection.as_ref().unwrap();
+            assert!(!r.is_empty(), "после обгона выделение непустое");
+            let sorted = r.as_sorted_char_range();
+            assert_eq!(
+                sorted.start.0, 0,
+                "выделение расширяется влево от новой границы"
+            );
         });
     }
 
@@ -403,6 +454,75 @@ mod tests {
             );
             assert!(core.selection.is_none());
             assert!(core.selected_text.is_empty());
+        });
+    }
+
+    #[test]
+    fn drag_handle_end_overtakes_start_keeps_selection() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.active = true;
+            core.selection = Some(CCursorRange::two(CCursor::new(2), CCursor::new(5)));
+            core.selected_text = "llo".to_owned();
+            core.drag_started = true;
+            core.drag_side = Some(HandleSide::End);
+
+            // End (primary=5, правая граница) тянем влево, в индекс 1 — левее Start
+            // (secondary=2). Выделение НЕ должно схлопнуться: тянущаяся капелька
+            // становится левой границей, и диапазон пересчитывается как [1..2].
+            let left_of_start = galley.pos_from_cursor(CCursor::new(1)).center();
+            core.drag_handle(HandleSide::End, left_of_start, &galley, egui::Pos2::ZERO);
+
+            assert!(core.active, "после обгона выделение остаётся активным");
+            let r = core.selection.as_ref().unwrap();
+            assert!(!r.is_empty(), "выделение не схлопнулось в ноль");
+            let sorted = r.as_sorted_char_range();
+            assert_eq!(sorted.start.0, 1, "новая левая граница — тянущийся End");
+            assert_eq!(sorted.end.0, 2, "старый Start стал правой границей");
+            assert_eq!(
+                core.selected_text, "l",
+                "выделен текст между новой левой и пассивной правой"
+            );
+            // Тянем ту же (теперь левую) капельку левее — диапазон растёт влево.
+            let further_left = galley.pos_from_cursor(CCursor::new(0)).center();
+            core.drag_handle(HandleSide::Start, further_left, &galley, egui::Pos2::ZERO);
+            let r2 = core.selection.as_ref().unwrap();
+            assert_eq!(
+                r2.as_sorted_char_range().start.0,
+                0,
+                "выделение расширяется влево"
+            );
+        });
+    }
+
+    #[test]
+    fn drag_handle_start_overtakes_end_keeps_selection() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.active = true;
+            core.selection = Some(CCursorRange::two(CCursor::new(2), CCursor::new(5)));
+            core.selected_text = "llo".to_owned();
+            core.drag_started = true;
+            core.drag_side = Some(HandleSide::Start);
+
+            // Start (secondary=2, левая граница) тянем вправо, в индекс 7 — правее End
+            // (primary=5). Тянущаяся капелька становится правой границей, выделение
+            // пересчитывается как [5..7].
+            let right_of_end = galley.pos_from_cursor(CCursor::new(7)).center();
+            core.drag_handle(HandleSide::Start, right_of_end, &galley, egui::Pos2::ZERO);
+
+            assert!(core.active, "после обгона выделение остаётся активным");
+            let r = core.selection.as_ref().unwrap();
+            assert!(!r.is_empty(), "выделение не схлопнулось в ноль");
+            let sorted = r.as_sorted_char_range();
+            assert_eq!(sorted.start.0, 5, "старый End стал левой границей");
+            assert_eq!(sorted.end.0, 7, "новая правая граница — тянущийся Start");
+            assert_eq!(
+                core.selected_text, "wo",
+                "выделен текст между старой левой и новой правой"
+            );
         });
     }
 

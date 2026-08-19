@@ -536,17 +536,20 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 }
             }
 
-            if let Some(range) = core.selection.filter(|r| !r.is_empty()) {
-                // 1. Фон выделения ПОД глифами.
-                paint_galley_with_selection(
-                    ui,
-                    &output.galley,
-                    output.galley_pos,
-                    &range,
-                    ui.visuals().text_color(),
-                );
+            if let Some(range) = core.selection {
+                // 1. Фон выделения ПОД глифами (только при непустом выделении).
+                if !range.is_empty() {
+                    paint_galley_with_selection(
+                        ui,
+                        &output.galley,
+                        output.galley_pos,
+                        &range,
+                        ui.visuals().text_color(),
+                    );
+                }
 
-                // 2. Ручки (Area, Foreground) — до тулбара. Цвет — из темы (primary).
+                // 2. Ручки (Area, Foreground) — до тулбара и даже при нулевом диапазоне,
+                // чтобы капелька продолжала драгаться в точке совпадения (обгон).
                 let (sp, ep) = handle_positions(&output.galley, output.galley_pos, &range);
                 let accent = crate::theme::Theme::current_from_ui(ui).colors.primary;
                 let (s_resp, e_resp) = draw_handles_in_area(ui.ctx(), field_id, sp, ep, accent);
@@ -566,45 +569,51 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                     }
                 }
 
-                // 3. Тулбар НАД выделением (поверх ручек).
-                if let Some(bbox) = core.selection_rect {
-                    if let Some(action) =
-                        show_toolbar(ui.ctx(), field_id.with("sel_tb"), bbox, is_editable)
-                    {
-                        match action {
-                            ToolbarAction::Copy => {
-                                log::info!(
-                                    "SEL-PIPE [TextEdit:{:?}] Copy -> {:?}",
-                                    field_id,
-                                    core.selected_text
-                                );
-                                ui.copy_text(core.selected_text.clone());
-                                core.reset();
-                            }
-                            ToolbarAction::Cut => {
-                                if is_editable {
+                // 3. Тулбар НАД выделением (поверх ручек) — только при непустом.
+                if !range.is_empty() {
+                    if let Some(bbox) = core.selection_rect {
+                        if let Some(action) =
+                            show_toolbar(ui.ctx(), field_id.with("sel_tb"), bbox, is_editable)
+                        {
+                            match action {
+                                ToolbarAction::Copy => {
                                     log::info!(
-                                        "SEL-PIPE [TextEdit:{:?}] Cut -> {:?}",
+                                        "SEL-PIPE [TextEdit:{:?}] Copy -> {:?}",
                                         field_id,
                                         core.selected_text
                                     );
                                     ui.copy_text(core.selected_text.clone());
-                                    deferred_cut =
-                                        Some(core.handle_toolbar_action(ToolbarAction::Cut));
                                     core.reset();
                                 }
-                            }
-                            // Paste disabled (нет JNI clipboard read).
-                            ToolbarAction::Paste => {}
-                            ToolbarAction::SelectAll => {
-                                core.select_all(&output.galley, output.galley_pos, &*text_guard);
-                                // Не сбрасывать выделение, пока палец отпускается над попапом.
-                                core.suppress_tap_outside = true;
-                                log::info!(
-                                    "SEL-PIPE [TextEdit:{:?}] SelectAll -> {:?}",
-                                    field_id,
-                                    core.selected_text
-                                );
+                                ToolbarAction::Cut => {
+                                    if is_editable {
+                                        log::info!(
+                                            "SEL-PIPE [TextEdit:{:?}] Cut -> {:?}",
+                                            field_id,
+                                            core.selected_text
+                                        );
+                                        ui.copy_text(core.selected_text.clone());
+                                        deferred_cut =
+                                            Some(core.handle_toolbar_action(ToolbarAction::Cut));
+                                        core.reset();
+                                    }
+                                }
+                                // Paste disabled (нет JNI clipboard read).
+                                ToolbarAction::Paste => {}
+                                ToolbarAction::SelectAll => {
+                                    core.select_all(
+                                        &output.galley,
+                                        output.galley_pos,
+                                        &*text_guard,
+                                    );
+                                    // Не сбрасывать выделение, пока палец отпускается над попапом.
+                                    core.suppress_tap_outside = true;
+                                    log::info!(
+                                        "SEL-PIPE [TextEdit:{:?}] SelectAll -> {:?}",
+                                        field_id,
+                                        core.selected_text
+                                    );
+                                }
                             }
                         }
                     }
@@ -635,6 +644,12 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 && !core.drag_started
             {
                 log::info!("SEL-PIPE [TextEdit:{:?}] tap outside -> reset", field_id);
+                core.reset();
+            }
+
+            // Палец отпущен в нулевой точке («перевёртыш» не доведён до обгона):
+            // пустой диапазон без пальца — это схлопывание, снимаем выделение.
+            if !any_down && core.active && core.selection.map_or(false, |r| r.is_empty()) {
                 core.reset();
             }
 
