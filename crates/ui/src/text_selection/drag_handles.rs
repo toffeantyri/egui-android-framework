@@ -13,7 +13,16 @@ const STEM_WIDTH: f32 = 2.0;
 /// Высота стебля (от текста до капельки).
 const STEM_HEIGHT: f32 = 24.0;
 /// Зона захвата (увеличенная для пальца).
-const HIT_AREA: f32 = 24.0;
+///
+/// Больше видимого размера капельки на ~20% (24 × 1.2), чтобы площадь касания
+/// была больше, не меняя отрисовку самой капельки (`HANDLE_RADIUS`).
+const HIT_AREA: f32 = 28.8;
+
+/// Смещение капельки по вертикали от точки привязки на строке: стебель + радиус.
+///
+/// Нужно, чтобы при драге капельки спроецировать позицию пальца (на капельке,
+/// ниже строки) обратно на уровень строки для `cursor_from_pos`.
+pub(crate) const HANDLE_VERTICAL_OFFSET: f32 = STEM_HEIGHT + HANDLE_RADIUS * 0.7;
 
 /// Позиции двух ручек из `CCursorRange` — в координатах, согласованных с галели.
 ///
@@ -61,9 +70,8 @@ pub(crate) fn dragged_handle(
 /// прятала ручки вне clip-области текста. Ручки рисуются всегда; ограничение
 /// видимости обеспечивается через `Area` на уровне вызывающего кода.
 pub(crate) fn draw_handle(ui: &mut Ui, id: Id, anchor_pos: Pos2, color: Color32) -> Response {
-    // Стебель висит под строкой текста.
-    let stem_bottom = anchor_pos + Vec2::new(0.0, STEM_HEIGHT);
-    let drop_center = stem_bottom + Vec2::new(0.0, HANDLE_RADIUS * 0.7);
+    // Стебель висит под строкой текста; центр капельки — на HANDLE_VERTICAL_OFFSET ниже.
+    let drop_center = anchor_pos + Vec2::new(0.0, HANDLE_VERTICAL_OFFSET);
 
     // Невидимая (увеличенная) зона захвата для пальца.
     let hit_rect = Rect::from_center_size(drop_center, Vec2::splat(HIT_AREA));
@@ -71,7 +79,8 @@ pub(crate) fn draw_handle(ui: &mut Ui, id: Id, anchor_pos: Pos2, color: Color32)
 
     let painter = ui.painter();
 
-    // Стебель.
+    // Стебель: от строки вниз до капельки (часть offset — стебель, остаток — капелька).
+    let stem_bottom = anchor_pos + Vec2::new(0.0, STEM_HEIGHT);
     painter.line_segment([anchor_pos, stem_bottom], (STEM_WIDTH, color));
     // Капелька: заливка цветом темы + контрастная светлая каёмка, чтобы ручка
     // была видна и на светлом, и на тёмном фоне (не сливалась с фоном).

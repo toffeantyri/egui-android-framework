@@ -13,7 +13,7 @@ use egui::text::{CCursorRange, Galley};
 use egui::Pos2;
 
 use super::android_behavior::{select_word_at, HandleSide};
-use super::drag_handles::selection_bbox;
+use super::drag_handles::{selection_bbox, HANDLE_VERTICAL_OFFSET};
 use super::toolbar::ToolbarAction;
 
 /// Действие над буфером текста, которое выполнит виджет ПОСЛЕ
@@ -108,6 +108,11 @@ impl SelectionCore {
         }
 
         let mut local = pos - galley_pos.to_vec2();
+        // Капелька рисуется ниже точки привязки (строки), на которой ставится курсор
+        // (смещение HANDLE_VERTICAL_OFFSET вниз). Пока палец на капельке, его позиция
+        // на offset ниже нужной строки — компенсируем, иначе курсор «сползает» вниз
+        // (а у конца текста — прыгает в самый конец → выделяется весь текст).
+        local.y -= HANDLE_VERTICAL_OFFSET;
         // Проецируем y на диапазон строк галели: ниже последней строки — последняя.
         local.y = local.y.clamp(0.0, galley.size().y);
         let cursor = galley.cursor_from_pos(local.to_vec2());
@@ -325,6 +330,30 @@ mod tests {
             core.drag_handle(HandleSide::End, below, &galley, Pos2::ZERO);
             let r = core.selection.as_ref().unwrap();
             assert!(r.primary.index.0 <= 11, "End не прыгает в конец");
+        });
+    }
+
+    #[test]
+    fn drag_handle_compensates_handle_vertical_offset() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.selection = Some(CCursorRange::two(CCursor::new(0), CCursor::new(5)));
+            core.drag_started = true;
+
+            // Палец на капельке End, которая на HANDLE_VERTICAL_OFFSET ниже строки
+            // курсора 5. После компенсации курсор должен остаться ≈ за строкой 5,
+            // а НЕ уехать на последнюю строку/в конец текста.
+            let row_center = galley.pos_from_cursor(CCursor::new(5)).center();
+            let handle_pos = Pos2::new(row_center.x, row_center.y + HANDLE_VERTICAL_OFFSET);
+            core.drag_handle(HandleSide::End, handle_pos, &galley, Pos2::ZERO);
+
+            let r = core.selection.as_ref().unwrap();
+            assert!(
+                r.primary.index.0 <= 8,
+                "End не должен уезжать в конец текста (получено {})",
+                r.primary.index.0
+            );
         });
     }
 
