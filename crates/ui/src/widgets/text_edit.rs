@@ -467,20 +467,37 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             let sel = remember(ui, ("sel_core", field_id), SelectionCore::default);
 
             let text_rect = egui::Rect::from_min_size(output.galley_pos, output.galley.size());
-            // Зона касания включает и зону ручек внизу (иначе касание ручки → ложный сброс).
+            let (now, any_down, latest, pressed) = ui.input(|i| {
+                (
+                    i.time,
+                    i.pointer.any_down(),
+                    i.pointer.latest_pos(),
+                    i.pointer.any_pressed(), // true только в кадр фактического нажатия
+                )
+            });
+
+            // Зона распознавания long-press (текст + ручки) — широкая.
             const HANDLE_DROP: f32 = 40.0; // STEM_HEIGHT(24) + HANDLE_RADIUS(12) + запас(4)
             let hit_rect = egui::Rect::from_min_max(
                 egui::pos2(text_rect.min.x - 16.0, text_rect.min.y - 16.0),
                 egui::pos2(text_rect.max.x + 16.0, text_rect.max.y + HANDLE_DROP),
             );
-
-            let (now, any_down, latest) =
-                ui.input(|i| (i.time, i.pointer.any_down(), i.pointer.latest_pos()));
+            // Зона «сброса по тапу вне» — только сам текст (+малый запас), не HANDLE_DROP.
+            let in_text_reset = latest.map_or(false, |p| text_rect.expand(6.0).contains(p));
 
             // Состояние выделения (нужно и для long-press блокировки, и для рендера).
             let mut core = sel.get().clone();
 
             let mut lp_state = lp.get().clone();
+
+            // Новое нажатие (единичный кадр) — начинаем заново: сбрасываем флаг
+            // «палец был на ручке», чтобы следующий драг ручки снова пропустил 1-й кадр.
+            // НЕ используем press_pos.is_none(): при активном выделении down=false и
+            // press_pos не ставится → сброс срабатывал бы каждый кадр (капелька не двигается).
+            if pressed {
+                core.drag_started = false;
+            }
+
             let in_text = latest.map_or(false, |p| hit_rect.contains(p));
 
             // Не активируем выделение слова, если поле в режиме ввода (фокус/IME),
@@ -594,17 +611,29 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 }
             }
 
-            // Сбрасываем флаг «первый кадр драга ручки» при отпускании пальца,
-            // чтобы следующий захват ручки снова пропустил точку попадания.
-            if !any_down {
-                core.drag_started = false;
-            }
-
             // Тап вне выделения → сброс. Выполняется В КОНЦЕ кадра (после обработки
             // клика тулбара), чтобы кадр отпускания над попапом не стёр выделение
             // до того, как «Всё»/копирование успеет сработать.
             // Подавляется после клика по тулбару (SelectAll), пока палец отпускается.
-            if !any_down && core.active && !in_text && !core.suppress_tap_outside {
+            // При активном драге ручки (`drag_started`) не сбрасываем.
+            if !any_down && core.active {
+                log::info!(
+                    "SEL-PIPE [TextEdit:{:?}] tap-outside eval in_text_reset={} drag_started={} \
+                     latest={:?} suppress={} -> reset={}",
+                    field_id,
+                    in_text_reset,
+                    core.drag_started,
+                    latest,
+                    core.suppress_tap_outside,
+                    !in_text_reset && !core.suppress_tap_outside && !core.drag_started
+                );
+            }
+            if !any_down
+                && core.active
+                && !in_text_reset
+                && !core.suppress_tap_outside
+                && !core.drag_started
+            {
                 log::info!("SEL-PIPE [TextEdit:{:?}] tap outside -> reset", field_id);
                 core.reset();
             }

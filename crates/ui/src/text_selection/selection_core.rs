@@ -122,6 +122,13 @@ impl SelectionCore {
                 HandleSide::Start => range.secondary = cursor,
                 HandleSide::End => range.primary = cursor,
             }
+            // Диапазон схлопнулся в ноль (например, End-ручку перетащили левее Start):
+            // честно сбрасываем выделение, иначе состояние «зависает» — ручки/тулбар не
+            // рисуются, но `active` и `drag_started` остаются true, блокируя тап-вне.
+            if range.is_empty() {
+                self.reset();
+                return;
+            }
             self.selected_text = range.slice_str(galley).to_owned();
             self.selection_rect = Some(selection_bbox(galley, galley_pos, range));
         }
@@ -354,6 +361,30 @@ mod tests {
                 "End не должен уезжать в конец текста (получено {})",
                 r.primary.index.0
             );
+        });
+    }
+
+    #[test]
+    fn drag_handle_collapse_to_empty_resets_state() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.active = true;
+            core.drag_started = true;
+            core.selection = Some(CCursorRange::two(CCursor::new(2), CCursor::new(5)));
+            core.selected_text = "llo".to_owned();
+
+            // End-handle (primary) тянем с индекса 2 в индекс 5 — до secondary (Start):
+            // диапазон схлопывается в ноль. Это НЕ должно «зависить» состояние:
+            // активность и drag сбрасываются, чтобы сразу можно было выделить заново.
+            let at_secondary = galley.pos_from_cursor(CCursor::new(5)).center();
+            core.drag_handle(HandleSide::End, at_secondary, &galley, egui::Pos2::ZERO);
+
+            assert!(!core.active, "надо сбросить active");
+            assert!(!core.drag_started, "надо сбросить drag_started");
+            assert!(core.selection.is_none());
+            assert!(core.selected_text.is_empty());
+            assert!(core.selection_rect.is_none());
         });
     }
 
