@@ -71,6 +71,9 @@ pub struct SelectionCore {
     /// отпускание пальца над тулбаром (вне текста) не сбрасывало выделение.
     /// Снимается при новом нажатии (`any_down`).
     pub suppress_tap_outside: bool,
+    /// Пропущен ли первый кадр касания ручки (чтобы не двигать курсор в точку
+    /// на самой ручке сразу при нажатии). Сбрасывается при отпускании пальца.
+    pub drag_started: bool,
 }
 
 impl SelectionCore {
@@ -92,8 +95,21 @@ impl SelectionCore {
     }
 
     /// Обновить границу выделения при перетаскивании ручки.
+    ///
+    /// Первый кадр касания ручки пропускается: `Response::dragged()` возвращает
+    /// true сразу при нажатии, и `pointer_pos` ещё указывает НА ручку (ниже текста).
+    /// Также `local.y` клампится в диапазон высоты галели, чтобы позиция ниже
+    /// последней строки не «прыгала» курсором в конец текста.
     pub fn drag_handle(&mut self, side: HandleSide, pos: Pos2, galley: &Galley, galley_pos: Pos2) {
-        let local = pos - galley_pos.to_vec2();
+        // Пропускаем первый кадр касания (точка попадания — на самой ручке).
+        if !self.drag_started {
+            self.drag_started = true;
+            return;
+        }
+
+        let mut local = pos - galley_pos.to_vec2();
+        // Проецируем y на диапазон строк галели: ниже последней строки — последняя.
+        local.y = local.y.clamp(0.0, galley.size().y);
         let cursor = galley.cursor_from_pos(local.to_vec2());
 
         if let Some(range) = self.selection.as_mut() {
@@ -149,6 +165,7 @@ impl SelectionCore {
         self.selected_text.clear();
         self.selection_rect = None;
         self.suppress_tap_outside = false;
+        self.drag_started = false;
     }
 }
 
@@ -253,8 +270,9 @@ mod tests {
                 egui::Pos2::ZERO,
                 &galley.text(),
             );
-            // тянем End-ручку к "world"
+            // Первый вызов (касание ручки) пропускается; второй — реально двигает.
             let end_pos = galley.pos_from_cursor(CCursor::new(11)).center();
+            core.drag_handle(HandleSide::End, end_pos, &galley, egui::Pos2::ZERO);
             core.drag_handle(HandleSide::End, end_pos, &galley, egui::Pos2::ZERO);
             let r = core.selection.as_ref().expect("selection");
             assert!(range_lo_hi(r).1 >= 5, "End расширил диапазон");
@@ -264,10 +282,59 @@ mod tests {
     }
 
     #[test]
+    fn drag_handle_first_frame_does_not_move_cursor() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.selection = Some(CCursorRange::two(CCursor::new(0), CCursor::new(5)));
+            core.drag_started = false;
+
+            // Первый вызов: касание ручки (позиция вне текста) — курсор не двигается.
+            core.drag_handle(
+                HandleSide::End,
+                Pos2::new(999.0, 999.0),
+                &galley,
+                Pos2::ZERO,
+            );
+            let r = core.selection.as_ref().unwrap();
+            assert_eq!(
+                r.primary.index.0, 5,
+                "курсор не должен измениться в 1-й кадр"
+            );
+            assert!(core.drag_started, "drag_started должен стать true");
+
+            // Второй вызов: позиция ниже текста клампится на последнюю строку.
+            let below = Pos2::new(0.0, galley.size().y + 100.0);
+            core.drag_handle(HandleSide::End, below, &galley, Pos2::ZERO);
+            let r = core.selection.as_ref().unwrap();
+            assert!(r.primary.index.0 <= 11, "End не прыгает в конец");
+        });
+    }
+
+    #[test]
+    fn drag_handle_clamps_y_to_galley() {
+        with_real_ui(|ui| {
+            let galley = make_galley(ui, "hello world");
+            let mut core = SelectionCore::default();
+            core.selection = Some(CCursorRange::two(CCursor::new(0), CCursor::new(5)));
+            core.drag_started = true;
+
+            // Позиция глубоко ниже галели → проецируется на последнюю строку,
+            // курсор не становится «концом текста» за пределами разумного.
+            let below = Pos2::new(10.0, galley.size().y + 300.0);
+            core.drag_handle(HandleSide::End, below, &galley, Pos2::ZERO);
+            let r = core.selection.as_ref().unwrap();
+            assert!(r.primary.index.0 <= 11, "End не прыгает в конец");
+        });
+    }
+
+    #[test]
     fn drag_handle_without_selection_is_noop() {
         with_real_ui(|ui| {
             let galley = make_galley(ui, "hello");
             let mut core = SelectionCore::default();
+            // Минуем «первый кадр» (иначе вызов вернётся до проверки selection).
+            core.drag_started = true;
             core.drag_handle(
                 HandleSide::Start,
                 egui::Pos2::ZERO,
@@ -367,10 +434,14 @@ mod tests {
         core.selection = Some(CCursorRange::one(CCursor::new(1)));
         core.selected_text = "x".into();
         core.selection_rect = Some(egui::Rect::NOTHING);
+        core.suppress_tap_outside = true;
+        core.drag_started = true;
         core.reset();
         assert!(!core.active);
         assert!(core.selection.is_none());
         assert!(core.selected_text.is_empty());
         assert!(core.selection_rect.is_none());
+        assert!(!core.suppress_tap_outside);
+        assert!(!core.drag_started);
     }
 }

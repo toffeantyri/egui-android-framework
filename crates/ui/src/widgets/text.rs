@@ -164,17 +164,27 @@ impl<M: Send> Widget<M> for Text {
                 let sel = remember(ui, ("sel_core", widget_id), SelectionCore::default);
 
                 let text_rect = egui::Rect::from_min_size(text_pos, galley.size());
-                // Небольшой запас для касания по краю строки.
-                let hit_rect = text_rect.expand(16.0);
+                // Зона касания включает и зону ручек внизу (STEM_HEIGHT + радиус + запас),
+                // иначе при касании ручки `in_text=false` → ложный сброс выделения.
+                const HANDLE_DROP: f32 = 40.0; // STEM_HEIGHT(24) + HANDLE_RADIUS(12) + запас(4)
+                let hit_rect = egui::Rect::from_min_max(
+                    egui::pos2(text_rect.min.x - 16.0, text_rect.min.y - 16.0),
+                    egui::pos2(text_rect.max.x + 16.0, text_rect.max.y + HANDLE_DROP),
+                );
 
                 let (now, any_down, latest) =
                     ui.input(|i| (i.time, i.pointer.any_down(), i.pointer.latest_pos()));
+
+                // Состояние выделения (нужно и для long-press блокировки, и для рендера).
+                let mut core = sel.get().clone();
 
                 let mut lp_state = lp.get().clone();
                 let in_text = latest.map_or(false, |p| hit_rect.contains(p));
                 let start_in_text = lp_state.press_pos.is_none() && any_down && in_text;
                 let active_press = lp_state.press_pos.is_some() || start_in_text;
-                let down = any_down && active_press;
+                // Не запускаем long-press, если выделение уже активно,
+                // иначе касание ручки перезапустит таймер и перевыберет слово.
+                let down = any_down && active_press && !core.active;
                 let recognized = lp_state.update_raw(now, down, latest);
                 if recognized {
                     log::info!(
@@ -184,8 +194,6 @@ impl<M: Send> Widget<M> for Text {
                     );
                 }
                 lp.set(lp_state);
-
-                let mut core = sel.get().clone();
 
                 // Новое нажатие — сняли подавление (следующий реальный клик вне снова сбросит).
                 if core.suppress_tap_outside && any_down {
@@ -269,6 +277,12 @@ impl<M: Send> Widget<M> for Text {
                     // Нет активного выделения → обычный рендер (единый путь).
                     ui.painter_at(rect)
                         .galley(text_pos, galley.clone(), text_color);
+                }
+
+                // Сбрасываем флаг «первый кадр драга ручки» при отпускании пальца,
+                // чтобы следующий захват ручки снова пропустил точку попадания.
+                if !any_down {
+                    core.drag_started = false;
                 }
 
                 // Тап вне выделения → сброс. Выполняется В КОНЦЕ кадра (после обработки
