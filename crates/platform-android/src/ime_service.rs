@@ -254,14 +254,17 @@ impl DefaultImeService {
 impl ImeService for DefaultImeService {
     fn apply(&mut self, command: ImeCommand) -> Vec<ImeEvent> {
         // Диагностика (временный лог для локализации потери ввода).
-        log::info!(
-            "IME-SVC: apply {:?} | cursor={} region={:?} snapshot={:?} batch={}",
-            command,
-            self.state.cursor,
-            self.state.composition_range,
-            self.state.text_snapshot,
-            self.state.batch_depth
-        );
+        // SyncText спамит каждый кадр ввода — не логируем его, остальное оставляем.
+        if !matches!(command, ImeCommand::Ui(UiCmd::SyncText(_))) {
+            log::info!(
+                "IME-SVC: apply {:?} | cursor={} region={:?} snapshot={:?} batch={}",
+                command,
+                self.state.cursor,
+                self.state.composition_range,
+                self.state.text_snapshot,
+                self.state.batch_depth
+            );
+        }
         let mut out: Vec<ImeEvent> = Vec::new();
         match command {
             ImeCommand::Ime(cmd) => match cmd {

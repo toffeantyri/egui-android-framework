@@ -16,6 +16,7 @@
 //! на чистой логике (`cargo test -p egui-android-ui`).
 
 pub mod android_behavior;
+pub mod coords;
 pub mod drag_handles;
 pub mod render;
 pub mod selection_core;

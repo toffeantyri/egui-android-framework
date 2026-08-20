@@ -506,7 +506,11 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 egui::pos2(text_rect.min.x - 16.0, text_rect.min.y - 16.0),
                 egui::pos2(text_rect.max.x + 16.0, text_rect.max.y + HANDLE_DROP),
             );
+
             // Зона «сброса по тапу вне» — только сам текст (+малый запас), не HANDLE_DROP.
+            // `hit_rect`/`text_rect` и `latest_pos` уже в одних координатах (видимых)
+            // — даже внутри ScrollArea egui отдаёт galley_pos в координатах указателя,
+            // поэтому никакой трансляции offset не нужно (см. device-лог: shift ломал тест).
             let in_text_reset = latest.map_or(false, |p| text_rect.expand(6.0).contains(p));
 
             // Состояние выделения (нужно и для long-press блокировки, и для рендера).
@@ -524,6 +528,13 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
 
             let in_text = latest.map_or(false, |p| hit_rect.contains(p));
 
+            // Приостановка скролла на время распознавания: только если это НОВОЕ
+            // нажатие (down) на selectable-тексте. Если палец уже скроллил и просто
+            // заехал на текст — не трогаем скролл (см. coords::set_long_press_guard).
+            if pressed && in_text && !core.active {
+                crate::text_selection::coords::set_long_press_guard(ui.ctx(), now);
+            }
+
             // Поле в фокусе (IME) НЕ блокирует выделение: long-press работает и там
             // (инвариант, см. `may_start_long_press`). `focused` передаётся для
             // ясности контракта, но не влияет на старт.
@@ -536,6 +547,8 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             let down = any_down && active_press && !core.active;
             let recognized = lp_state.update_raw(now, down, latest);
             if recognized {
+                // long-press распознан — выделение пошло, скроллу уже не мешаем.
+                crate::text_selection::coords::clear_long_press_guard(ui.ctx());
                 log::info!(
                     "SEL-PIPE [TextEdit:{:?}] long-press recognized at {:?}",
                     field_id,
@@ -677,6 +690,11 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
             // пустой диапазон без пальца — это схлопывание, снимаем выделение.
             if !any_down && core.active && core.selection.map_or(false, |r| r.is_empty()) {
                 core.reset();
+            }
+
+            // Палец отпущен → guard скролла больше не актуален (скролл возобновляется).
+            if !any_down {
+                crate::text_selection::coords::clear_long_press_guard(ui.ctx());
             }
 
             sel.set(core);

@@ -15,6 +15,13 @@ fn cx_key() -> egui::Id {
     egui::Id::new("ui_wrapper_cx")
 }
 
+/// Глобальный ключ для накопленной трансляции координат (сдвиг контента внутри
+/// scroll-контейнеров). Аналог constraints: хранится в Context, чтобы переживать
+/// `Frame::show` / `ScrollArea::show`. См. `crates/ui/src/text_selection/coords.rs`.
+fn shift_key() -> egui::Id {
+    egui::Id::new("ui_wrapper_shift")
+}
+
 fn read_cx(ui: &egui::Ui) -> Constraints {
     ui.ctx()
         .data(|d| d.get_temp::<Constraints>(cx_key()).unwrap_or_default())
@@ -22,6 +29,25 @@ fn read_cx(ui: &egui::Ui) -> Constraints {
 
 fn write_cx(ui: &egui::Ui, constraints: Constraints) {
     ui.ctx().data_mut(|d| d.insert_temp(cx_key(), constraints));
+}
+
+/// Текущая накопленная трансляция координат (сумма сдвигов скролл-контейнеров
+/// по цепочке), хранимая в Context.
+///
+/// Хранится через `*_persisted`, а не `*_temp`: значение пишется scrollable-Column
+/// в КОНЦЕ кадра (после рендера контента) и должно быть доступно виджетам в
+/// СЛЕДУЮЩЕМ кадре. temp-данные очищаются в конце каждого кадра, поэтому потеряли бы сдвиг.
+pub fn read_shift(ui: &egui::Ui) -> egui::Vec2 {
+    ui.ctx().data_mut(|d| {
+        d.get_persisted::<egui::Vec2>(shift_key())
+            .unwrap_or(egui::Vec2::ZERO)
+    })
+}
+
+/// Записать накопленную трансляцию координат в Context (переживает кадры).
+pub fn write_shift(ui: &egui::Ui, shift: egui::Vec2) {
+    ui.ctx()
+        .data_mut(|d| d.insert_persisted(shift_key(), shift));
 }
 
 /// Wrapper over `egui::Ui` with Constraints support.

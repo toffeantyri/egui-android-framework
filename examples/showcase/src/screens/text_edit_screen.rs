@@ -6,6 +6,11 @@
 //! - **Multiline** — многострочный комментарий с `max_lines` и `char_limit`
 //! - **Read-only** — только чтение (клавиатура не открывается)
 //! - **Hint** — пустое поле с подсказкой-плейсхолдером
+//! - Ещё несколько полей (Имя, Телефон, Заметки, Доп. комментарий) — чтобы экран
+//!   гарантированно скроллился и можно было проверить выделение в прокрученной части.
+//!
+//! Все `TextEdit` выделяют текст Android-жестом по умолчанию (`selectable=true`,
+//! см. `docs/text-selection-refactor.md`).
 //!
 //! Текст редактируется через `remember` (локальное UI-состояние, не сохраняется
 //! при kill/restore) в комбинации с `on_changed`. `on_submit` демонстрирует
@@ -135,6 +140,60 @@ impl Component for TextEditScreen {
                         let last = last_submit.clone();
                         move |v| last.set(v.to_owned())
                     })
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
+                    .render(ui, dispatch);
+
+                // ─── 6. Имя (однострочное) ───────────────────────────────
+                Text::new("6. Имя:").render(ui, dispatch);
+                let name = remember(ui, "te_name", || String::new());
+                let name_init = name.get().clone();
+                let name = name.clone();
+                TextEdit::new(name_init)
+                    .hint("Ваше имя")
+                    .single_line()
+                    .keyboard_type(KeyboardType::Text)
+                    .ime_action(ImeAction::Next)
+                    .on_changed(move |v| name.set(v.to_owned()))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
+                    .render(ui, dispatch);
+
+                // ─── 7. Телефон (Number) ─────────────────────────────────
+                Text::new("7. Телефон:").render(ui, dispatch);
+                let phone = remember(ui, "te_phone", || String::new());
+                let phone_init = phone.get().clone();
+                let phone = phone.clone();
+                TextEdit::new(phone_init)
+                    .hint("+7 900 000-00-00")
+                    .single_line()
+                    .keyboard_type(KeyboardType::Phone)
+                    .ime_action(ImeAction::Done)
+                    .on_changed(move |v| phone.set(v.to_owned()))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
+                    .render(ui, dispatch);
+
+                // ─── 8. Заметки (multiline) ──────────────────────────────
+                Text::new("8. Заметки (multiline):").render(ui, dispatch);
+                let notes = remember(ui, "te_notes", || String::new());
+                let notes_init = notes.get().clone();
+                let notes = notes.clone();
+                TextEdit::new(notes_init)
+                    .hint("Ваши заметки...")
+                    .multiline()
+                    .max_lines(5)
+                    .on_changed(move |v| notes.set(v.to_owned()))
+                    .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
+                    .render(ui, dispatch);
+
+                // ─── 9. Доп. комментарий (multiline) ────────────────────
+                Text::new("9. Доп. комментарий (multiline):").render(ui, dispatch);
+                let extra = remember(ui, "te_extra", || String::new());
+                let extra_init = extra.get().clone();
+                let extra = extra.clone();
+                TextEdit::new(extra_init)
+                    .hint("Введите дополнительный комментарий...")
+                    .multiline()
+                    .max_lines(4)
+                    .on_changed(move |v| extra.set(v.to_owned()))
                     .modifier(Modifier::new().fill_max_width().padding_hv(12.0, 10.0))
                     .render(ui, dispatch);
 

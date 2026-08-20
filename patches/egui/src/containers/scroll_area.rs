@@ -852,13 +852,27 @@ impl ScrollArea {
                 .as_ref()
                 .is_some_and(|response| response.dragged())
             {
-                for d in 0..2 {
-                    if direction_enabled[d] {
-                        ui.input(|input| {
-                            state.offset[d] -= input.pointer.delta()[d];
-                        });
-                        state.scroll_stuck_to_end[d] = false;
-                        state.offset_target[d] = None;
+                // ── Патч фреймворка: PENDING-DRAG GUARD для android-выделения ──
+                // Пока активен long-press-guard (палец опущен на selectable-виджете и
+                // распознавание ещё идёт, окно ~450мс), скролл приостанавливается,
+                // чтобы жест long-press не «украшался» drag-to-scroll. Флаг + время
+                // старта ставит фреймворк (`egui_android_ui::text_selection::coords`);
+                // здесь только читаем и отсекаем устаревший (таймаут даже если не сняли).
+                let guard_time = ui
+                    .ctx()
+                    .data_mut(|d| d.get_persisted::<f64>(long_press_guard_id()));
+                let guard_active = guard_time.is_some_and(|t| {
+                    ui.input(|i| i.time) - t < 0.45 // LONG_PRESS_GUARD_SEC
+                });
+                if !guard_active {
+                    for d in 0..2 {
+                        if direction_enabled[d] {
+                            ui.input(|input| {
+                                state.offset[d] -= input.pointer.delta()[d];
+                            });
+                            state.scroll_stuck_to_end[d] = false;
+                            state.offset_target[d] = None;
+                        }
                     }
                 }
             } else {
@@ -1565,6 +1579,14 @@ impl Prepared {
 
         (content_size, state)
     }
+}
+
+/// Id флага «приостановить скролл на время распознавания long-press» для
+/// выделения в `Text`/`TextEdit`. Используется фреймворком (ставит/снимает
+/// `Option<f64>` времени старта в `egui::Context`) и патчем `scroll_area`
+/// (читает перед scroll-drag). См. `crates/ui/.../coords.rs`.
+pub fn long_press_guard_id() -> crate::Id {
+    crate::Id::new("egui_long_press_scroll_guard")
 }
 
 /// Paint fade-out gradients at the top and/or bottom of a scroll area to

@@ -182,6 +182,9 @@ impl<M: Send> Widget<M> for Text {
                 // Зона «сброса по тапу вне» — только сам текст (+малый запас).
                 // НЕ используем hit_rect с HANDLE_DROP: у растянутого текста (fill_max_width)
                 // она огромна, и тап «мимо» случайно попадает внутрь → выделение не сбрасывается.
+                // `text_rect`/`hit_rect` и `latest_pos` уже в одних координатах (видимых): даже
+                // внутри ScrollArea egui отдаёт позицию в координатах указателя, поэтому никакой
+                // трансляции offset не нужно (убрали из-за device-лога: сдвиг ломал hit-тест).
                 let in_text_reset = latest.map_or(false, |p| text_rect.expand(6.0).contains(p));
 
                 // Состояние выделения (нужно и для long-press блокировки, и для рендера).
@@ -198,6 +201,11 @@ impl<M: Send> Widget<M> for Text {
                 }
 
                 let in_text = latest.map_or(false, |p| hit_rect.contains(p));
+                // Приостановка скролла на время распознавания: только при НОВОМ нажатии
+                // на selectable-тексте (если палец уже скроллил — скролл не трогаем).
+                if pressed && in_text && !core.active {
+                    crate::text_selection::coords::set_long_press_guard(ui.ctx(), now);
+                }
                 let start_in_text = lp_state.press_pos.is_none() && any_down && in_text;
                 let active_press = lp_state.press_pos.is_some() || start_in_text;
                 // Не запускаем long-press, если выделение уже активно,
@@ -205,6 +213,8 @@ impl<M: Send> Widget<M> for Text {
                 let down = any_down && active_press && !core.active;
                 let recognized = lp_state.update_raw(now, down, latest);
                 if recognized {
+                    // long-press распознан — выделение пошло, скроллу уже не мешаем.
+                    crate::text_selection::coords::clear_long_press_guard(ui.ctx());
                     log::info!(
                         "SEL-PIPE [Text:{:?}] long-press recognized at {:?}",
                         widget_id,
@@ -340,6 +350,11 @@ impl<M: Send> Widget<M> for Text {
                 // пустой диапазон без пальца — это схлопывание, снимаем выделение.
                 if !any_down && core.active && core.selection.map_or(false, |r| r.is_empty()) {
                     core.reset();
+                }
+
+                // Палец отпущен → guard скролла больше не актуален (скролл возобновляется).
+                if !any_down {
+                    crate::text_selection::coords::clear_long_press_guard(ui.ctx());
                 }
 
                 // commit состояния в remember (иначе выделение «не живёт» между кадрами).
