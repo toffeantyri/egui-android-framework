@@ -24,6 +24,17 @@ pub enum ToolbarAction {
     SelectAll,
 }
 
+/// Режим попапа: над выделенным словом ([`Self::Selection`]) или в пустом месте
+/// поля, где нет выделенного текста ([`Self::Caret`]). Влияет на набор кнопок
+/// (как в нативном Android).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolbarMode {
+    /// Над выделением слова: Копировать / (Вырезать, Вставить) / Всё.
+    Selection,
+    /// Над кареткой в пустом месте: Вставить / Всё.
+    Caret,
+}
+
 /// Позиция тулбара (его ВЕРХ) — выше верха выделения на `TOOLBAR_LIFT`.
 ///
 /// `Area::fixed_pos(pos)` ставит ВЕРХ попапа в `pos`, поэтому поднимаем `y` на
@@ -44,6 +55,7 @@ pub(crate) fn show_toolbar(
     id: Id,
     selection_rect: Rect,
     is_editable: bool,
+    mode: ToolbarMode,
 ) -> Option<ToolbarAction> {
     let mut result = None;
     let theme = crate::theme::Theme::current(ctx);
@@ -55,9 +67,10 @@ pub(crate) fn show_toolbar(
     let content_rect = ctx.content_rect();
     let pos = compute_toolbar_pos(selection_rect, content_rect);
     log::info!(
-        "SEL-PIPE [toolbar] selection_rect={:?} popup_top={:?} lift={TOOLBAR_LIFT}",
+        "SEL-PIPE [toolbar] selection_rect={:?} popup_top={:?} mode={:?} lift={TOOLBAR_LIFT}",
         selection_rect,
         pos,
+        mode,
     );
 
     Area::new(id)
@@ -85,30 +98,49 @@ pub(crate) fn show_toolbar(
 
                     // Горизонтальная компоновка (исправление этапа 4: было vertical).
                     ui.horizontal(|ui| {
-                        if ui
-                            .add(egui::Button::new("Копировать").fill(Color32::TRANSPARENT))
-                            .clicked()
-                        {
-                            result = Some(ToolbarAction::Copy);
-                        }
-                        if is_editable {
-                            ui.separator();
-                            if ui
-                                .add(egui::Button::new("Вырезать").fill(Color32::TRANSPARENT))
-                                .clicked()
-                            {
-                                result = Some(ToolbarAction::Cut);
+                        match mode {
+                            ToolbarMode::Selection => {
+                                if ui
+                                    .add(egui::Button::new("Копировать").fill(Color32::TRANSPARENT))
+                                    .clicked()
+                                {
+                                    result = Some(ToolbarAction::Copy);
+                                }
+                                if is_editable {
+                                    ui.separator();
+                                    if ui
+                                        .add(
+                                            egui::Button::new("Вырезать")
+                                                .fill(Color32::TRANSPARENT),
+                                        )
+                                        .clicked()
+                                    {
+                                        result = Some(ToolbarAction::Cut);
+                                    }
+                                }
+                                ui.separator();
+                                // Paste через JNI clipboard — P1; для выделения показываем
+                                // кнопку отключённой.
+                                if ui
+                                    .add_enabled(
+                                        false,
+                                        egui::Button::new("Вставить").fill(Color32::TRANSPARENT),
+                                    )
+                                    .clicked()
+                                {
+                                    result = Some(ToolbarAction::Paste);
+                                }
                             }
-                            ui.separator();
-                            // Paste через JNI clipboard — P1; пока disabled.
-                            if ui
-                                .add_enabled(
-                                    false,
-                                    egui::Button::new("Вставить").fill(Color32::TRANSPARENT),
-                                )
-                                .clicked()
-                            {
-                                result = Some(ToolbarAction::Paste);
+                            ToolbarMode::Caret => {
+                                // В пустом месте — как в нативном Android: Вставить + Всё.
+                                // Вставки из буфера ещё нет (JNI clipboard), но пункт виден;
+                                // клик возвращает Paste (виджет делает no-op).
+                                if ui
+                                    .add(egui::Button::new("Вставить").fill(Color32::TRANSPARENT))
+                                    .clicked()
+                                {
+                                    result = Some(ToolbarAction::Paste);
+                                }
                             }
                         }
                         ui.separator();
@@ -168,7 +200,7 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |_ui| {});
         });
         let sel = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 20.0));
-        let action = show_toolbar(&ctx, Id::new("tb_test"), sel, false);
+        let action = show_toolbar(&ctx, Id::new("tb_test"), sel, false, ToolbarMode::Selection);
         assert!(action.is_none());
     }
 
@@ -181,7 +213,7 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |_ui| {});
         });
         let sel = Rect::from_min_max(egui::pos2(0.0, 50.0), egui::pos2(100.0, 70.0));
-        let action = show_toolbar(&ctx, Id::new("tb_ro"), sel, false);
+        let action = show_toolbar(&ctx, Id::new("tb_ro"), sel, false, ToolbarMode::Selection);
         assert!(action.is_none());
     }
 }

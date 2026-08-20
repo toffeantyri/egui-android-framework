@@ -141,6 +141,30 @@ pub(crate) fn select_word_at(text: &str, ccursor: CCursor) -> CCursorRange {
     )
 }
 
+/// Результат long-press по позиции: попал в слово — [Self::Word], попал в пустое
+/// место (пробел/край строки) — [Self::Caret] (туда ставят каретку и показывают
+/// попап действий).
+pub enum LongPressTarget {
+    /// Курсор над словом — выделяем его.
+    Word(CCursorRange),
+    /// Курсор над пустым местом — сюда ставим каретку (для вставки).
+    Caret(CCursor),
+}
+
+/// Чистое определение цели long-press по тексту и курсору (без `Galley`):
+/// слово (`select_word_at` не пусто) либо каретка (пусто/пробел/край).
+pub(crate) fn word_range_or_caret(text: &str, cursor: CCursor) -> LongPressTarget {
+    if text.is_empty() {
+        return LongPressTarget::Caret(cursor);
+    }
+    let word = select_word_at(text, cursor);
+    if word.is_empty() {
+        LongPressTarget::Caret(cursor)
+    } else {
+        LongPressTarget::Word(word)
+    }
+}
+
 fn ccursor_next_word(text: &str, ccursor: CCursor) -> CCursor {
     CCursor {
         index: next_word_boundary_char_index(text, ccursor.index),
@@ -409,5 +433,42 @@ mod tests {
         let (lo, hi) = range_lo_hi(r);
         // пробел ещё не считается словом: диапазон либо пустой, либо вокруг соседнего слова
         assert!(lo <= 5 && 5 <= hi, "диапазон ({lo}..{hi}) вокруг cursor=5");
+    }
+
+    // ── word_range_or_caret (long-press: слово или каретка) ──
+
+    #[test]
+    fn long_press_on_word_is_word() {
+        // cursor внутри "world" → слово (не каретка).
+        match word_range_or_caret("hello world", CCursor::new(8)) {
+            LongPressTarget::Word(r) => assert_eq!(range_lo_hi(r), (6, 11)),
+            LongPressTarget::Caret(_) => panic!("курсор в слове не должен давать каретку"),
+        }
+    }
+
+    #[test]
+    fn long_press_on_space_is_caret() {
+        // cursor на пробеле между словами → каретка (пустое место).
+        match word_range_or_caret("hello world", CCursor::new(5)) {
+            LongPressTarget::Word(_) => panic!("пробел не должен выделять слово"),
+            LongPressTarget::Caret(c) => assert_eq!(c.index.0, 5),
+        }
+    }
+
+    #[test]
+    fn long_press_on_end_is_caret() {
+        // cursor в конце текста → каретка.
+        match word_range_or_caret("hello world", CCursor::new(11)) {
+            LongPressTarget::Word(_) => panic!("конец текста не должен давать слово"),
+            LongPressTarget::Caret(c) => assert_eq!(c.index.0, 11),
+        }
+    }
+
+    #[test]
+    fn long_press_on_empty_text_is_caret() {
+        match word_range_or_caret("", CCursor::new(0)) {
+            LongPressTarget::Word(_) => panic!("пустой текст \nе слово"),
+            LongPressTarget::Caret(c) => assert_eq!(c.index.0, 0),
+        }
     }
 }

@@ -484,13 +484,16 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 dragged_handle, draw_handles_in_area, handle_positions,
             };
             use crate::text_selection::render::paint_galley_with_selection;
-            use crate::text_selection::toolbar::{show_toolbar, ToolbarAction};
+            use crate::text_selection::toolbar::{show_toolbar, ToolbarAction, ToolbarMode};
             use crate::text_selection::SelectionCore;
 
             let lp = remember(ui, ("sel_lp", field_id), LongPressState::default);
             let sel = remember(ui, ("sel_core", field_id), SelectionCore::default);
 
-            let text_rect = egui::Rect::from_min_size(output.galley_pos, output.galley.size());
+            // Видимый рект всего поля (широкий при fill_max_width). long-press в ЛЮБОМ
+            // месте поля (в т.ч. пустом справа от текста) должен распознаваться, поэтому
+            // hit-зона строится от ректа поля, а не от крошечного галеля пустого текста.
+            let field_rect = response.rect;
             let (now, any_down, latest, pressed) = ui.input(|i| {
                 (
                     i.time,
@@ -500,18 +503,18 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 )
             });
 
-            // Зона распознавания long-press (текст + ручки) — широкая.
+            // Зона распознавания long-press — весь рект поля (иначе в пустом месте
+            // широкого поля, где галель нулевой, long-press не распознаётся).
             const HANDLE_DROP: f32 = 40.0; // STEM_HEIGHT(24) + HANDLE_RADIUS(12) + запас(4)
             let hit_rect = egui::Rect::from_min_max(
-                egui::pos2(text_rect.min.x - 16.0, text_rect.min.y - 16.0),
-                egui::pos2(text_rect.max.x + 16.0, text_rect.max.y + HANDLE_DROP),
+                egui::pos2(field_rect.min.x - 16.0, field_rect.min.y - 16.0),
+                egui::pos2(field_rect.max.x + 16.0, field_rect.max.y + HANDLE_DROP),
             );
 
-            // Зона «сброса по тапу вне» — только сам текст (+малый запас), не HANDLE_DROP.
-            // `hit_rect`/`text_rect` и `latest_pos` уже в одних координатах (видимых)
-            // — даже внутри ScrollArea egui отдаёт galley_pos в координатах указателя,
-            // поэтому никакой трансляции offset не нужно (см. device-лог: shift ломал тест).
-            let in_text_reset = latest.map_or(false, |p| text_rect.expand(6.0).contains(p));
+            // Зона «сброса по тапу вне» — рект всего поля: отпускание/тап внутри поля
+            // НЕ сбрасывает (не мешает long-press-попапу в пустой части поля); сброс —
+            // только тап/отпускание вне поля.
+            let in_text_reset = latest.map_or(false, |p| field_rect.expand(6.0).contains(p));
 
             // Состояние выделения (нужно и для long-press блокировки, и для рендера).
             let mut core = sel.get().clone();
@@ -562,16 +565,33 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 core.suppress_tap_outside = false;
             }
 
-            // Долгое нажатие → выделить слово (в т.ч. когда поле в фокусе / IME).
+            // Долгое нажатие → либо выделить слово, либо (в пустом месте) поставить
+            // каретку в позицию long-press (для последующей вставки из попапа).
             if recognized {
                 if let Some(pos) = latest {
-                    core.select_word_at(pos, &output.galley, output.galley_pos, &*text_guard);
-                    log::info!(
-                        "SEL-PIPE [TextEdit:{:?}] word selected {:?} range={:?}",
-                        field_id,
-                        core.selected_text,
-                        core.selection.as_ref().map(|r| r.as_sorted_char_range())
-                    );
+                    let caret =
+                        core.long_press_start(pos, &output.galley, output.galley_pos, &*text_guard);
+                    if let Some(cursor) = caret {
+                        // Ставим каретку в позицию long-press (поле в фокусе).
+                        log::info!(
+                            "SEL-PIPE [TextEdit:{:?}] caret placed at {:?}",
+                            field_id,
+                            cursor
+                        );
+                        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field_id) {
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+                            state.store(ui.ctx(), field_id);
+                        }
+                    } else {
+                        log::info!(
+                            "SEL-PIPE [TextEdit:{:?}] word selected {:?} range={:?}",
+                            field_id,
+                            core.selected_text,
+                            core.selection.as_ref().map(|r| r.as_sorted_char_range())
+                        );
+                    }
                 }
             }
 
@@ -611,9 +631,13 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                 // 3. Тулбар НАД выделением (поверх ручек) — только при непустом.
                 if !range.is_empty() {
                     if let Some(bbox) = core.selection_rect {
-                        if let Some(action) =
-                            show_toolbar(ui.ctx(), field_id.with("sel_tb"), bbox, is_editable)
-                        {
+                        if let Some(action) = show_toolbar(
+                            ui.ctx(),
+                            field_id.with("sel_tb"),
+                            bbox,
+                            is_editable,
+                            ToolbarMode::Selection,
+                        ) {
                             match action {
                                 ToolbarAction::Copy => {
                                     log::info!(
@@ -654,6 +678,37 @@ impl<M: Send + 'static> Widget<M> for TextEdit<M> {
                                     );
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // ── Попап в пустом месте (caret mode): long-press вне слова → каретка + меню.
+            // Рисуется отдельно от word-попапа: selection=None, но caret_mode/caret_rect заданы.
+            if core.caret_mode {
+                if let Some(bbox) = core.caret_rect {
+                    if let Some(action) = show_toolbar(
+                        ui.ctx(),
+                        field_id.with("sel_caret_tb"),
+                        bbox,
+                        is_editable,
+                        ToolbarMode::Caret,
+                    ) {
+                        match action {
+                            // Вставка из буфера ещё не реализована (JNI clipboard) — пока no-op.
+                            ToolbarAction::Paste => {
+                                log::info!("SEL-PIPE [TextEdit:{:?}] Paste (no-op yet)", field_id);
+                            }
+                            ToolbarAction::SelectAll => {
+                                core.select_all(&output.galley, output.galley_pos, &*text_guard);
+                                core.suppress_tap_outside = true;
+                                log::info!(
+                                    "SEL-PIPE [TextEdit:{:?}] caret SelectAll -> {:?}",
+                                    field_id,
+                                    core.selected_text
+                                );
+                            }
+                            ToolbarAction::Copy | ToolbarAction::Cut => {}
                         }
                     }
                 }

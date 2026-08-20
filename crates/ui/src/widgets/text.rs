@@ -157,7 +157,7 @@ impl<M: Send> Widget<M> for Text {
                     dragged_handle, draw_handles_in_area, handle_positions,
                 };
                 use crate::text_selection::render::paint_galley_with_selection;
-                use crate::text_selection::toolbar::{show_toolbar, ToolbarAction};
+                use crate::text_selection::toolbar::{show_toolbar, ToolbarAction, ToolbarMode};
                 use crate::text_selection::SelectionCore;
 
                 let lp = remember(ui, ("sel_lp", widget_id), LongPressState::default);
@@ -286,6 +286,7 @@ impl<M: Send> Widget<M> for Text {
                                 widget_id.with("sel_tb"),
                                 bbox,
                                 false, // read-only: без Cut/Paste
+                                ToolbarMode::Selection,
                             ) {
                                 match action {
                                     ToolbarAction::Copy => {

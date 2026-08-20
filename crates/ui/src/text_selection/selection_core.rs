@@ -9,7 +9,7 @@
 //! решаются на уровне виджета: какие кнопки показывать в тулбаре и как
 //! применять `BufferCommand` к буферу текста.
 
-use egui::text::{CCursorRange, Galley};
+use egui::text::{CCursor, CCursorRange, Galley};
 use egui::Pos2;
 
 use super::android_behavior::{select_word_at, HandleSide};
@@ -78,6 +78,12 @@ pub struct SelectionCore {
     /// primary/secondary). Нужна, чтобы при «обгоне» границы выделение не
     /// схлопывалось в ноль, а пересчитывалось с другой стороны (см. `drag_handle`).
     drag_side: Option<HandleSide>,
+    /// Long-press в пустом месте поля (вне слова): режим «кареточного» попапа.
+    /// Отличается от выделения слова — для набора кнопок попапа (Вставить/Всё)
+    /// и отдельного жизненного цикла (не ручки, не обгон).
+    pub caret_mode: bool,
+    /// Rect позиции каретки (для попапа в `caret_mode`).
+    pub caret_rect: Option<egui::Rect>,
 }
 
 impl SelectionCore {
@@ -95,6 +101,50 @@ impl SelectionCore {
             self.selection = Some(range);
             self.selected_text = selected;
             self.selection_rect = Some(selection_bbox(galley, galley_pos, &range));
+        }
+    }
+
+    /// Long-press по позиции: либо выделяем слово (как [`Self::select_word_at`]),
+    /// либо, если курсор в пустом месте (пробел/край), включаем «кареточный» режим
+    /// попапа и возвращаем курсор, куда виджет поставит каретку (для вставки).
+    ///
+    /// Возвращает `Some(cursor)` при `caret_mode` (надо поставить каретку),
+    /// `None` — когда выделили слово.
+    pub fn long_press_start(
+        &mut self,
+        pos: Pos2,
+        galley: &Galley,
+        galley_pos: Pos2,
+        text: &str,
+    ) -> Option<CCursor> {
+        let local = pos - galley_pos.to_vec2();
+        let cursor = galley.cursor_from_pos(local.to_vec2());
+
+        match super::android_behavior::word_range_or_caret(text, cursor) {
+            super::android_behavior::LongPressTarget::Word(range) => {
+                let selected = range.slice_str(text).to_owned();
+                self.active = true;
+                self.selection = Some(range);
+                self.selected_text = selected;
+                self.selection_rect = Some(selection_bbox(galley, galley_pos, &range));
+                self.caret_mode = false;
+                self.caret_rect = None;
+                None
+            }
+            super::android_behavior::LongPressTarget::Caret(ccursor) => {
+                // Позиция каретки → rect для попапа (высота строки галели).
+                let row = galley.pos_from_cursor(ccursor);
+                self.active = true;
+                self.selection = None;
+                self.selected_text.clear();
+                self.caret_mode = true;
+                self.caret_rect = Some(egui::Rect::from_center_size(
+                    galley_pos + row.center().to_vec2(),
+                    egui::vec2(0.0, galley.size().y.min(24.0)),
+                ));
+                self.selection_rect = None;
+                Some(ccursor)
+            }
         }
     }
 
@@ -175,6 +225,8 @@ impl SelectionCore {
         self.selection = Some(all);
         self.selected_text = text.to_owned();
         self.selection_rect = Some(selection_bbox(galley, galley_pos, &all));
+        self.caret_mode = false;
+        self.caret_rect = None;
     }
 
     /// Обработать действие тулбара и вернуть команду для буфера текста.
@@ -214,6 +266,8 @@ impl SelectionCore {
         self.suppress_tap_outside = false;
         self.drag_started = false;
         self.drag_side = None;
+        self.caret_mode = false;
+        self.caret_rect = None;
     }
 }
 
